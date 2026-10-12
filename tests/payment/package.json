@@ -1,0 +1,8 @@
+{
+  "name": "senzu-payment-isolated-tests",
+  "private": true,
+  "devDependencies": {
+    "firebase-tools": "14.22.0",
+    "@firebase/rules-unit-testing": "5.0.0"
+  }
+}

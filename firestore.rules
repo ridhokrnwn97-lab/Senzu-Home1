@@ -1,0 +1,843 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =============================================================
+    // AUTHENTICATION & AUTHORIZATION HELPERS
+    // =============================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSystemServer() {
+      return isSignedIn() && (
+        request.auth.uid == 'd9TQAK0v8dV4bB9Sxm660M416Ly2' ||
+        (request.auth.token.email != null && request.auth.token.email == 'system.service@senzuhome.internal')
+      );
+    }
+
+    function isPrimaryManager() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email == 'ridhokrnwn97@gmail.com') ||
+        isSystemServer()
+      );
+    }
+
+    function hasStaffRoleDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/staff_roles/$(request.auth.uid));
+    }
+
+    function getStaffRole() {
+      return get(/databases/$(database)/documents/staff_roles/$(request.auth.uid)).data;
+    }
+
+    function isStaffActive() {
+      return isPrimaryManager() || (hasStaffRoleDoc() && (!('isActive' in getStaffRole()) || getStaffRole().isActive == true));
+    }
+
+    function isManager() {
+      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin']);
+    }
+
+    function isSupervisor() {
+      return isManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['supervisor', 'manager', 'admin']);
+    }
+
+    function isCSS() {
+      return isManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['css', 'admin', 'manager']);
+    }
+
+    function isTherapist() {
+      return isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role == 'therapist';
+    }
+
+    function isStaff() {
+      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff']);
+    }
+
+    function isOperationalStaff() {
+      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css']);
+    }
+
+    function getStaffTherapistId() {
+      return ('therapistId' in getStaffRole()) ? getStaffRole().therapistId : '';
+    }
+
+    // Checks if the authenticated user is the owner of the given customerId
+    function isCustomer(customerId) {
+      return isSignedIn() && (
+        request.auth.uid == customerId ||
+        (
+          exists(/databases/$(database)/documents/customers/$(customerId)) &&
+          ('authUserId' in get(/databases/$(database)/documents/customers/$(customerId)).data) &&
+          get(/databases/$(database)/documents/customers/$(customerId)).data.authUserId == request.auth.uid
+        )
+      );
+    }
+
+    // Checks if the authenticated user is the legitimate customer of a booking
+    // Enforces: Conflicting canonical/legacy owner UIDs fail closed; CRM identifiers cannot override existing canonical owner
+    function isBookingCustomer(bookingData) {
+      return isSignedIn() && (
+        (('customerAuthUid' in bookingData && bookingData.customerAuthUid != null && bookingData.customerAuthUid != '') &&
+         ('authUserId' in bookingData && bookingData.authUserId != null && bookingData.authUserId != '')) ?
+          (bookingData.customerAuthUid == bookingData.authUserId && bookingData.customerAuthUid == request.auth.uid) :
+        (('customerAuthUid' in bookingData && bookingData.customerAuthUid != null && bookingData.customerAuthUid != '') ?
+          (bookingData.customerAuthUid == request.auth.uid) :
+        (('authUserId' in bookingData && bookingData.authUserId != null && bookingData.authUserId != '') ?
+          (bookingData.authUserId == request.auth.uid) :
+        (('customerId' in bookingData && bookingData.customerId != null && bookingData.customerId != '') &&
+          isCustomer(bookingData.customerId))
+        ))
+      );
+    }
+
+    // Checks if the authenticated user is the assigned therapist of a booking
+    function isBookingTherapist(bookingData) {
+      return isTherapist() && (
+        (('therapistId' in bookingData) && bookingData.therapistId == getStaffTherapistId()) ||
+        (('assignedTherapistId' in bookingData) && bookingData.assignedTherapistId == getStaffTherapistId())
+      );
+    }
+
+    // Checks if the authenticated user is the legitimate customer owner of a payment
+    // Enforces: Conflicting canonical/legacy owner UIDs fail closed; CRM identifiers cannot override existing canonical owner
+    function paymentUidMatches(data) {
+      return (!('customerAuthUid' in data) || data.customerAuthUid == null || data.customerAuthUid == '' || data.customerAuthUid == request.auth.uid)
+        && (!('authUserId' in data) || data.authUserId == null || data.authUserId == '' || data.authUserId == request.auth.uid);
+    }
+    function isPaymentCustomer(paymentData) {
+      let booking = get(/databases/$(database)/documents/bookings/$(paymentData.bookingId)).data;
+      return isSignedIn() && paymentUidMatches(paymentData) && paymentUidMatches(booking)
+        && (booking.get('customerAuthUid', '') == request.auth.uid || booking.get('authUserId', '') == request.auth.uid);
+    }
+
+    // =============================================================
+    // 1. MASTER CATALOG & PUBLIC OPERATIONAL CONFIGURATION
+    // Read: Public (customers need to view services, branches, pricing)
+    // Write: Strictly Manager / Admin only
+    // =============================================================
+
+    match /company_settings/{settingId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /business_settings/{settingId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /branches/{branchId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /service_categories/{categoryId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /therapist_skills/{skillId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /area_master_config/{configId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /service_areas/{areaId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /radius_tiers/{tierId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /payment_settings/{settingId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /notification_config/{configId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /crm_settings/{configId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /loyalty_settings/{configId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /membership_tiers/{tierId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    match /vouchers/{voucherId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    // =============================================================
+    // 2. STAFF ROLES & USERS (STRICT ACCESS CONTROL)
+    // =============================================================
+
+    // /staff_roles/{authUid}: Ground truth for RBAC.
+    // Client write is STRICTLY FORBIDDEN (handled by trusted server backend only).
+    match /staff_roles/{authUid} {
+      allow read: if isSignedIn() && (request.auth.uid == authUid || isOperationalStaff());
+      allow write: if isSystemServer(); // Prompt 18D: Server-Authoritative only. No browser client, including Manager, can write.
+    }
+
+    // /staff_users/{staffId}: Staff directory
+    // Read: Operational staff, or individual staff reading own doc
+    // Write: Manager only (or staff updating non-role profile fields)
+    match /staff_users/{staffId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && (
+        ('authUserId' in resource.data && resource.data.authUserId == request.auth.uid) ||
+        ('authUid' in resource.data && resource.data.authUid == request.auth.uid) ||
+        ('email' in resource.data && request.auth.token.email != null && resource.data.email == request.auth.token.email)
+      ));
+      allow create: if isSystemServer() || isManager();
+      allow update: if isSystemServer() || isManager() || (
+        isStaff() && 'authUserId' in resource.data && resource.data.authUserId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'displayName', 'phone', 'whatsapp', 'gender', 'internalNotes', 'updatedAt'
+           ])
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.isActive == resource.data.isActive
+      );
+      allow delete: if false; // Prompt 18D: No-Hard-Delete policy (Deactivate staff instead)
+    }
+
+    // =============================================================
+    // 3. THERAPISTS, ROSTERS & TRACKING
+    // =============================================================
+
+    // Public catalog view for customer booking & therapist selection
+    match /therapists/{therapistId} {
+      allow read: if true;
+      allow create: if isManager();
+      allow update: if isManager() || isSupervisor()
+        || (isTherapist() && (
+             resource.id == getStaffTherapistId() ||
+             ('authUserId' in resource.data && resource.data.authUserId == request.auth.uid) ||
+             ('staffId' in resource.data && resource.data.staffId == getStaffRole().staffId)
+           )
+           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'phone', 'status', 'currentStatus', 'currentLatitude', 'currentLongitude',
+                'lastLocationUpdate', 'updatedAt'
+              ])
+           && request.resource.data.isActive == resource.data.isActive
+           );
+      allow delete: if false; // Prompt 18D: No-Hard-Delete policy (Deactivate therapist instead)
+    }
+
+    match /therapist_rosters/{rosterId} {
+      allow read: if isStaff();
+      allow write: if isSupervisor()
+        || (
+          isSignedIn() && (
+            isTherapist() ||
+            (hasStaffRoleDoc() && getStaffRole().role in ['therapist', 'staff'])
+          ) && (
+            ('therapistId' in request.resource.data && (
+              request.resource.data.therapistId == getStaffTherapistId() ||
+              request.resource.data.therapistId == request.auth.uid ||
+              (exists(/databases/$(database)/documents/therapists/$(request.resource.data.therapistId)) && (
+                (('authUserId' in get(/databases/$(database)/documents/therapists/$(request.resource.data.therapistId)).data) && get(/databases/$(database)/documents/therapists/$(request.resource.data.therapistId)).data.authUserId == request.auth.uid) ||
+                (request.auth.token.email != null && ('email' in get(/databases/$(database)/documents/therapists/$(request.resource.data.therapistId)).data) && get(/databases/$(database)/documents/therapists/$(request.resource.data.therapistId)).data.email == request.auth.token.email)
+              ))
+            )) ||
+            (resource != null && 'therapistId' in resource.data && (
+              resource.data.therapistId == getStaffTherapistId() ||
+              resource.data.therapistId == request.auth.uid ||
+              (exists(/databases/$(database)/documents/therapists/$(resource.data.therapistId)) && (
+                (('authUserId' in get(/databases/$(database)/documents/therapists/$(resource.data.therapistId)).data) && get(/databases/$(database)/documents/therapists/$(resource.data.therapistId)).data.authUserId == request.auth.uid) ||
+                (request.auth.token.email != null && ('email' in get(/databases/$(database)/documents/therapists/$(resource.data.therapistId)).data) && get(/databases/$(database)/documents/therapists/$(resource.data.therapistId)).data.email == request.auth.token.email)
+              ))
+            )) ||
+            rosterId.matches('^' + getStaffTherapistId() + '_.*') ||
+            rosterId.matches('^' + request.auth.uid + '_.*')
+          )
+        );
+    }
+
+    match /roster_templates/{templateId} {
+      allow read: if isStaff();
+      allow write: if isSupervisor();
+    }
+
+    // Therapist GPS locations:
+    // Scoped strictly by booking ID. Customer can only read if it's their own active booking.
+    match /therapist_locations/{locationId} {
+      allow read: if isOperationalStaff()
+        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
+        || (isSignedIn() && exists(/databases/$(database)/documents/bookings/$(locationId))
+            && (
+              ('authUserId' in get(/databases/$(database)/documents/bookings/$(locationId)).data && get(/databases/$(database)/documents/bookings/$(locationId)).data.authUserId == request.auth.uid) ||
+              ('customerId' in get(/databases/$(database)/documents/bookings/$(locationId)).data && isCustomer(get(/databases/$(database)/documents/bookings/$(locationId)).data.customerId))
+            )
+           );
+      allow write: if isSupervisor()
+        || (isTherapist() && (
+             ('therapistId' in request.resource.data && request.resource.data.therapistId == getStaffTherapistId()) ||
+             (resource != null && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
+           ));
+    }
+
+    // =============================================================
+    // 4. CUSTOMERS & ADDRESSES
+    // Isolated: Customer A cannot read Customer B's data
+    // =============================================================
+
+    match /customers/{customerId} {
+      allow get: if isOperationalStaff() || (
+        isSignedIn() && (
+          resource == null ||
+          request.auth.uid == customerId ||
+          ('authUserId' in resource.data && resource.data.authUserId == request.auth.uid) ||
+          customerId.matches('^cust_u_' + request.auth.uid + '.*')
+        )
+      );
+      allow list: if isOperationalStaff() || (
+        isSignedIn() && ('authUserId' in resource.data && resource.data.authUserId == request.auth.uid)
+      );
+      allow create: if isOperationalStaff() || (
+        // Guests cannot set authUserId; signed-in users must match request.auth.uid and have dedicated customer ID
+        (!('authUserId' in request.resource.data) || request.resource.data.authUserId == null) ||
+        (isSignedIn() && request.resource.data.authUserId == request.auth.uid && (customerId.matches('^cust_u_.*') || customerId == request.auth.uid))
+      );
+      allow update: if isOperationalStaff() || (
+        isSignedIn() &&
+        // Customer can ONLY update their own existing profile; cannot attach UID to unowned or another user's profile
+        'authUserId' in resource.data && resource.data.authUserId == request.auth.uid &&
+        // Cannot reassign authUserId to another user or remove it
+        'authUserId' in request.resource.data && request.resource.data.authUserId == request.auth.uid &&
+        // Customer cannot tamper with CRM segmentation or financial metrics
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'totalSpend', 'averageOrderValue', 'totalBookings', 'completedBookings',
+          'cancelledBookings', 'totalTreatmentMinutes', 'customerSegment', 'crmStatus'
+        ]))
+      );
+      allow delete: if false; // Prompt 18D: Customer Master No-Hard-Delete policy (Archive instead)
+    }
+
+    match /customer_addresses/{addressId} {
+      allow read: if isOperationalStaff() || (
+        isSignedIn() && (
+          ('customerId' in resource.data && isCustomer(resource.data.customerId)) ||
+          resource.id.matches('^addr_' + request.auth.uid + '.*')
+        )
+      );
+      allow create: if isOperationalStaff() || (
+        isSignedIn() && (
+          ('customerId' in request.resource.data && isCustomer(request.resource.data.customerId)) ||
+          addressId.matches('^addr_' + request.auth.uid + '.*')
+        )
+      );
+      allow update, delete: if isOperationalStaff() || (
+        isSignedIn() && (
+          ('customerId' in resource.data && isCustomer(resource.data.customerId)) ||
+          resource.id.matches('^addr_' + request.auth.uid + '.*')
+        )
+      );
+    }
+
+    // =============================================================
+    // 5. CASES & CRM INTERACTIONS
+    // =============================================================
+
+    match /cases/{caseId} {
+      allow read: if isOperationalStaff()
+        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
+        || (isSignedIn() && 'customerId' in resource.data && (
+             resource.data.customerId == request.auth.uid ||
+             isCustomer(resource.data.customerId)
+            ));
+      allow create: if isOperationalStaff() || isSignedIn();
+      allow update: if isOperationalStaff();
+      allow delete: if false; // Prompt 18D: Case No-Hard-Delete policy (Close/Resolve via status)
+    }
+
+    match /case_events/{eventId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && 'customerId' in resource.data && (
+        resource.data.customerId == request.auth.uid ||
+        isCustomer(resource.data.customerId)
+      ));
+      allow create: if isOperationalStaff() || isSignedIn();
+      allow update, delete: if false; // Append-only
+    }
+
+    match /customer_notes/{noteId} {
+      allow read, write: if isOperationalStaff();
+    }
+
+    match /crm_tasks/{taskId} {
+      allow read, write: if isOperationalStaff();
+    }
+
+    match /customer_interactions/{interactionId} {
+      allow read, write: if isOperationalStaff();
+    }
+
+    // =============================================================
+    // 6. BOOKINGS (STRICT SCOPE, FIELD-LEVEL & SPOOF PREVENTION)
+    // =============================================================
+
+    match /bookings/{bookingId} {
+      allow get: if isOperationalStaff()
+        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
+        || (
+          // Signed-in customer: Case A, B, C with NO conflicting ownership (Case D denied)
+          isSignedIn() && (
+            (
+              'customerAuthUid' in resource.data && resource.data.customerAuthUid == request.auth.uid &&
+              (!('authUserId' in resource.data) || resource.data.authUserId == null || resource.data.authUserId == '' || resource.data.authUserId == request.auth.uid)
+            ) || (
+              'authUserId' in resource.data && resource.data.authUserId == request.auth.uid &&
+              (!('customerAuthUid' in resource.data) || resource.data.customerAuthUid == null || resource.data.customerAuthUid == '' || resource.data.customerAuthUid == request.auth.uid)
+            )
+          )
+        )
+        || (
+          // Unauthenticated guest tracking ONLY: booking has no authenticated owner
+          !isSignedIn() &&
+          (!('customerAuthUid' in resource.data) || resource.data.customerAuthUid == null || resource.data.customerAuthUid == '') &&
+          (!('authUserId' in resource.data) || resource.data.authUserId == null || resource.data.authUserId == '')
+        );
+
+      allow list: if isOperationalStaff()
+        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
+        || (isSignedIn() && (
+             (
+               'customerAuthUid' in resource.data && resource.data.customerAuthUid == request.auth.uid &&
+               (!('authUserId' in resource.data) || resource.data.authUserId == null || resource.data.authUserId == '' || resource.data.authUserId == request.auth.uid)
+             ) || (
+               'authUserId' in resource.data && resource.data.authUserId == request.auth.uid &&
+               (!('customerAuthUid' in resource.data) || resource.data.customerAuthUid == null || resource.data.customerAuthUid == '' || resource.data.customerAuthUid == request.auth.uid)
+             )
+           ));
+
+      // Customer or guest can create a booking with SAFE FIELDS ONLY
+      // Cannot set operational statuses, therapist assignment, payment verification, or timestamps
+      allow create: if request.resource.data.get('paymentPolicyVersion', 0) == 2
+        && request.resource.data.get('paymentDeadline', null) == null
+        && (isOperationalStaff() || (
+        request.resource.data.status in ['Menunggu Pembayaran', 'awaiting_payment', 'Draft', 'Pending'] &&
+        (!('paymentStatus' in request.resource.data) || request.resource.data.paymentStatus in ['UNPAID', 'PENDING', 'pending', 'unpaid'] || request.resource.data.paymentStatus == null) &&
+        (!('therapistId' in request.resource.data) || request.resource.data.therapistId == null) &&
+        (!('therapistName' in request.resource.data) || request.resource.data.therapistName == null) &&
+        (!('paymentVerifiedAt' in request.resource.data) || request.resource.data.paymentVerifiedAt == null) &&
+        (!('confirmedAt' in request.resource.data) || request.resource.data.confirmedAt == null) &&
+        (!('completedAt' in request.resource.data) || request.resource.data.completedAt == null) &&
+        (!('assignedAt' in request.resource.data) || request.resource.data.assignedAt == null) &&
+        (!('acceptedAt' in request.resource.data) || request.resource.data.acceptedAt == null) &&
+        (!('onTheWayAt' in request.resource.data) || request.resource.data.onTheWayAt == null) &&
+        (!('arrivedAt' in request.resource.data) || request.resource.data.arrivedAt == null) &&
+        (!('totalAmount' in request.resource.data) || request.resource.data.totalAmount >= 0) &&
+        (!('internalNotes' in request.resource.data) || request.resource.data.internalNotes == null || request.resource.data.internalNotes == '') &&
+        // Spoof prevention: guests cannot set ownership UIDs; signed-in users must match request.auth.uid
+        (
+          (!isSignedIn() && !('customerAuthUid' in request.resource.data) && !('authUserId' in request.resource.data)) ||
+          (isSignedIn() &&
+            (!('customerAuthUid' in request.resource.data) || request.resource.data.customerAuthUid == request.auth.uid) &&
+            (!('authUserId' in request.resource.data) || request.resource.data.authUserId == request.auth.uid)
+          )
+        )
+      ));
+
+      // Updates:
+      // - Operational staff (Manager, Supervisor, CSS) can update
+      // - Assigned therapist can ONLY update progress status & trip coordinates (cannot alter paymentStatus, price, or therapistId)
+      // - Customer can ONLY cancel pending bookings, upload payment proof, or add customer notes
+      allow update: if ((isSupervisor() || isCSS())
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentPolicyVersion', 'paymentDeadline', 'activePaymentId']))
+        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId()
+            && request.resource.data.paymentStatus == resource.data.paymentStatus
+            && request.resource.data.servicePrice == resource.data.servicePrice
+            && request.resource.data.homeServiceFee == resource.data.homeServiceFee
+            && request.resource.data.totalAmount == resource.data.totalAmount
+            && request.resource.data.therapistId == resource.data.therapistId
+            && request.resource.data.status in ['Therapist Assigned', 'Accepted', 'On The Way', 'Arrived', 'In Service', 'Treatment', 'Completed']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                 'status', 'acceptedAt', 'acceptedBy', 'onTheWayAt', 'arrivedAt', 'arrivalLatitude', 'arrivalLongitude',
+                 'treatmentStartedAt', 'completedAt', 'earlyCompletion', 'issueReport', 'updatedAt'
+               ])
+           )
+        || (
+             isBookingCustomer(resource.data) &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'status', 'cancellationReason', 'customerNotes', 'updatedAt'
+             ])
+             && (!('therapistId' in request.resource.data) || request.resource.data.therapistId == resource.data.therapistId)
+             && request.resource.data.paymentStatus != 'PAID'
+             && request.resource.data.paymentStatus != 'paid'
+             && request.resource.data.status != 'Confirmed'
+             && request.resource.data.status != 'Pembayaran Terverifikasi'
+             && request.resource.data.status != 'Therapist Assigned'
+             && request.resource.data.status != 'Completed'
+             && (
+               request.resource.data.paymentStatus == resource.data.paymentStatus ||
+               (request.resource.data.paymentStatus == 'pending_manual_verification' && resource.data.paymentStatus in ['UNPAID', 'unpaid', 'PENDING', 'pending', 'pending_payment', 'Menunggu Pembayaran'])
+             )
+             && (
+               request.resource.data.status == resource.data.status ||
+               (request.resource.data.status == 'Cancelled' && resource.data.status in ['Menunggu Pembayaran', 'Draft', 'Pending', 'awaiting_payment'])
+             )
+           );
+
+      allow delete: if false; // Prompt 18D: Bookings No-Hard-Delete policy
+    }
+
+    // =============================================================
+    // 7. PAYMENTS (CLIENT SPOOF-PROOF & FIELD-LEVEL TIGHTENING)
+    // =============================================================
+
+    match /payments/{paymentId} {
+      allow get: if isOperationalStaff() || isPaymentCustomer(resource.data);
+
+      allow list: if isOperationalStaff(); // Customer discovery uses authorized /api/payments/lookup; realtime uses scoped document reads.
+
+      // Admin-backed payment endpoints derive amounts, ownership, deadline and proof acceptance.
+      allow create: if false;
+      // Keep the existing staff correction feature; customers cannot bypass server checks.
+      allow update: if (isSupervisor() || isCSS())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'bookingId', 'customerAuthUid', 'authUserId', 'paymentDeadline', 'amount'
+        ]);
+
+      allow delete: if false; // Prompt 18D: Payments No-Hard-Delete policy
+    }
+
+    // =============================================================
+    // 8. AUDIT LOGS (IMMUTABLE APPEND-ONLY)
+    // =============================================================
+
+    match /booking_status_history/{historyId} {
+      allow read: if true; // Needed for guest order tracking timeline
+      allow create: if true; // Append-only initial status created on booking submission
+      allow update, delete: if false;
+    }
+
+    match /payment_status_history/{historyId} {
+      allow read: if isOperationalStaff();
+      allow create: if true; // Append-only payment status history
+      allow update, delete: if false;
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read, create: if isManager();
+      allow update, delete: if false;
+    }
+
+    match /operational_audit_logs/{logId} {
+      allow read: if isOperationalStaff() || isTherapist();
+      allow create: if isOperationalStaff()
+        || (isSignedIn() && (
+             isTherapist() ||
+             (hasStaffRoleDoc() && getStaffRole().role in ['therapist', 'staff'])
+           ));
+      allow update, delete: if false;
+    }
+
+    match /customer_audit_logs/{logId} {
+      allow read: if isOperationalStaff();
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // =============================================================
+    // 9. LOYALTY, REWARDS & VOUCHERS
+    // =============================================================
+
+    match /loyalty_accounts/{accountId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && 'customerId' in resource.data && (
+        resource.data.customerId == request.auth.uid ||
+        isCustomer(resource.data.customerId)
+      ));
+      allow create, update: if isOperationalStaff();
+      allow delete: if false; // Prompt 18D: Loyalty Accounts No-Hard-Delete policy
+    }
+
+    match /loyalty_transactions/{txId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && 'customerId' in resource.data && (
+        resource.data.customerId == request.auth.uid ||
+        isCustomer(resource.data.customerId)
+      ));
+      allow create: if isOperationalStaff();
+      allow update, delete: if false;
+    }
+
+    match /customer_vouchers/{voucherId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && 'customerId' in resource.data && (
+        resource.data.customerId == request.auth.uid ||
+        isCustomer(resource.data.customerId)
+      ));
+      allow create, update: if isOperationalStaff();
+      allow delete: if false; // Prompt 18D: Vouchers No-Hard-Delete policy
+    }
+
+    match /voucher_redemptions/{redemptionId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isOperationalStaff();
+      allow delete: if false;
+    }
+
+    match /referrals/{referralId} {
+      allow read: if isOperationalStaff() || (isSignedIn() && (
+        ('referrerCustomerId' in resource.data && resource.data.referrerCustomerId == request.auth.uid) ||
+        ('refereeCustomerId' in resource.data && resource.data.refereeCustomerId == request.auth.uid)
+      ));
+      allow create: if isOperationalStaff() || isSignedIn();
+      allow update, delete: if isOperationalStaff();
+    }
+
+    // =============================================================
+    // 10. NOTIFICATIONS & REVIEWS
+    // =============================================================
+
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isStaff() || (isSignedIn() && (
+        ('recipientUserId' in resource.data && resource.data.recipientUserId == request.auth.uid) ||
+        ('recipientRole' in resource.data && resource.data.recipientRole == 'customer')
+      ));
+      allow delete: if isOperationalStaff();
+    }
+
+    match /notification_settings/{settingId} {
+      allow read: if true;
+      allow write: if isOperationalStaff();
+    }
+
+    match /notification_devices/{deviceId} {
+      allow read, write: if isOperationalStaff();
+    }
+
+    match /notification_events/{eventId} {
+      allow read: if isOperationalStaff();
+      allow create: if true;
+      allow update: if true;
+      allow delete: if isManager();
+    }
+
+    match /notification_deliveries/{deliveryId} {
+      allow read: if isOperationalStaff();
+      allow create: if true;
+      allow update: if isOperationalStaff();
+      allow delete: if isManager();
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isStaff() || isSignedIn();
+      allow update: if isOperationalStaff();
+      allow delete: if isManager();
+    }
+
+    // Server-Authoritative reconciliation audit log
+    match /reconciliation_audit/{auditId} {
+      allow read: if isOperationalStaff();
+      allow write: if false; // Privileged server write only
+    }
+
+    // =============================================================
+    // 10. BOOKING CHATS & OPERATIONAL MESSAGING (CUSTOMER <-> THERAPIST)
+    // Strictly scoped per booking. No open directory or arbitrary querying.
+    // =============================================================
+
+    match /booking_chats/{bookingId} {
+      // Chat session read:
+      // Operational Staff: supervisor/manager can review operational records
+      // Non-existent doc check: allow checking if document exists if signed in
+      // Customer: authenticated customer for booking or in chat customerUid
+      // Therapist: assigned therapist for booking or in chat therapistAuthUid / therapistId
+      allow get: if isOperationalStaff()
+        || (resource == null && isSignedIn())
+        || (resource != null && (
+             (isSignedIn() && (
+               (('customerUid' in resource.data) && (resource.data.customerUid == request.auth.uid || isCustomer(resource.data.customerUid))) ||
+               (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data))
+             ))
+             || (isTherapist() && (
+                  (('therapistAuthUid' in resource.data) && resource.data.therapistAuthUid == request.auth.uid) ||
+                  (('therapistId' in resource.data) && resource.data.therapistId == getStaffTherapistId()) ||
+                  (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data))
+                ))
+           ));
+
+      // Listing chats: restricted strictly to participant's own chats
+      allow list: if isOperationalStaff()
+        || (isSignedIn() && ('customerUid' in resource.data) && (resource.data.customerUid == request.auth.uid || isCustomer(resource.data.customerUid)))
+        || (isTherapist() && (
+             (('therapistAuthUid' in resource.data) && resource.data.therapistAuthUid == request.auth.uid) ||
+             (('therapistId' in resource.data) && resource.data.therapistId == getStaffTherapistId())
+           ));
+
+      // Chat session creation:
+      // Allowed if user is authenticated customer for the booking OR assigned therapist OR operational staff
+      // Must link to a real booking in /bookings/$(bookingId)
+      allow create: if isSignedIn() && (
+        isOperationalStaff() ||
+        (
+          exists(/databases/$(database)/documents/bookings/$(bookingId)) && (
+            isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data) ||
+            isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data)
+          )
+        )
+      );
+
+      // Updating chat metadata: only participants can update unread counts or lastMessage preview,
+      // cannot change bookingId.
+      allow update: if isOperationalStaff()
+        || (isSignedIn() && (
+             (('customerUid' in resource.data) && (resource.data.customerUid == request.auth.uid || isCustomer(resource.data.customerUid))) ||
+             (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data)) ||
+             (isTherapist() && (
+               (('therapistAuthUid' in resource.data) && resource.data.therapistAuthUid == request.auth.uid) ||
+               (('therapistId' in resource.data) && resource.data.therapistId == getStaffTherapistId()) ||
+               (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data))
+             ))
+           ) &&
+           request.resource.data.bookingId == resource.data.bookingId
+        );
+
+      allow delete: if false;
+
+      // Subcollection: messages
+      match /messages/{messageId} {
+        allow read: if isOperationalStaff()
+          || (exists(/databases/$(database)/documents/bookings/$(bookingId)) && (
+               isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data) ||
+               isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data)
+             ))
+          || (exists(/databases/$(database)/documents/booking_chats/$(bookingId)) && (
+               (isSignedIn() && ('customerUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && (
+                 get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid == request.auth.uid ||
+                 isCustomer(get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid)
+               )) ||
+               (isTherapist() && (
+                 (('therapistAuthUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistAuthUid == request.auth.uid) ||
+                 (('therapistId' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistId == getStaffTherapistId())
+               ))
+             ));
+
+        // Create message:
+        // Must be participant (Customer or Therapist) or Operational Staff
+        // Cannot forge SYSTEM messages from client
+        // Max text size: 1000 chars
+        // Chat must be active (not closed)
+        allow create: if isOperationalStaff() || (
+          isSignedIn() &&
+          request.resource.data.bookingId == bookingId &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 1000 &&
+          (
+            !exists(/databases/$(database)/documents/booking_chats/$(bookingId)) ||
+            !('status' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) ||
+            get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.status != 'closed'
+          ) &&
+          (
+            !exists(/databases/$(database)/documents/bookings/$(bookingId)) ||
+            (
+              !(get(/databases/$(database)/documents/bookings/$(bookingId)).data.status in [
+                'Completed', 'Cancelled', 'Rescheduled', 'selesai', 'dibatalkan', 'expired'
+              ]) &&
+              !(get(/databases/$(database)/documents/bookings/$(bookingId)).data.paymentStatus in [
+                'expired', 'refunded', 'payment_rejected'
+              ])
+            )
+          ) &&
+          (
+            (
+              request.resource.data.senderType == 'CUSTOMER' &&
+              request.resource.data.messageType == 'TEXT' &&
+              request.resource.data.senderUid == request.auth.uid &&
+              (
+                (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data)) ||
+                (exists(/databases/$(database)/documents/booking_chats/$(bookingId)) && ('customerUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && (
+                  get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid == request.auth.uid ||
+                  isCustomer(get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid)
+                ))
+              )
+            ) ||
+            (
+              request.resource.data.senderType == 'THERAPIST' &&
+              request.resource.data.messageType == 'TEXT' &&
+              isTherapist() &&
+              (
+                (exists(/databases/$(database)/documents/bookings/$(bookingId)) && isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data)) ||
+                (exists(/databases/$(database)/documents/booking_chats/$(bookingId)) && (
+                  (('therapistAuthUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistAuthUid == request.auth.uid) ||
+                  (('therapistId' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistId == getStaffTherapistId())
+                ))
+              )
+            )
+          )
+        );
+
+        // Update message: strictly for marking readAt (receipts) by authorized participants, cannot edit message text
+        allow update: if isSignedIn() && (
+          (
+            isOperationalStaff() ||
+            (exists(/databases/$(database)/documents/bookings/$(bookingId)) && (
+              isBookingCustomer(get(/databases/$(database)/documents/bookings/$(bookingId)).data) ||
+              isBookingTherapist(get(/databases/$(database)/documents/bookings/$(bookingId)).data)
+            )) ||
+            (exists(/databases/$(database)/documents/booking_chats/$(bookingId)) && (
+              (
+                'customerUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data &&
+                (get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid == request.auth.uid || isCustomer(get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.customerUid))
+              ) ||
+              (
+                isTherapist() && (
+                  (('therapistAuthUid' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistAuthUid == request.auth.uid) ||
+                  (('therapistId' in get(/databases/$(database)/documents/booking_chats/$(bookingId)).data) && get(/databases/$(database)/documents/booking_chats/$(bookingId)).data.therapistId == getStaffTherapistId())
+                )
+              )
+            ))
+          ) &&
+          request.resource.data.text == resource.data.text &&
+          request.resource.data.senderType == resource.data.senderType &&
+          request.resource.data.senderUid == resource.data.senderUid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
+        );
+
+        allow delete: if false; // Messages are immutable and cannot be hard-deleted
+      }
+    }
+
+    // =============================================================
+    // 11. DEFAULT ZERO-TRUST DENY
+    // =============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

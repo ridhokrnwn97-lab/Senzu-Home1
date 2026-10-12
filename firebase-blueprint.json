@@ -1,0 +1,675 @@
+{
+  "entities": {
+    "ServiceItem": {
+      "title": "ServiceItem",
+      "description": "Layanan treatment refleksi dan pijat keluarga Senzu Home",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "duration": { "type": "number" },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "isPopular": { "type": "boolean" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "duration", "price", "isActive"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Pengaturan biaya home service, rekening transfer, dan kontak WA",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "homeServiceFee": { "type": "number" },
+        "bankName": { "type": "string" },
+        "bankAccount": { "type": "string" },
+        "bankHolder": { "type": "string" },
+        "qrisInstruction": { "type": "string" },
+        "contactWhatsApp": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "homeServiceFee", "bankName", "bankAccount", "bankHolder", "contactWhatsApp"]
+    },
+    "Therapist": {
+      "title": "Therapist",
+      "description": "Data profil terapis Senzu Home Palembang",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Perempuan", "Laki-laki"] },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "specialties": { "type": "array" },
+        "rating": { "type": "number" },
+        "totalCompleted": { "type": "number" },
+        "status": { "type": "string", "enum": ["available", "on_duty", "off"] },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "gender", "phone", "status"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Order reservasi treatment home service pelanggan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingCode": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerWhatsApp": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "serviceId": { "type": "string" },
+        "serviceName": { "type": "string" },
+        "serviceDuration": { "type": "number" },
+        "therapistId": { "type": "string" },
+        "therapistName": { "type": "string" },
+        "scheduleDate": { "type": "string" },
+        "scheduleTime": { "type": "string" },
+        "scheduleAt": { "type": "string" },
+        "genderPreference": { "type": "string", "enum": ["Bebas", "Perempuan", "Laki-laki"] },
+        "address": { "type": "string" },
+        "area": { "type": "string" },
+        "servicePrice": { "type": "number" },
+        "homeServiceFee": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["QRIS", "QRIS Senzu", "Transfer", "Transfer BNI", "Transfer Bank Mandiri", "Transfer BRI", "Cash"],
+          "description": "Metode bayar aktif: QRIS Senzu, Transfer BNI, Transfer Bank Mandiri, Transfer BRI. Nilai 'Cash' hanya dipertahankan untuk audit trail data historis."
+        },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PAID"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Menunggu Pembayaran",
+            "Pembayaran Terverifikasi",
+            "Confirmed",
+            "Therapist Assigned",
+            "Accepted",
+            "On The Way",
+            "Arrived",
+            "Treatment",
+            "Completed",
+            "Cancelled",
+            "Rescheduled"
+          ]
+        },
+        "customerNotes": { "type": "string" },
+        "internalNotes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "bookingCode",
+        "customerId",
+        "customerName",
+        "customerWhatsApp",
+        "serviceId",
+        "serviceName",
+        "scheduleDate",
+        "scheduleTime",
+        "address",
+        "area",
+        "totalAmount",
+        "paymentMethod",
+        "paymentStatus",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BookingStatusHistory": {
+      "title": "BookingStatusHistory",
+      "description": "Log kronologis audit trail perubahan status booking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "bookingCode": { "type": "string" },
+        "status": { "type": "string" },
+        "note": { "type": "string" },
+        "updatedByRole": { "type": "string" },
+        "updatedByName": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "formattedWIB": { "type": "string" }
+      },
+      "required": ["id", "bookingId", "bookingCode", "status", "updatedByRole", "updatedByName", "timestamp", "formattedWIB"]
+    },
+    "CustomerCRM": {
+      "title": "CustomerCRM",
+      "description": "Database profil pelanggan dan histori treatment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "area": { "type": "string" },
+        "totalBooking": { "type": "number" },
+        "completedBooking": { "type": "number" },
+        "totalSpend": { "type": "number" },
+        "lastBooking": { "type": "string" },
+        "favoriteTreatment": { "type": "string" },
+        "favoriteTherapist": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "whatsapp", "address", "area", "totalBooking", "completedBooking", "totalSpend"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Catatan transaksi pembayaran customer untuk order booking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "bookingCode": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "paymentProofUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "bookingId", "bookingCode", "amount", "paymentMethod", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "PaymentStatusHistory": {
+      "title": "PaymentStatusHistory",
+      "description": "Riwayat audit trail perubahan status pembayaran",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "notes": { "type": "string" },
+        "actor": { "type": "string" }
+      },
+      "required": ["id", "paymentId", "bookingId", "status", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notifikasi in-app dan push untuk customer dan staff",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventType": { "type": "string" },
+        "recipientUserId": { "type": "string" },
+        "recipientRole": { "type": "string", "enum": ["customer", "css", "supervisor", "therapist", "admin", "manager", "finance"] },
+        "bookingId": { "type": "string" },
+        "bookingCode": { "type": "string" },
+        "customerId": { "type": "string" },
+        "therapistId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "channel": { "type": "string", "enum": ["in_app", "push", "whatsapp", "email"] },
+        "priority": { "type": "string", "enum": ["LOW", "NORMAL", "HIGH", "CRITICAL"] },
+        "read": { "type": "boolean" },
+        "readAt": { "type": "string" },
+        "actionUrl": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" }
+      },
+      "required": ["id", "eventType", "recipientRole", "title", "message", "channel", "priority", "read", "createdAt"]
+    },
+    "NotificationEvent": {
+      "title": "NotificationEvent",
+      "description": "Log event pemicu notifikasi sistem",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventType": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "payload": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "processedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "processing", "processed", "failed"] },
+        "error": { "type": "string" }
+      },
+      "required": ["id", "eventType", "payload", "createdAt", "status"]
+    },
+    "NotificationDelivery": {
+      "title": "NotificationDelivery",
+      "description": "Log pengiriman notifikasi ke channel tujuan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "notificationId": { "type": "string" },
+        "channel": { "type": "string", "enum": ["in_app", "push", "whatsapp", "email"] },
+        "recipient": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "sent", "delivered", "failed"] },
+        "sentAt": { "type": "string" },
+        "deliveredAt": { "type": "string" },
+        "failedAt": { "type": "string" },
+        "failureReason": { "type": "string" },
+        "retryCount": { "type": "number" }
+      },
+      "required": ["notificationId", "channel", "recipient", "status"]
+    },
+    "NotificationDevice": {
+      "title": "NotificationDevice",
+      "description": "Token perangkat pengguna untuk push notification PWA/Web Push",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "role": { "type": "string" },
+        "token": { "type": "string" },
+        "platform": { "type": "string", "enum": ["web", "pwa", "ios_pwa", "android_web"] },
+        "browser": { "type": "string" },
+        "deviceName": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "lastSeenAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "role", "token", "platform", "enabled", "createdAt", "lastSeenAt", "updatedAt"]
+    },
+    "NotificationPreferences": {
+      "title": "NotificationPreferences",
+      "description": "Pengaturan preferensi notifikasi per pengguna",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "role": { "type": "string" },
+        "pushEnabled": { "type": "boolean" },
+        "bookingUpdates": { "type": "boolean" },
+        "paymentUpdates": { "type": "boolean" },
+        "therapistUpdates": { "type": "boolean" },
+        "reminders": { "type": "boolean" },
+        "marketing": { "type": "boolean" },
+        "soundEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "role", "pushEnabled", "bookingUpdates", "paymentUpdates", "therapistUpdates", "reminders", "marketing", "updatedAt"]
+    },
+    "NotificationSettings": {
+      "title": "NotificationSettings",
+      "description": "Konfigurasi threshold dan alert notifikasi tingkat sistem Senzu Home",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingCreatedAlert": { "type": "boolean" },
+        "paymentAlert": { "type": "boolean" },
+        "supervisorAlert": { "type": "boolean" },
+        "therapistAlert": { "type": "boolean" },
+        "bookingReminder": { "type": "boolean" },
+        "nearbyNotification": { "type": "boolean" },
+        "staleGpsAlert": { "type": "boolean" },
+        "reminderMinutes": { "type": "number" },
+        "assignmentAlertMinutes": { "type": "number" },
+        "therapistNotAcceptedMinutes": { "type": "number" },
+        "lateDepartureBufferMinutes": { "type": "number" },
+        "gpsStaleMinutes": { "type": "number" },
+        "nearbyDistanceKm": { "type": "number" },
+        "whatsappEnabled": { "type": "boolean" },
+        "emailEnabled": { "type": "boolean" },
+        "pushEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["bookingCreatedAlert", "paymentAlert", "supervisorAlert", "reminderMinutes", "assignmentAlertMinutes", "gpsStaleMinutes"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Pengaturan master data cabang fisik dan operasional Senzu",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "companyId": { "type": "string" },
+        "brandName": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "province": { "type": "string" },
+        "postalCode": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "customerServiceWhatsApp": { "type": "string" },
+        "officialEmail": { "type": "string" },
+        "openingTime": { "type": "string" },
+        "closingTime": { "type": "string" },
+        "timezone": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "isDefault": { "type": "boolean" }
+      },
+      "required": ["id", "code", "name", "address", "city", "province", "latitude", "longitude", "customerServiceWhatsApp", "officialEmail", "openingTime", "closingTime", "status"]
+    },
+    "AdminAuditLog": {
+      "title": "AdminAuditLog",
+      "description": "Log riwayat audit perubahan Master Data dan Pengaturan Perusahaan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "actorName": { "type": "string" },
+        "action": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "summary": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "formattedWIB": { "type": "string" }
+      },
+      "required": ["id", "actorId", "actorRole", "actorName", "action", "entityType", "entityId", "summary", "timestamp", "formattedWIB"]
+    },
+    "CustomerLoyaltyAccount": {
+      "title": "CustomerLoyaltyAccount",
+      "description": "Akun keanggotaan loyalty pelanggan, saldo poin, dan level tier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "memberNumber": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "pointsBalance": { "type": "number" },
+        "lifetimePointsEarned": { "type": "number" },
+        "currentTierId": { "type": "string" },
+        "currentTierName": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "customerId", "memberNumber", "customerName", "pointsBalance", "currentTierId", "status"]
+    },
+    "LoyaltyTransaction": {
+      "title": "LoyaltyTransaction",
+      "description": "Buku besar transaksi mutasi poin loyalty",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "transactionType": { "type": "string" },
+        "points": { "type": "number" },
+        "balanceBefore": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "referenceType": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "reason": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "customerId", "transactionType", "points", "balanceBefore", "balanceAfter", "createdAt"]
+    },
+    "MembershipTier": {
+      "title": "MembershipTier",
+      "description": "Konfigurasi tingkatan membership loyalty Senzu Home",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "level": { "type": "number" },
+        "minimumQualifiedSpend": { "type": "number" },
+        "earningMultiplier": { "type": "number" },
+        "badgeLabel": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "sortOrder": { "type": "number" }
+      },
+      "required": ["id", "name", "level", "enabled"]
+    },
+    "Voucher": {
+      "title": "Voucher",
+      "description": "Katalog voucher diskon dan reward loyalty",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "voucherType": { "type": "string" },
+        "value": { "type": "number" },
+        "minimumSpend": { "type": "number" },
+        "validFrom": { "type": "string" },
+        "validUntil": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "name", "voucherType", "value", "enabled"]
+    },
+    "CustomerVoucher": {
+      "title": "CustomerVoucher",
+      "description": "Voucher yang dimiliki pelanggan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voucherId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "voucherName": { "type": "string" },
+        "value": { "type": "number" },
+        "status": { "type": "string" },
+        "assignedAt": { "type": "string" },
+        "expiredAt": { "type": "string" }
+      },
+      "required": ["id", "voucherId", "customerId", "voucherName", "status"]
+    },
+    "ServiceArea": {
+      "title": "ServiceArea",
+      "description": "Area jangkauan layanan Home Service dan tarif biaya per wilayah",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "kecamatan": { "type": "string" },
+        "city": { "type": "string" },
+        "province": { "type": "string" },
+        "branchId": { "type": "string" },
+        "branchName": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "homeServiceEnabled": { "type": "boolean" },
+        "homeServiceFee": { "type": "number" },
+        "minimumOrderAmount": { "type": "number" },
+        "maximumDistanceKm": { "type": "number" },
+        "sortOrder": { "type": "number" },
+        "internalNote": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "name", "kecamatan", "city", "province", "branchId", "status", "homeServiceEnabled"]
+    },
+    "ServiceCategory": {
+      "title": "ServiceCategory",
+      "description": "Master kategori layanan treatment Senzu Home",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "categoryCode": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "description": { "type": "string" },
+        "sortOrder": { "type": "number" },
+        "activeStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "categoryName", "sortOrder", "activeStatus", "isActive"]
+    },
+    "TherapistSkill": {
+      "title": "TherapistSkill",
+      "description": "Master keahlian terapis Senzu Home",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "skillId": { "type": "string" },
+        "skillCode": { "type": "string" },
+        "skillName": { "type": "string" },
+        "description": { "type": "string" },
+        "sortOrder": { "type": "number" },
+        "activeStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "skillName", "sortOrder", "activeStatus", "isActive"]
+    },
+    "BookingChat": {
+      "title": "BookingChat",
+      "description": "Sesi chat operasional antara pelanggan dan terapis untuk sebuah reservasi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "bookingCode": { "type": "string" },
+        "customerUid": { "type": "string" },
+        "customerName": { "type": "string" },
+        "therapistId": { "type": "string" },
+        "therapistAuthUid": { "type": "string" },
+        "therapistName": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "customerUnreadCount": { "type": "number" },
+        "therapistUnreadCount": { "type": "number" },
+        "lastMessagePreview": { "type": "string" },
+        "lastMessageAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "closedAt": { "type": "string" }
+      },
+      "required": ["id", "bookingId", "bookingCode", "customerUid", "therapistId", "status", "createdAt", "updatedAt"]
+    },
+    "BookingChatMessage": {
+      "title": "BookingChatMessage",
+      "description": "Pesan chat realtime antara pelanggan dan terapis dalam reservasi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "senderType": { "type": "string", "enum": ["CUSTOMER", "THERAPIST", "SYSTEM"] },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "readAt": { "type": "string" },
+        "clientMessageId": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["TEXT", "SYSTEM"] }
+      },
+      "required": ["id", "bookingId", "senderType", "senderUid", "text", "createdAt", "clientMessageId", "messageType"]
+    }
+  },
+  "firestore": {
+    "/service_categories/{categoryId}": {
+      "schema": "ServiceCategory",
+      "description": "Koleksi master kategori layanan treatment"
+    },
+    "/therapist_skills/{skillId}": {
+      "schema": "TherapistSkill",
+      "description": "Koleksi master keahlian terapis"
+    },
+    "/service_areas/{areaId}": {
+      "schema": "ServiceArea",
+      "description": "Koleksi master area layanan Home Service dan tarif"
+    },
+    "/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Koleksi cabang fisik dan hub operasional Senzu"
+    },
+    "/admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Koleksi log audit trail master data dan pengaturan"
+    },
+    "/services/{serviceId}": {
+      "schema": "ServiceItem",
+      "description": "Koleksi katalog layanan refleksi"
+    },
+    "/settings/{settingId}": {
+      "schema": "AppSettings",
+      "description": "Pengaturan operasional dan rekening bank"
+    },
+    "/therapists/{therapistId}": {
+      "schema": "Therapist",
+      "description": "Koleksi profil data terapis Senzu"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Koleksi order dan reservasi home service"
+    },
+    "/booking_status_history/{historyId}": {
+      "schema": "BookingStatusHistory",
+      "description": "Log riwayat status booking"
+    },
+    "/customers/{customerId}": {
+      "schema": "CustomerCRM",
+      "description": "Koleksi database CRM pelanggan"
+    },
+    "/payments/{paymentId}": {
+      "schema": "PaymentRecord",
+      "description": "Koleksi data pembayaran booking"
+    },
+    "/payment_status_history/{historyId}": {
+      "schema": "PaymentStatusHistory",
+      "description": "Audit trail status pembayaran"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Koleksi notifikasi realtime in-app dan push"
+    },
+    "/notification_events/{eventId}": {
+      "schema": "NotificationEvent",
+      "description": "Koleksi log event notifikasi"
+    },
+    "/notification_deliveries/{deliveryId}": {
+      "schema": "NotificationDelivery",
+      "description": "Koleksi log pengiriman notifikasi"
+    },
+    "/notification_devices/{deviceId}": {
+      "schema": "NotificationDevice",
+      "description": "Koleksi token perangkat untuk push notification"
+    },
+    "/notification_preferences/{prefId}": {
+      "schema": "NotificationPreferences",
+      "description": "Preferensi notifikasi pengguna"
+    },
+    "/notification_settings/{settingId}": {
+      "schema": "NotificationSettings",
+      "description": "Konfigurasi threshold alert sistem"
+    },
+    "/loyalty_settings/{settingId}": {
+      "schema": "AppSettings",
+      "description": "Pengaturan program loyalty dan reward"
+    },
+    "/membership_tiers/{tierId}": {
+      "schema": "MembershipTier",
+      "description": "Daftar level keanggotaan loyalty"
+    },
+    "/loyalty_accounts/{accountId}": {
+      "schema": "CustomerLoyaltyAccount",
+      "description": "Koleksi akun loyalty pelanggan dan saldo poin"
+    },
+    "/loyalty_transactions/{transactionId}": {
+      "schema": "LoyaltyTransaction",
+      "description": "Log mutasi poin loyalty pelanggan"
+    },
+    "/vouchers/{voucherId}": {
+      "schema": "Voucher",
+      "description": "Katalog voucher diskon dan promosi"
+    },
+    "/customer_vouchers/{voucherId}": {
+      "schema": "CustomerVoucher",
+      "description": "Koleksi voucher aktif yang dimiliki pelanggan"
+    },
+    "/referrals/{referralId}": {
+      "schema": "CustomerLoyaltyAccount",
+      "description": "Riwayat klaim referral pelanggan"
+    },
+    "/booking_chats/{bookingId}": {
+      "schema": "BookingChat",
+      "description": "Sesi chat operasional antara pelanggan dan terapis per booking"
+    },
+    "/booking_chats/{bookingId}/messages/{messageId}": {
+      "schema": "BookingChatMessage",
+      "description": "Pesan chat per booking antara pelanggan dan terapis"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Senzu Home",
+  "description": "Layanan home service Senzu Reflexology & Family Massage di Kota Palembang",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
