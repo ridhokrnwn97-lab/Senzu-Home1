@@ -71,6 +71,7 @@ async function notificationRequest(
     }
   };
   for (let attempt = 0; attempt < 2; attempt++) {
+    const canRetry = attempt === 0 && route !== '/api/notifications/list';
     stable();
     let token = '';
     if (!guest) {
@@ -86,14 +87,14 @@ async function notificationRequest(
       });
     } catch (error) {
       stable();
-      if (attempt === 0) continue;
+      if (canRetry) continue;
       throw fail('NETWORK_ERROR', 'Layanan notifikasi belum dapat dihubungi.');
     }
     stable();
     let result: any;
     try { result = await response.json(); } catch { result = null; }
     stable();
-    if ((response.status === 429 || response.status >= 500) && attempt === 0) continue;
+    if ((response.status === 429 || response.status >= 500) && canRetry) continue;
     if (!response.ok || !result || result.success !== true) {
       throw fail(text(result?.code) || `HTTP_${response.status}`, text(result?.message || result?.error, 250) || 'Permintaan notifikasi gagal.', response.status);
     }
@@ -174,6 +175,7 @@ function subscribePrivateNotifications(filters: Record<string, unknown>, callbac
   callback([]);
   if (!session || !uid) return () => {};
   let active = true, inFlight = false, initial = true;
+  let failures = 0, nextPollAt = 0;
   let controller: AbortController | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let stopAuth: (() => void) | undefined;
@@ -184,21 +186,28 @@ function subscribePrivateNotifications(filters: Record<string, unknown>, callbac
   };
   const stable = () => active && auth?.currentUser === session && text(auth.currentUser?.uid) === uid;
   const poll = async () => {
-    if (!active || inFlight) return;
+    if (!active || inFlight || Date.now() < nextPollAt) return;
     if (!stable()) { stop(); return; }
     inFlight = true;
     const current = new AbortController(); controller = current;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const result = await notificationRequest('/api/notifications/list', filters, { uid, signal: current.signal });
+      const result = await Promise.race([
+        notificationRequest('/api/notifications/list', filters, { uid, signal: current.signal }),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => { current.abort(); reject(fail('NOTIFICATION_READ_TIMEOUT', 'Pembacaan notifikasi melewati batas waktu.')); }, 25000); }),
+      ]);
       if (!stable() || current.signal.aborted) return;
       if (!Array.isArray(result.notifications)) throw fail('MALFORMED_RESPONSE', 'Daftar notifikasi tidak valid.');
       const items = result.notifications.map(safeNotification).filter((n: InAppNotification | null): n is InAppNotification => Boolean(n));
       presentArrival(uid, items, initial); initial = false;
+      failures = 0; nextPollAt = 0;
       if (stable()) callback(items);
     } catch (error: any) {
       if (!stable()) { stop(); return; }
       if ([401, 403].includes(error?.status)) callback([]);
-    } finally { inFlight = false; if (controller === current) controller = null; }
+      failures = Math.min(failures + 1, 4);
+      nextPollAt = Date.now() + Math.min(60000, 5000 * 2 ** failures);
+    } finally { if (timeout) clearTimeout(timeout); inFlight = false; if (controller === current) controller = null; }
   };
   stopAuth = onAuthStateChanged(auth, user => { if (user !== session || text(user?.uid) !== uid) stop(); });
   if (active) { timer = setInterval(() => { void poll(); }, 5000); void poll(); }
