@@ -44,6 +44,7 @@ import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { useCustomerServiceWhatsApp } from '../lib/supportWhatsApp';
 import { CustomerRegisterModal } from './CustomerRegisterModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
+import { trackMetaAdsAction } from '../lib/metaPixel';
 
 interface CustomerPaymentPageProps {
   booking: Booking;
@@ -1071,6 +1072,7 @@ export const CustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
               {isCsAvailable ? (
                 <a
                   id="btn-payment-cs"
+                  onClick={() => { void trackMetaAdsAction('payment_confirmation_clicked', { entityId: booking.id, value: booking.totalAmount }); }}
                   href={getCsWhatsAppUrl(
                     `Halo Senzu Home, saya ingin konfirmasi pembayaran untuk Kode Booking: ${booking.bookingCode}`
                   )}

@@ -24,6 +24,7 @@ import { BranchSettingsCard } from './admin/BranchSettingsCard';
 import { ServiceMasterCard } from './admin/ServiceMasterCard';
 import { BusinessSettingsCard } from './admin/BusinessSettingsCard';
 import { AdminAuditLogDrawer } from './admin/AdminAuditLogDrawer';
+import { MetaAdsSettingsCard } from './admin/MetaAdsSettingsCard';
 
 interface AdminSettingsViewProps {
   settings: AppSettings;
@@ -236,6 +237,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         )}
 
         {activeTab === 'business' && (
+          <div className="space-y-6">
           <BusinessSettingsCard
             businessSettings={businessSettings}
             branches={branches}
@@ -243,6 +245,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             currentUser={currentUser}
             onRefresh={handleFullRefresh}
           />
+          <MetaAdsSettingsCard currentUser={currentUser} />
+          </div>
         )}
 
         {activeTab === 'audit' && (
