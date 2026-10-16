@@ -20002,20 +20002,37 @@ async function startServer() {
     }
     return result;
   }
-  function s7Reader(transaction: any): { doc: (collection: string, id: string) => Promise<any>; query: (query: any) => Promise<any> } {
+  async function s7WithinReadDeadline<T>(operation: () => Promise<T>, deadlineAt = 0): Promise<T> {
+    if (!deadlineAt) return operation();
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw s7Error(503, 'NOTIFICATION_READ_TIMEOUT');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => {
+          if (Date.now() >= deadlineAt) throw s7Error(503, 'NOTIFICATION_READ_TIMEOUT');
+          return operation();
+        }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(s7Error(503, 'NOTIFICATION_READ_TIMEOUT')), remaining); }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  function s7Reader(transaction: any, deadlineAt = 0): { doc: (collection: string, id: string) => Promise<any>; query: (query: any) => Promise<any> } {
     const cache = new Map<string, Promise<any>>();
     const queries: { query: any; promise: Promise<any> }[] = [];
     return {
       doc(collection: string, id: string) {
+        if (deadlineAt && Date.now() >= deadlineAt) throw s7Error(503, 'NOTIFICATION_READ_TIMEOUT');
         if (!s7Id(id)) throw s7Error(409, 'SOURCE_REFERENCE_INVALID');
         const key = `${collection}/${id}`;
-        if (!cache.has(key)) cache.set(key, transaction.get(adminDb.collection(collection).doc(id)));
+        if (!cache.has(key)) cache.set(key, s7WithinReadDeadline(() => transaction.get(adminDb.collection(collection).doc(id)), deadlineAt));
         return cache.get(key)!;
       },
       query: query => {
+        if (deadlineAt && Date.now() >= deadlineAt) throw s7Error(503, 'NOTIFICATION_READ_TIMEOUT');
         const prior = queries.find(item => typeof query.isEqual === 'function' && query.isEqual(item.query));
         if (prior) return prior.promise;
-        const promise = transaction.get(query); queries.push({ query, promise }); return promise;
+        const promise = s7WithinReadDeadline(() => transaction.get(query), deadlineAt); queries.push({ query, promise }); return promise;
       },
     };
   }
@@ -20494,7 +20511,7 @@ async function startServer() {
     for (const key of ['bookingId', 'bookingCode', 'customerId', 'therapistId', 'caseId', 'caseCode', 'recipientUserId']) if (s7Id(content[key])) result[key] = content[key];
     return result;
   }
-  async function s7Inbox(read: ReturnType<typeof s7Reader>, caller: S7Caller): Promise<any[]> {
+  async function s7Inbox(read: ReturnType<typeof s7Reader>, caller: S7Caller, window?: { limit: number; bookingId?: string; bookingCode?: string }): Promise<any[]> {
     const candidates = new Map<string, any>();
     const collect = async (query: any) => {
       let after: any = null;
@@ -20523,7 +20540,21 @@ async function startServer() {
     }
     if (s7Operational.includes(caller.role)) await collect(adminDb.collection('notifications').where('recipientUserId', '==', caller.uid));
     const visible: any[] = [];
-    for (const snap of candidates.values()) { const item = await s7Visible(read, caller, snap); if (item) visible.push(item); }
+    // Candidate order must match the eventual DTO timestamp. Legacy text dates are untrusted;
+    // Firestore snapshot creation time is authoritative for legacy rows.
+    const candidateTime = (snap: any): number => {
+      const data = snap.data(), iso = s7Date(data.provenanceId ? data.createdAt : snap.createTime);
+      return iso ? Date.parse(iso) : Infinity; // Resolve unknown legacy dates before stopping early.
+    };
+    const ordered = [...candidates.values()].map(snap => ({ snap, time: candidateTime(snap) })).sort((a, b) =>
+      (a.time === b.time ? 0 : a.time > b.time ? -1 : 1) || b.snap.id.localeCompare(a.snap.id)
+    ).map(item => item.snap);
+    // Bound source lookups to eight at a time; bulk actions still inspect their full scope.
+    for (let offset = 0; offset < ordered.length; offset += 8) {
+      const items = await Promise.all(ordered.slice(offset, offset + 8).map(snap => s7Visible(read, caller, snap)));
+      for (const item of items) if (item && (!window?.bookingId || item.bookingId === window.bookingId) && (!window?.bookingCode || item.bookingCode === window.bookingCode)) visible.push(item);
+      if (window && visible.length >= window.limit) break;
+    }
     return visible.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id));
   }
   async function s7Push(notificationIds: string[]): Promise<void> {
@@ -20566,12 +20597,27 @@ async function startServer() {
       } catch { await setup.delivery.update({ status: 'failed', failedAt: new Date().toISOString(), retryCount: 0, failureReason: 'FCM_REQUEST_FAILED' }); }
     }
   }
-  function s7Route(handler: (req: express.Request, uid: string) => Promise<any>) {
+  function s7Route(handler: (req: express.Request, uid: string, deadlineAt: number) => Promise<any>, readTimeoutMs = 0) {
     return async (req: express.Request, res: express.Response) => {
       res.setHeader('Cache-Control', 'no-store');
-      try { const uid = await s7Verify(req); const result = await handler(req, uid); res.status(200).json(result); }
+      const startedAt = Date.now(), deadlineAt = readTimeoutMs ? startedAt + readTimeoutMs : 0;
+      try {
+        const result = await s7WithinReadDeadline(async () => {
+          const uid = await s7Verify(req);
+          (req as any).authUid = uid; // Logging marker, derived only from the verified token.
+          if (deadlineAt && Date.now() >= deadlineAt) throw s7Error(503, 'NOTIFICATION_READ_TIMEOUT');
+          return handler(req, uid, deadlineAt);
+        }, deadlineAt);
+        res.status(200).json(result);
+      }
       catch (error: any) {
         const status = [400, 401, 403, 404, 409, 429, 503].includes(error.statusCode) ? error.statusCode : 503;
+        if (readTimeoutMs && status === 503) console.warn(JSON.stringify({
+          severity: 'ERROR', event: 'notification_inbox_read_failed',
+          code: error.statusCode ? s7Text(error.code, 80) : 'NOTIFICATION_UNAVAILABLE',
+          databaseCode: typeof error.code === 'number' || /^[A-Za-z0-9_/-]{1,80}$/.test(error.code || '') ? error.code : 'UNKNOWN',
+          phase: (req as any).authUid ? 'database' : 'authentication', latencyMs: Date.now() - startedAt,
+        }));
         res.status(status).json({ success: false, code: error.statusCode ? error.code : 'NOTIFICATION_UNAVAILABLE', message: status === 503 ? 'Layanan notifikasi belum tersedia. Silakan coba lagi.' : error.message });
       }
     };
@@ -20596,14 +20642,15 @@ async function startServer() {
     if (!result.isIdempotent) void s7Push(result.notificationIds).catch(() => {});
     return result;
   }));
-  app.post('/api/notifications/list', s7Route(async (req, uid) => {
+  app.post('/api/notifications/list', s7Route(async (req, uid, deadlineAt) => {
     const body = s7Body(req.body, ['bookingId', 'bookingCode']);
     if ([body.bookingId, body.bookingCode].some(v => v !== undefined && !s7Id(v))) throw s7Error(400, 'INVALID_NOTIFICATION_FILTER');
     return adminDb.runTransaction(async (transaction: any) => {
-      const read = s7Reader(transaction), caller = await s7Caller(read, uid), items = await s7Inbox(read, caller);
-      return { success: true, notifications: items.filter(n => (!body.bookingId || n.bookingId === body.bookingId) && (!body.bookingCode || n.bookingCode === body.bookingCode)).slice(0, 50) };
-    });
-  }));
+      const read = s7Reader(transaction, deadlineAt), caller = await s7Caller(read, uid);
+      const items = await s7Inbox(read, caller, { limit: 50, ...body });
+      return { success: true, notifications: items.slice(0, 50) };
+    }, { readOnly: true });
+  }, 20000));
   function s7ActionRequest(body: any, uid: string, action: string): { id: string; fingerprint: string } | null {
     if (body.requestId === undefined) return null; // Existing callers remain authenticated and scoped.
     if (!s7Id(body.requestId)) throw s7Error(400, 'INVALID_NOTIFICATION_REQUEST_ID');
