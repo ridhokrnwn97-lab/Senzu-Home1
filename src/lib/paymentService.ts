@@ -30,6 +30,7 @@ import { optimizeFileForFirestore } from './imageOptimizer';
 import { OFFICIAL_SENZU_BANK_ACCOUNTS, OFFICIAL_SENZU_QRIS, DEFAULT_PAYMENT_SETTINGS } from './paymentDefaults';
 export { OFFICIAL_SENZU_BANK_ACCOUNTS, OFFICIAL_SENZU_QRIS, DEFAULT_PAYMENT_SETTINGS } from './paymentDefaults';
 import { paymentRequest } from './paymentApi';
+import { trackMetaAdsAction } from './metaPixel';
 
 // ----------------- PAYMENT SETTINGS -----------------
 
@@ -300,6 +301,7 @@ export async function uploadPaymentProof(
     });
     const currentPaymentData = result.payment as PaymentRecord;
     const bookingCode = currentPaymentData.bookingCode || bookingId;
+    void trackMetaAdsAction('payment_proof_submitted', { entityId: bookingId, value: currentPaymentData.amount });
     // Retry of the same accepted proof must not duplicate notifications.
     if (result.isIdempotent) return { success: true };
 

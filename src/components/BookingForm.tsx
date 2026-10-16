@@ -56,6 +56,7 @@ import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { auth } from '../lib/firebase';
 import { getCustomerSavedAddresses } from '../lib/crmService';
 import { CustomerSavedAddress } from '../types/crm';
+import { trackMetaAdsAction } from '../lib/metaPixel';
 import { Gift, Coins, Tag, Ticket, Users, Sparkles as SparklesIcon } from 'lucide-react';
 
 interface BookingFormProps {
@@ -333,6 +334,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       if (cancelled || edited || !mountedRef.current || auth.currentUser?.uid !== uid) return;
       checkoutAttemptRef.current = null;
       try { globalThis.sessionStorage?.removeItem(`senzu:voucher-checkout:${uid}`); } catch {}
+      void trackMetaAdsAction('booking_submitted', { entityId: booking.id, value: booking.totalAmount });
       setSubmittedBooking(booking);
       onBookingSuccess(booking);
     }).catch(err => {
@@ -661,6 +663,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
       if (!isCurrentSubmission()) return;
       checkoutAttemptRef.current = null;
+      void trackMetaAdsAction('booking_submitted', { entityId: newBooking.id, value: newBooking.totalAmount });
       setSubmittedBooking(newBooking);
       onBookingSuccess(newBooking);
     } catch (err: any) {
