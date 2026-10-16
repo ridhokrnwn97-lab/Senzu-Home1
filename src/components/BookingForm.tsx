@@ -53,6 +53,7 @@ import {
   validatePromoCodeForBooking,
 } from '../lib/loyaltyService';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
+import { auth } from '../lib/firebase';
 import { getCustomerSavedAddresses } from '../lib/crmService';
 import { CustomerSavedAddress } from '../types/crm';
 import { Gift, Coins, Tag, Ticket, Users, Sparkles as SparklesIcon } from 'lucide-react';
@@ -151,26 +152,23 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Manager Master Data Areas (Prompt 15B)
   const [serviceAreas, setServiceAreas] = useState<ServiceArea[]>([]);
 
-  // Fetch Loyalty Account & Vouchers when customer enters phone number
+  const { currentCustomer, firebaseUser } = useCustomerAuth();
+  // An editable contact number cannot select somebody else's membership or vouchers.
   useEffect(() => {
-    const clean = customerWhatsApp.replace(/[^0-9]/g, '');
-    if (clean.length >= 10) {
-      const custId = `cust_${clean}`;
-      getLoyaltyAccountByCustomerId(custId).then((acc) => {
-        setCustomerLoyalty(acc);
-      }).catch(() => {});
-
-      getCustomerVouchers(custId).then((vouchers) => {
-        const available = vouchers.filter((v) => v.status === 'available');
-        setCustomerVouchersList(available);
-      }).catch(() => {});
-    } else {
-      setCustomerLoyalty(null);
-      setCustomerVouchersList([]);
-      setIsRedeemingPoints(false);
-      setPointsToRedeem(0);
-    }
-  }, [customerWhatsApp]);
+    let cancelled = false;
+    const uid = auth.currentUser?.uid;
+    const custId = uid && currentCustomer?.authUserId === uid ? (currentCustomer?.id || '') : '';
+    setCustomerLoyalty(null);
+    setCustomerVouchersList([]);
+    if (!uid || !custId) return;
+    getLoyaltyAccountByCustomerId(custId).then(acc => {
+      if (!cancelled && auth.currentUser?.uid === uid) setCustomerLoyalty(acc);
+    }).catch(() => {});
+    getCustomerVouchers(custId).then(vouchers => {
+      if (!cancelled && auth.currentUser?.uid === uid) setCustomerVouchersList(vouchers.filter(v => v.status === 'available'));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentCustomer?.id, currentCustomer?.authUserId, firebaseUser?.uid]);
 
   // Handle Repeat Booking prefill (services, address, notes, gender preference, but NOT dates/time)
   useEffect(() => {
@@ -197,7 +195,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
   }, [repeatData, services]);
 
-  const { currentCustomer, firebaseUser } = useCustomerAuth();
   const [savedCustomerAddresses, setSavedCustomerAddresses] = useState<CustomerSavedAddress[]>([]);
 
   // Customer Account Auto-Prefill (Prompt 17B: Guest booking remains optional, but if logged in, prefill)
@@ -235,6 +232,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   }, [currentCustomer, repeatData]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = React.useRef(false);
+  const checkoutAttemptRef = React.useRef<{ fingerprint: string; attemptId: string } | null>(null);
+  const currentCheckoutUidRef = React.useRef(auth.currentUser?.uid || '');
+  const previewSequenceRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [submittedBooking, setSubmittedBooking] = useState<Booking | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
@@ -293,6 +296,73 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   const totalAmount = pricingBreakdown.finalAmount;
 
+  const phoneDigitsForCheckout = customerWhatsApp.replace(/[^0-9]/g, '');
+  const normalizedCheckoutPhone = phoneDigitsForCheckout.startsWith('0') ? `62${phoneDigitsForCheckout.slice(1)}`
+    : (phoneDigitsForCheckout.startsWith('62') ? phoneDigitsForCheckout : `62${phoneDigitsForCheckout}`);
+  const checkoutFingerprint = JSON.stringify({
+    uid: auth.currentUser?.uid || '', customerId: currentCustomer?.id || '', customerName: customerName.trim(),
+    phone: normalizedCheckoutPhone, customerEmail: customerEmail.trim(), serviceId: selectedService?.id || '',
+    scheduleDate, scheduleTime, genderPreference, paymentMethod, address: address.trim(), latitude, longitude,
+    placeId, addressNotes: addressNotes.trim(), distanceKm, distanceMeters, selectedArea,
+    areaId: matchedArea?.id || '', areaName: matchedArea?.name || selectedArea,
+    customerNotes: customerNotes.trim(), promoId: appliedPromo?.id || '', promoCode: appliedPromo?.code || '',
+    customerVoucherId: selectedCustomerVoucher?.id || '', requestedPoints: isRedeemingPoints ? pointsToRedeem : 0,
+    referredBy: referralMsg?.valid ? referralMsg.referrerAccount?.customerId || '' : '',
+    referralCode: referralMsg?.valid ? referralInput.trim().toUpperCase() : '',
+  });
+  const latestCheckoutContextRef = React.useRef(checkoutFingerprint);
+  latestCheckoutContextRef.current = checkoutFingerprint;
+
+  // Read-only recovery after refresh: an uncommitted draft can never be submitted automatically.
+  React.useEffect(() => {
+    const uid = auth.currentUser?.uid || '';
+    let cancelled = false;
+    let pending: any = null;
+    try { pending = JSON.parse(globalThis.sessionStorage?.getItem(`senzu:voucher-checkout:${uid}`) || 'null'); } catch {}
+    if (!uid || pending?.uid !== uid || !pending?.draft || submittingRef.current) return;
+    // Automatic profile/address prefill is not a new user intent. Explicit interaction cancels this recovery result.
+    let edited = false;
+    const markEdited = () => { edited = true; };
+    const stopWatching = () => {
+      if (typeof window !== 'undefined') for (const event of ['input', 'change', 'click']) window.removeEventListener(event, markEdited, true);
+    };
+    if (typeof window !== 'undefined') for (const event of ['input', 'change', 'click']) window.addEventListener(event, markEdited, true);
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    createBooking({...pending.draft, voucherRecoveryOnly: true}).then(booking => {
+      if (cancelled || edited || !mountedRef.current || auth.currentUser?.uid !== uid) return;
+      checkoutAttemptRef.current = null;
+      try { globalThis.sessionStorage?.removeItem(`senzu:voucher-checkout:${uid}`); } catch {}
+      setSubmittedBooking(booking);
+      onBookingSuccess(booking);
+    }).catch(err => {
+      if (cancelled || edited || auth.currentUser?.uid !== uid) return;
+      if (err?.code === 'CHECKOUT_NOT_COMMITTED') {
+        setErrorMsg('Checkout sebelumnya belum tersimpan. Silakan lengkapi dan kirim pesanan kembali.');
+      } else if (err?.code !== 'SESSION_CHANGED') {
+        setErrorMsg(err?.message || 'Pemulihan checkout belum berhasil. Silakan coba kembali.');
+      }
+    }).finally(() => {
+      stopWatching();
+      submittingRef.current = false;
+      if (!cancelled && mountedRef.current) setIsSubmitting(false);
+    });
+    return () => { cancelled = true; stopWatching(); };
+  }, [firebaseUser?.uid]);
+
+  React.useEffect(() => {
+    const uid = auth.currentUser?.uid || '';
+    if (currentCheckoutUidRef.current && currentCheckoutUidRef.current !== uid) {
+      try { globalThis.sessionStorage?.removeItem(`senzu:voucher-checkout:${currentCheckoutUidRef.current}`); } catch {}
+    }
+    currentCheckoutUidRef.current = uid;
+    checkoutAttemptRef.current = null;
+    previewSequenceRef.current++;
+    setAppliedPromo(null);
+    setSelectedCustomerVoucher(null);
+    setSubmittedBooking(null);
+  }, [firebaseUser?.uid]);
+
   const handleApplyPromo = async (overrideCode?: string) => {
     setPromoError('');
     const codeToTest = (typeof overrideCode === 'string' ? overrideCode : promoInput).trim();
@@ -301,57 +371,105 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       return;
     }
     const custId = currentCustomer?.id || (customerWhatsApp ? `cust_${customerWhatsApp.replace(/[^0-9]/g, '')}` : undefined);
+    const activeAuthUid = auth.currentUser?.uid;
+    const requestSequence = ++previewSequenceRef.current;
+    const requestContext = latestCheckoutContextRef.current;
     const result = await validatePromoCodeForBooking({
       promoCode: codeToTest,
       servicePrice,
       serviceId: selectedService?.id,
       serviceCategory: selectedService?.category,
+      serviceCategoryId: selectedService?.categoryId,
       serviceDuration: selectedService?.duration,
       customerId: custId,
-      customerAuthUid: currentCustomer?.authUserId,
+      customerAuthUid: activeAuthUid,
       customerWhatsApp: customerWhatsApp.trim(),
       customerEmail: customerEmail.trim(),
       homeServiceFee,
+      latitude,
+      longitude,
+      distanceKm,
+      customerVoucherId: selectedCustomerVoucher?.id,
+      pointsToRedeem: isRedeemingPoints ? pointsToRedeem : 0,
     });
 
+    if (!mountedRef.current || requestSequence !== previewSequenceRef.current
+      || requestContext !== latestCheckoutContextRef.current || auth.currentUser?.uid !== activeAuthUid) return;
     if (!result.valid || !result.voucher) {
       setPromoError(result.errorMessage || 'Kode promo tidak valid atau tidak dapat digunakan.');
       setAppliedPromo(null);
+      checkoutAttemptRef.current = null;
     } else {
       setAppliedPromo(result.voucher);
       setPromoInput('');
+      checkoutAttemptRef.current = null;
     }
   };
 
-  // Revalidate active promo when customer identity changes to prevent bypass or stale success
+  // Revalidate active promo when customer identity, session, service, or fee changes to prevent bypass or stale success
   React.useEffect(() => {
-    if (!appliedPromo) return;
-    const phoneDigits = customerWhatsApp.replace(/[^0-9]/g, '');
-    if (phoneDigits.length < 9 && !currentCustomer) return;
+    if (!appliedPromo || submittingRef.current || checkoutAttemptRef.current) return;
+    const requestContext = latestCheckoutContextRef.current;
+    const requestSequence = ++previewSequenceRef.current;
+    const activeAuthUid = auth.currentUser?.uid;
+    if (!activeAuthUid) {
+      setAppliedPromo(null);
+      setPromoError('Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.');
+      checkoutAttemptRef.current = null;
+      return;
+    }
 
+    const phoneDigits = customerWhatsApp.replace(/[^0-9]/g, '');
     const timer = setTimeout(async () => {
+      if (submittingRef.current) return;
       const custId = currentCustomer?.id || (phoneDigits ? `cust_${phoneDigits}` : undefined);
       const res = await validatePromoCodeForBooking({
         promoCode: appliedPromo.code || '',
         servicePrice,
         serviceId: selectedService?.id,
         serviceCategory: selectedService?.category,
+        serviceCategoryId: selectedService?.categoryId,
         serviceDuration: selectedService?.duration,
         customerId: custId,
-        customerAuthUid: currentCustomer?.authUserId,
+        customerAuthUid: activeAuthUid,
         customerWhatsApp: customerWhatsApp.trim(),
         customerEmail: customerEmail.trim(),
         homeServiceFee,
+        latitude,
+        longitude,
+        distanceKm,
+        customerVoucherId: selectedCustomerVoucher?.id,
+        pointsToRedeem: isRedeemingPoints ? pointsToRedeem : 0,
       });
 
-      if (!res.valid) {
+      if (!mountedRef.current || requestSequence !== previewSequenceRef.current
+        || requestContext !== latestCheckoutContextRef.current || auth.currentUser?.uid !== activeAuthUid
+        || submittingRef.current || checkoutAttemptRef.current) return;
+      if (!res.valid && !(res as any).retryable) {
         setAppliedPromo(null);
-        setPromoError(res.errorMessage || 'Voucher tidak berlaku untuk akun/nomor WhatsApp ini.');
+        setPromoError(res.errorMessage || 'Voucher tidak berlaku untuk akun/layanan ini.');
+        checkoutAttemptRef.current = null;
       }
     }, 500);
 
-    return () => clearTimeout(timer);
-  }, [customerWhatsApp, currentCustomer?.id, currentCustomer?.authUserId, appliedPromo?.code, servicePrice]);
+    return () => { clearTimeout(timer); previewSequenceRef.current++; };
+  }, [
+    customerWhatsApp,
+    customerEmail,
+    currentCustomer?.id,
+    currentCustomer?.authUserId,
+    firebaseUser?.uid,
+    appliedPromo?.code,
+    selectedService?.id,
+    servicePrice,
+    homeServiceFee,
+    latitude,
+    longitude,
+    distanceKm,
+    selectedCustomerVoucher?.id,
+    isRedeemingPoints,
+    pointsToRedeem,
+  ]);
 
   const handleCheckReferral = async () => {
     if (!referralInput.trim()) return;
@@ -374,6 +492,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current || isSubmitting) return;
     setErrorMsg('');
 
     if (!selectedService) {
@@ -394,49 +513,92 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       return;
     }
 
+    if (isCalculatingRoute) {
+      setErrorMsg('Sedang menghitung rute lokasi Anda. Mohon tunggu...');
+      return;
+    }
+
+    if (routeError) {
+      setErrorMsg(routeError || 'Jarak lokasi belum dapat dihitung. Silakan periksa titik lokasi Anda atau coba kembali.');
+      return;
+    }
+
+    const canonicalAuthUid = auth.currentUser?.uid || undefined;
+    const requestContext = latestCheckoutContextRef.current;
+    const isCurrentSubmission = () => mountedRef.current
+      && (auth.currentUser?.uid || '') === (canonicalAuthUid || '')
+      && latestCheckoutContextRef.current === requestContext;
+    const usesServerCheckout = Boolean(appliedPromo || selectedCustomerVoucher || pricingBreakdown.pointsRedeemed > 0);
+    if (usesServerCheckout && !canonicalAuthUid) {
+      const authErrMsg = 'Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.';
+      setPromoError(authErrMsg);
+      setAppliedPromo(null);
+      setSelectedCustomerVoucher(null);
+      checkoutAttemptRef.current = null;
+      setErrorMsg(authErrMsg);
+      return;
+    }
+
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
       const targetCustomerId = currentCustomer ? currentCustomer.id : `cust_${customerWhatsApp.replace(/[^0-9]/g, '')}`;
 
-      // Pre-flight authoritative voucher revalidation to block any race condition or stale promo
-      if (appliedPromo) {
+      let checkoutAttemptId: string | undefined = undefined;
+      let isRetryingExistingAttempt = false;
+      if (usesServerCheckout) {
+        if (checkoutAttemptRef.current && checkoutAttemptRef.current.fingerprint === checkoutFingerprint) {
+          isRetryingExistingAttempt = true;
+        } else {
+          checkoutAttemptRef.current = {
+            fingerprint: checkoutFingerprint,
+            attemptId: `chk_${globalThis.crypto.randomUUID()}`,
+          };
+        }
+        checkoutAttemptId = checkoutAttemptRef.current.attemptId;
+      } else {
+        checkoutAttemptRef.current = null;
+      }
+
+      // Pre-flight authoritative voucher revalidation on fresh attempts to block stale promos
+      if (appliedPromo && !isRetryingExistingAttempt) {
         const recheck = await validatePromoCodeForBooking({
           promoCode: appliedPromo.code || '',
           servicePrice,
           serviceId: selectedService.id,
           serviceCategory: selectedService.category,
+          serviceCategoryId: selectedService.categoryId,
           serviceDuration: selectedService.duration,
           customerId: targetCustomerId,
-          customerAuthUid: currentCustomer?.authUserId,
+          customerAuthUid: canonicalAuthUid,
           customerWhatsApp: customerWhatsApp.trim(),
           customerEmail: customerEmail.trim(),
           homeServiceFee,
+          latitude,
+          longitude,
+          distanceKm,
+          customerVoucherId: selectedCustomerVoucher?.id,
+          pointsToRedeem: isRedeemingPoints ? pointsToRedeem : 0,
+          checkoutAttemptId,
         });
 
+        if (!isCurrentSubmission()) return;
         if (!recheck.valid || !recheck.voucher) {
+          if ((recheck as any).retryable) {
+            setErrorMsg(recheck.errorMessage || 'Gagal memvalidasi voucher. Silakan coba kirim kembali.');
+            return;
+          }
           setPromoError(recheck.errorMessage || 'Voucher promo sudah tidak dapat digunakan.');
           setAppliedPromo(null);
-          setIsSubmitting(false);
+          checkoutAttemptRef.current = null;
           setErrorMsg(recheck.errorMessage || 'Voucher tidak lagi memenuhi syarat. Total pembayaran telah diperbarui.');
           return;
         }
       }
 
-      if (isCalculatingRoute) {
-        setErrorMsg('Sedang menghitung rute lokasi Anda. Mohon tunggu...');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (routeError) {
-        setErrorMsg(routeError || 'Jarak lokasi belum dapat dihitung. Silakan periksa titik lokasi Anda atau coba kembali.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const canonicalAuthUid = currentCustomer?.authUserId || firebaseUser?.uid || undefined;
-
       const newBooking = await createBooking({
+        checkoutAttemptId,
+        customerVoucherId: selectedCustomerVoucher ? selectedCustomerVoucher.id : undefined,
         customerId: targetCustomerId,
         customerAuthUid: canonicalAuthUid,
         authUserId: canonicalAuthUid,
@@ -497,19 +659,58 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         customerNotes: customerNotes.trim(),
       });
 
+      if (!isCurrentSubmission()) return;
+      checkoutAttemptRef.current = null;
       setSubmittedBooking(newBooking);
       onBookingSuccess(newBooking);
     } catch (err: any) {
+      if (!isCurrentSubmission()) return;
       console.error('Error creating booking:', err);
-      const msg = err.message || '';
-      if (msg.includes('sudah pernah digunakan') || msg.includes('Voucher') || msg.includes('voucher') || msg.includes('promo')) {
-        setPromoError(msg);
-        setAppliedPromo(null);
-        setErrorMsg(msg);
-      } else {
+      const msg = err?.message || '';
+      const errCode = typeof err?.code === 'string' ? err.code : '';
+      const isTransientError =
+        errCode === 'NETWORK_ERROR' ||
+        errCode === 'MALFORMED_RESPONSE' ||
+        errCode === 'VOUCHER_REDEMPTION_UNAVAILABLE' ||
+        errCode === 'VOUCHER_CHECKOUT_UNAVAILABLE' ||
+        errCode === 'VOUCHER_VALIDATION_UNAVAILABLE' ||
+        errCode === 'AUTH_SERVICE_UNAVAILABLE' ||
+        err?.status === 503 ||
+        err?.status === 502 ||
+        err?.status === 504;
+
+      if (isTransientError) {
         setErrorMsg(msg || 'Gagal membuat pesanan. Pastikan koneksi internet Anda stabil.');
+      } else {
+        checkoutAttemptRef.current = null;
+
+        if (
+          errCode.startsWith('VOUCHER_') ||
+          errCode.startsWith('CUSTOMER_VOUCHER_') ||
+          errCode === 'PRICE_MISMATCH' ||
+          errCode === 'DISCOUNT_MISMATCH' ||
+          errCode === 'HOME_SERVICE_FEE_MISMATCH' ||
+          errCode === 'AUTH_REQUIRED' ||
+          errCode === 'SESSION_CHANGED' ||
+          msg.includes('sudah pernah digunakan') ||
+          msg.includes('Voucher') ||
+          msg.includes('voucher') ||
+          msg.includes('promo') ||
+          msg.includes('diskon')
+        ) {
+          setPromoError(msg || 'Voucher tidak dapat digunakan pada pesanan ini.');
+          if (errCode.startsWith('CUSTOMER_VOUCHER_') || (!appliedPromo && selectedCustomerVoucher)) {
+            setSelectedCustomerVoucher(null);
+          } else {
+            setAppliedPromo(null);
+          }
+          setErrorMsg(msg || 'Voucher tidak lagi memenuhi syarat. Total pembayaran telah diperbarui.');
+        } else {
+          setErrorMsg(msg || 'Gagal membuat pesanan. Pastikan koneksi internet Anda stabil.');
+        }
       }
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -1080,7 +1281,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setAppliedPromo(null)}
+                      onClick={() => {
+                        setAppliedPromo(null);
+                        setPromoError('');
+                        checkoutAttemptRef.current = null;
+                      }}
                       className="text-slate-400 hover:text-slate-600 text-xs underline cursor-pointer"
                     >
                       Batal
@@ -1102,7 +1307,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       return (
                         <div
                           key={cv.id}
-                          onClick={() => setSelectedCustomerVoucher(isSelected ? null : cv)}
+                          onClick={() => {
+                            setSelectedCustomerVoucher(isSelected ? null : cv);
+                            setPromoError('');
+                            checkoutAttemptRef.current = null;
+                          }}
                           className={`p-2.5 rounded-xl border cursor-pointer transition text-xs flex items-center justify-between ${
                             isSelected
                               ? 'border-[#082A4F] bg-[#082A4F]/5 text-[#082A4F] ring-1 ring-[#082A4F]'

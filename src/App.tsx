@@ -241,25 +241,48 @@ function MainApp() {
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     if (currentUser) {
+      const role = currentUser.role as any;
+      const canonicalStaffId =
+        role === 'therapist'
+          ? currentUser.therapistId || (currentUser as any)?.staffUserId || (currentUser as any)?.id || currentUser.uid || ''
+          : (currentUser as any)?.id || (currentUser as any)?.staffUserId || currentUser.uid || role;
+      if (role === 'therapist' && !canonicalStaffId) {
+        setUnreadNotifCount(0);
+        return;
+      }
       unsubscribe = subscribeToRoleNotifications(
-        currentUser.role as any,
-        (currentUser as any)?.id || currentUser?.uid || 'user',
+        role,
+        canonicalStaffId,
         (notifs) => {
           const unread = notifs.filter((n) => !n.read).length;
           setUnreadNotifCount(unread);
         }
       );
-    } else if (initialTrackCode) {
-      unsubscribe = subscribeToCustomerNotifications(initialTrackCode, (notifs) => {
-        const unread = notifs.filter((n) => !n.read).length;
-        setUnreadNotifCount(unread);
-      });
+    } else if (firebaseUser?.uid || currentCustomer?.id) {
+      unsubscribe = subscribeToCustomerNotifications(
+        {
+          customerId: currentCustomer?.id || firebaseUser?.uid || '',
+          customerAuthUid: firebaseUser?.uid || undefined,
+          bookingCode: initialTrackCode || undefined,
+        },
+        (notifs) => {
+          const unread = notifs.filter((n) => !n.read).length;
+          setUnreadNotifCount(unread);
+        }
+      );
+    } else {
+      setUnreadNotifCount(0);
     }
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [currentUser, initialTrackCode]);
+  }, [
+    currentUser,
+    firebaseUser?.uid,
+    currentCustomer?.id,
+    initialTrackCode,
+  ]);
 
   // Load initial data and subscriptions with Phase 6 & Phase 7 Privacy & Data Minimization
   useEffect(() => {
@@ -1097,7 +1120,20 @@ function MainApp() {
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
         currentUserRole={(currentUser?.role as any) || 'customer'}
-        currentUserId={(currentUser as any)?.id || currentUser?.uid}
+        currentUserId={
+          currentUser
+            ? currentUser.role === 'therapist'
+              ? currentUser.therapistId || (currentUser as any)?.staffUserId || (currentUser as any)?.id || currentUser.uid
+              : (currentUser as any)?.id || (currentUser as any)?.staffUserId || currentUser.uid
+            : currentCustomer?.id || firebaseUser?.uid
+        }
+        therapistId={
+          currentUser?.role === 'therapist'
+            ? currentUser.therapistId || (currentUser as any)?.staffUserId || (currentUser as any)?.id || currentUser.uid
+            : undefined
+        }
+        customerId={!currentUser ? currentCustomer?.id || firebaseUser?.uid : undefined}
+        customerAuthUid={!currentUser ? firebaseUser?.uid || undefined : undefined}
         customerBookingCode={initialTrackCode}
         onNavigateToAction={(actionUrl) => {
           if (actionUrl.startsWith('/track/')) {

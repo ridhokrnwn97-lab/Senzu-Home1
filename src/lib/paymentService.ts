@@ -178,20 +178,6 @@ export function getPaymentStatusBadgeStyle(status?: string): {
 
 // ----------------- AUDIT TRAIL / EVENTS -----------------
 
-export async function addPaymentEvent(event: Omit<PaymentEvent, 'id' | 'createdAt'>): Promise<void> {
-  try {
-    const id = `pe_${event.paymentId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const newEvent: PaymentEvent = {
-      ...event,
-      id,
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'payment_status_history', id), newEvent);
-  } catch (err) {
-    console.warn('Failed to record payment event:', err);
-  }
-}
-
 export async function getPaymentEvents(paymentId: string): Promise<PaymentEvent[]> {
   try {
     const q = query(
@@ -514,58 +500,191 @@ export async function cssRejectPaymentTransaction(
   }
 }
 
+const ALLOWED_ADMIN_CORRECTION_PAYMENT_STATUSES = new Set<PaymentStatusCode>([
+  'unpaid',
+  'pending_manual_verification',
+  'paid',
+  'payment_rejected',
+  'pending',
+  'failed',
+  'expired',
+  'cancelled',
+  'refunded',
+  'partially_refunded',
+]);
+
+function isValidPaymentCorrectionDocId(value: unknown, maxLen = 128): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= maxLen &&
+    value.trim() === value &&
+    !value.includes('/') &&
+    !/[\x00-\x1F\x7F\s]/.test(value)
+  );
+}
+
+function generatePaymentCorrectionRequestId(): string {
+  const ts = Date.now().toString(36);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `pcorr_${ts}_${hex}`;
+  }
+  return `pcorr_${ts}_${Math.random().toString(36).slice(2, 12)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 /**
  * Admin: Payment Correction
- * Allows authorized admin to adjust payment state with mandatory reason & audit
+ * Allows authorized admin/manager to adjust payment state via authoritative server transaction
  */
 export async function adminCorrectPayment(
   payment: PaymentRecord,
   booking: Booking,
-  staffId: string,
-  staffName: string,
+  _staffId: string,
+  _staffName: string,
   newStatus: PaymentStatusCode,
   reason: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!reason.trim()) {
+  if (typeof reason !== 'string' || !reason.trim()) {
     return { success: false, error: 'Alasan koreksi pembayaran wajib diisi.' };
   }
 
-  try {
-    const now = new Date().toISOString();
-    const paymentDocRef = doc(db, 'payments', payment.id);
-    await updateDoc(paymentDocRef, {
-      status: newStatus,
-      correctedBy: staffName,
-      correctedAt: now,
-      correctionReason: reason,
-      updatedAt: now,
-    });
-
-    const bookingDocRef = doc(db, 'bookings', booking.id);
-    await updateDoc(bookingDocRef, {
-      paymentStatus: newStatus,
-      updatedAt: now,
-    });
-
-    await addPaymentEvent({
-      paymentId: payment.id,
-      bookingId: booking.id,
-      bookingCode: booking.bookingCode,
-      oldStatus: payment.status,
-      newStatus,
-      source: 'admin',
-      userId: staffId,
-      userName: staffName,
-      userRole: 'admin',
-      eventType: 'payment_corrected',
-      note: `Koreksi status oleh Admin: ${reason}`,
-    });
-
-    return { success: true };
-  } catch (err) {
-    console.error('Payment correction error:', err);
-    return { success: false, error: 'Gagal melakukan koreksi pembayaran.' };
+  const cleanReason = reason.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+  if (!cleanReason || cleanReason.length > 500) {
+    return { success: false, error: 'Alasan koreksi pembayaran tidak valid atau melebihi batas.' };
   }
+
+  const paymentId = typeof payment?.id === 'string' ? payment.id.trim() : '';
+  const bookingId = typeof booking?.id === 'string' ? booking.id.trim() : '';
+  if (
+    !isValidPaymentCorrectionDocId(paymentId, 128) ||
+    !isValidPaymentCorrectionDocId(bookingId, 128)
+  ) {
+    return { success: false, error: 'ID pembayaran atau reservasi tidak valid.' };
+  }
+
+  if (
+    payment?.bookingId !== undefined &&
+    payment?.bookingId !== null &&
+    payment?.bookingId !== '' &&
+    (typeof payment.bookingId !== 'string' || payment.bookingId.trim() !== bookingId)
+  ) {
+    return { success: false, error: 'ID reservasi tidak sesuai dengan data pembayaran.' };
+  }
+
+  if (
+    typeof newStatus !== 'string' ||
+    !ALLOWED_ADMIN_CORRECTION_PAYMENT_STATUSES.has(newStatus)
+  ) {
+    return { success: false, error: 'Status koreksi pembayaran tidak valid.' };
+  }
+
+  const initialSession = auth?.currentUser;
+  const initialUid =
+    initialSession && typeof initialSession.uid === 'string' ? initialSession.uid.trim() : '';
+  if (
+    !initialSession ||
+    !initialUid ||
+    initialSession.uid !== initialUid ||
+    !isValidPaymentCorrectionDocId(initialUid, 128) ||
+    typeof initialSession.getIdToken !== 'function'
+  ) {
+    return {
+      success: false,
+      error: 'Autentikasi Manager/Admin diperlukan untuk melakukan koreksi pembayaran.',
+    };
+  }
+
+  const requestId = generatePaymentCorrectionRequestId();
+  const payload = {
+    bookingId,
+    newStatus,
+    reason: cleanReason,
+    requestId,
+  };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const currentSession = auth?.currentUser;
+      if (
+        !currentSession ||
+        currentSession.uid !== initialUid ||
+        typeof currentSession.getIdToken !== 'function'
+      ) {
+        return { success: false, error: 'Sesi pengguna telah berubah atau berakhir.' };
+      }
+
+      const rawToken = await currentSession.getIdToken();
+      const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+      if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        return { success: false, error: 'Sesi pengguna telah berubah atau berakhir.' };
+      }
+
+      const res = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/correct`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        return { success: false, error: 'Sesi pengguna telah berubah atau berakhir.' };
+      }
+
+      const data = await res.json().catch(() => null);
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        return { success: false, error: 'Sesi pengguna telah berubah atau berakhir.' };
+      }
+
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        const errMsg =
+          (typeof data?.error === 'string' && data.error.trim()) ||
+          (typeof data?.message === 'string' && data.message.trim()) ||
+          'Gagal melakukan koreksi pembayaran.';
+        return { success: false, error: errMsg };
+      }
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        data.success !== true ||
+        !data.payment ||
+        typeof data.payment !== 'object' ||
+        Array.isArray(data.payment) ||
+        data.payment.id !== paymentId ||
+        data.payment.status !== newStatus ||
+        (data.bookingId !== undefined && data.bookingId !== bookingId)
+      ) {
+        return { success: false, error: 'Respons koreksi pembayaran dari server tidak valid.' };
+      }
+
+      return { success: true };
+    } catch (err) {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        return { success: false, error: 'Sesi pengguna telah berubah atau berakhir.' };
+      }
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 40));
+        continue;
+      }
+      console.error('Payment correction error:', err);
+      return { success: false, error: 'Gagal melakukan koreksi pembayaran.' };
+    }
+  }
+
+  return { success: false, error: 'Gagal melakukan koreksi pembayaran.' };
 }
 
 // ----------------- SUBSCRIPTIONS & QUERIES -----------------

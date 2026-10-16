@@ -11,7 +11,7 @@ import {
   limit,
   onSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import {
   UnifiedCase,
   CaseEvent,
@@ -749,6 +749,37 @@ export async function deliverServiceRecovery(params: {
   });
 }
 
+const ALLOWED_MANUAL_REFUND_STATUSES = new Set<RefundRequestStatus>([
+  'APPROVED',
+  'PROCESSING_MANUAL',
+  'COMPLETED_MANUAL',
+  'REJECTED',
+]);
+
+function isValidManualRefundDocId(value: unknown, maxLen = 128): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= maxLen &&
+    value.trim() === value &&
+    !value.includes('/') &&
+    !/[\x00-\x1F\x7F\s]/.test(value)
+  );
+}
+
+function generateManualRefundRequestId(): string {
+  const ts = Date.now().toString(36);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `mref_${ts}_${hex}`;
+  }
+  return `mref_${ts}_${Math.random().toString(36).slice(2, 12)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 /**
  * Update Manual Refund Status (Manual Bank / QRIS Transfer without Gateway)
  */
@@ -765,75 +796,241 @@ export async function updateManualRefundStatus(params: {
   actorRole: string;
   note?: string;
 }): Promise<void> {
-  if (!params.caseItem.recovery) {
-    throw new Error('Kasus ini belum memiliki recovery record.');
+  const caseId = typeof params?.caseItem?.id === 'string' ? params.caseItem.id.trim() : '';
+  if (!isValidManualRefundDocId(caseId, 128)) {
+    throw new Error('ID kasus tidak valid.');
   }
 
-  const now = new Date().toISOString();
-  const caseRef = doc(db, CASES_COLLECTION, params.caseItem.id);
-  const rec = params.caseItem.recovery;
+  if (
+    typeof params?.newStatus !== 'string' ||
+    !ALLOWED_MANUAL_REFUND_STATUSES.has(params.newStatus)
+  ) {
+    throw new Error('Status refund manual tidak valid.');
+  }
 
-  const updatedRec: CaseRecovery = {
-    ...rec,
-    refundStatus: params.newStatus,
-    refundAmount: params.refundAmount !== undefined ? params.refundAmount : rec.refundAmount,
-    refundMethod: params.refundMethod || rec.refundMethod,
-    refundDate: params.refundDate || rec.refundDate || now.split('T')[0],
-    refundReference: params.refundReference || rec.refundReference,
-    refundProofUrl: params.refundProofUrl || rec.refundProofUrl,
-    refundProcessedBy: params.actorId,
-    refundProcessedByName: params.actorName,
-    refundProcessedAt: now,
-  };
-
-  await updateDoc(caseRef, cleanFirestoreData({
-    recovery: updatedRec,
-    updatedAt: now,
-  }));
-
-  await addCaseTimelineEvent({
-    caseId: params.caseItem.id,
-    caseCode: params.caseItem.caseCode,
-    eventType: 'refund.status_updated',
-    actorId: params.actorId,
-    actorName: params.actorName,
-    actorRole: params.actorRole,
-    summary: `Status Refund Manual diperbarui: ${params.newStatus}`,
-    details: `${params.refundMethod || 'Transfer'} - Rp ${(updatedRec.refundAmount || 0).toLocaleString('id-ID')} | Ref: ${params.refundReference || '-'} | Catatan: ${params.note || '-'}`,
-    oldValue: rec.refundStatus,
-    newValue: params.newStatus,
-  });
-
-  // If completed, record to payment history without deleting original payment record
-  if (params.newStatus === 'COMPLETED_MANUAL') {
-    try {
-      const historyId = `psh_ref_${Date.now()}`;
-      await setDoc(doc(db, 'payment_status_history', historyId), cleanFirestoreData({
-        id: historyId,
-        bookingId: params.caseItem.bookingId,
-        bookingCode: params.caseItem.bookingCode,
-        amount: updatedRec.refundAmount,
-        oldStatus: 'paid',
-        newStatus: 'refunded',
-        reason: `Manual Refund Kasus ${params.caseItem.caseCode}: ${params.note || 'Pengembalian dana disetujui Manager'}`,
-        updatedBy: params.actorName,
-        updatedByRole: params.actorRole,
-        timestamp: now,
-      }));
-    } catch (payErr) {
-      console.warn('Could not add payment status history for refund:', payErr);
+  if (params.refundAmount !== undefined && params.refundAmount !== null) {
+    if (
+      typeof params.refundAmount !== 'number' ||
+      !Number.isFinite(params.refundAmount) ||
+      params.refundAmount <= 0 ||
+      params.refundAmount > 100_000_000
+    ) {
+      throw new Error('Nominal refund manual tidak valid.');
     }
   }
 
-  await addOperationalAuditLog({
-    bookingId: params.caseItem.bookingId,
-    bookingCode: params.caseItem.bookingCode,
-    customerId: params.caseItem.customerId,
-    action: 'refund_status_updated',
-    actorRole: (params.actorRole || 'staff').toLowerCase() as any,
-    actorName: params.actorName,
-    note: `Refund manual kasus ${params.caseItem.caseCode} diubah menjadi ${params.newStatus} (Rp ${(updatedRec.refundAmount || 0).toLocaleString('id-ID')})`,
-  });
+  let cleanMethod: string | undefined;
+  if (params.refundMethod !== undefined && params.refundMethod !== null) {
+    if (typeof params.refundMethod !== 'string') {
+      throw new Error('Metode refund manual tidak valid.');
+    }
+    const trimmed = params.refundMethod.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    if (!trimmed || trimmed.length > 100) {
+      throw new Error('Metode refund manual tidak valid.');
+    }
+    cleanMethod = trimmed;
+  }
+
+  let cleanDate: string | undefined;
+  if (params.refundDate !== undefined && params.refundDate !== null) {
+    if (typeof params.refundDate !== 'string') {
+      throw new Error('Tanggal refund manual tidak valid.');
+    }
+    const trimmed = params.refundDate.trim();
+    if (!trimmed || trimmed.length > 40 || Number.isNaN(Date.parse(trimmed))) {
+      throw new Error('Tanggal refund manual tidak valid.');
+    }
+    cleanDate = trimmed;
+  }
+
+  let cleanReference: string | undefined;
+  if (params.refundReference !== undefined && params.refundReference !== null) {
+    if (typeof params.refundReference !== 'string') {
+      throw new Error('Referensi refund manual tidak valid.');
+    }
+    const trimmed = params.refundReference.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    if (trimmed.length > 150) {
+      throw new Error('Referensi refund manual melebihi batas.');
+    }
+    if (trimmed) cleanReference = trimmed;
+  }
+
+  let cleanProofUrl: string | undefined;
+  if (params.refundProofUrl !== undefined && params.refundProofUrl !== null) {
+    if (typeof params.refundProofUrl !== 'string') {
+      throw new Error('URL bukti refund manual tidak valid.');
+    }
+    const trimmed = params.refundProofUrl.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    if (trimmed.length > 2000) {
+      throw new Error('URL bukti refund manual melebihi batas.');
+    }
+    if (trimmed) cleanProofUrl = trimmed;
+  }
+
+  let cleanNote: string | undefined;
+  if (params.note !== undefined && params.note !== null) {
+    if (typeof params.note !== 'string') {
+      throw new Error('Catatan refund manual tidak valid.');
+    }
+    const trimmed = params.note.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    if (trimmed.length > 1000) {
+      throw new Error('Catatan refund manual melebihi batas.');
+    }
+    if (trimmed) cleanNote = trimmed;
+  }
+
+  const initialSession = auth?.currentUser;
+  const initialUid =
+    initialSession && typeof initialSession.uid === 'string' ? initialSession.uid.trim() : '';
+  if (
+    !initialSession ||
+    !initialUid ||
+    initialSession.uid !== initialUid ||
+    !isValidManualRefundDocId(initialUid, 128) ||
+    typeof initialSession.getIdToken !== 'function'
+  ) {
+    throw new Error('Autentikasi Manager diperlukan untuk memperbarui status refund manual.');
+  }
+
+  let cleanBookingId: string | undefined;
+  if (
+    params.caseItem?.bookingId !== undefined &&
+    params.caseItem?.bookingId !== null &&
+    params.caseItem?.bookingId !== ''
+  ) {
+    const trimmedBkId =
+      typeof params.caseItem.bookingId === 'string' ? params.caseItem.bookingId.trim() : '';
+    if (!isValidManualRefundDocId(trimmedBkId, 128)) {
+      throw new Error('ID reservasi pada kasus tidak valid.');
+    }
+    cleanBookingId = trimmedBkId;
+  }
+
+  let cleanBookingCode: string | undefined;
+  if (
+    params.caseItem?.bookingCode !== undefined &&
+    params.caseItem?.bookingCode !== null &&
+    params.caseItem?.bookingCode !== ''
+  ) {
+    if (typeof params.caseItem.bookingCode !== 'string') {
+      throw new Error('Kode reservasi pada kasus tidak valid.');
+    }
+    const trimmedBkCode = params.caseItem.bookingCode.trim().toUpperCase();
+    if (
+      !isValidManualRefundDocId(trimmedBkCode, 64) ||
+      trimmedBkCode.length < 3 ||
+      /^bk_/i.test(trimmedBkCode) ||
+      !/^[A-Z0-9_-]+$/.test(trimmedBkCode)
+    ) {
+      throw new Error('Kode reservasi pada kasus tidak valid.');
+    }
+    cleanBookingCode = trimmedBkCode;
+  }
+
+  const requestId = generateManualRefundRequestId();
+  const payload: Record<string, unknown> = {
+    newStatus: params.newStatus,
+    requestId,
+    ...(cleanBookingId !== undefined ? { bookingId: cleanBookingId } : {}),
+    ...(cleanBookingCode !== undefined ? { bookingCode: cleanBookingCode } : {}),
+    ...(params.refundAmount !== undefined && params.refundAmount !== null
+      ? { refundAmount: params.refundAmount }
+      : {}),
+    ...(cleanMethod !== undefined ? { refundMethod: cleanMethod } : {}),
+    ...(cleanDate !== undefined ? { refundDate: cleanDate } : {}),
+    ...(cleanReference !== undefined ? { refundReference: cleanReference } : {}),
+    ...(cleanProofUrl !== undefined ? { refundProofUrl: cleanProofUrl } : {}),
+    ...(cleanNote !== undefined ? { note: cleanNote } : {}),
+  };
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const currentSession = auth?.currentUser;
+      if (
+        !currentSession ||
+        currentSession.uid !== initialUid ||
+        typeof currentSession.getIdToken !== 'function'
+      ) {
+        throw new Error('Sesi pengguna telah berubah atau berakhir.');
+      }
+
+      const rawToken = await currentSession.getIdToken();
+      const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+      if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        throw new Error('Sesi pengguna telah berubah atau berakhir.');
+      }
+
+      const res = await fetch(
+        `/api/cases/${encodeURIComponent(caseId)}/manual-refund-status`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        throw new Error('Sesi pengguna telah berubah atau berakhir.');
+      }
+
+      const data = await res.json().catch(() => null);
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        throw new Error('Sesi pengguna telah berubah atau berakhir.');
+      }
+
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        const errMsg =
+          (typeof data?.error === 'string' && data.error.trim()) ||
+          (typeof data?.message === 'string' && data.message.trim()) ||
+          'Gagal memperbarui status refund manual.';
+        const nonRetryableErr = new Error(errMsg);
+        (nonRetryableErr as any).nonRetryable = true;
+        throw nonRetryableErr;
+      }
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        data.success !== true ||
+        data.caseId !== caseId ||
+        !data.recovery ||
+        typeof data.recovery !== 'object' ||
+        Array.isArray(data.recovery) ||
+        data.recovery.refundStatus !== params.newStatus
+      ) {
+        const badPayloadErr = new Error('Respons pembaruan refund manual dari server tidak valid.');
+        (badPayloadErr as any).nonRetryable = true;
+        throw badPayloadErr;
+      }
+
+      return;
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error('Gagal memperbarui status refund manual.');
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        throw new Error('Sesi pengguna telah berubah atau berakhir.');
+      }
+      if (err?.nonRetryable) {
+        throw lastError;
+      }
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 40));
+        continue;
+      }
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error('Gagal memperbarui status refund manual.');
 }
 
 /**

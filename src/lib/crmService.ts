@@ -1036,18 +1036,171 @@ export async function updateCrmTaskStatus(
 // ----------------- AUDIT LOGS -----------------
 
 export async function addCustomerAuditLog(
-  logData: Omit<CustomerAuditLog, 'id' | 'timestamp'>
+  logData: Omit<CustomerAuditLog, 'id' | 'timestamp'> & { requestId?: string }
 ): Promise<void> {
-  try {
-    const logId = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const entry: CustomerAuditLog = {
-      ...logData,
-      id: logId,
-      timestamp: new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'customer_audit_logs', logId), cleanFirestoreData(entry));
-  } catch (err) {
-    console.warn('Audit log write error:', err);
+  const isValidAuditId = (val: unknown, maxBytes = 128): val is string => {
+    if (typeof val !== 'string') return false;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed !== val) return false;
+    if (trimmed === '.' || trimmed === '..') return false;
+    if (new TextEncoder().encode(trimmed).length > maxBytes) return false;
+    if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+    return true;
+  };
+
+  const ALLOWED_ACTIONS = new Set<string>([
+    'created',
+    'updated',
+    'merged',
+    'status_change',
+    'status_changed',
+    'vip_change',
+    'promoted_to_vip',
+    'demoted_from_vip',
+    'segment_change',
+    'note_added',
+    'tag_added',
+    'review_added',
+  ]);
+
+  if (!logData || typeof logData !== 'object' || Array.isArray(logData)) return;
+
+  const rawCustomerId = typeof logData.customerId === 'string' ? logData.customerId.trim() : '';
+  if (!isValidAuditId(rawCustomerId, 128) || logData.customerId !== rawCustomerId) return;
+
+  const rawAction = typeof logData.action === 'string' ? logData.action.trim() : '';
+  if (!ALLOWED_ACTIONS.has(rawAction) || logData.action !== rawAction) return;
+
+  if (
+    logData.details !== undefined &&
+    logData.details !== null &&
+    (typeof logData.details !== 'string' ||
+      logData.details.length > 1000 ||
+      new TextEncoder().encode(logData.details).length > 1000)
+  ) {
+    return;
+  }
+  const cleanDetails =
+    typeof logData.details === 'string'
+      ? logData.details.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+      : '';
+  if (rawAction !== 'created' && !cleanDetails) return;
+
+  let requestId = '';
+  if (logData.requestId !== undefined && logData.requestId !== null && logData.requestId !== '') {
+    if (typeof logData.requestId !== 'string' || !isValidAuditId(logData.requestId, 128)) {
+      return;
+    }
+    requestId = logData.requestId;
+  } else {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+      requestId = `req_${globalThis.crypto.randomUUID().replace(/-/g, '')}`;
+    } else if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      requestId = `req_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    } else {
+      requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+  }
+
+  const session = auth?.currentUser;
+  const initialUid = typeof session?.uid === 'string' ? session.uid.trim() : '';
+  if (
+    !session ||
+    !initialUid ||
+    session.uid !== initialUid ||
+    !isValidAuditId(initialUid, 128) ||
+    typeof session.getIdToken !== 'function'
+  ) {
+    return;
+  }
+
+  const payload = {
+    customerId: rawCustomerId,
+    action: rawAction,
+    details: cleanDetails,
+    requestId,
+  };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+      const rawToken = await session.getIdToken();
+      const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+      if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      let res: Response;
+      try {
+        res = await fetch('/api/customer-audit/append', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (networkErr) {
+        if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+        if (attempt === 0) continue;
+        console.warn('Audit log write network error:', networkErr);
+        return;
+      }
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      if ((res.status >= 500 && res.status <= 599) || res.status === 429) {
+        if (attempt === 0) continue;
+        console.warn('Audit log write unavailable:', res.status);
+        return;
+      }
+
+      if (!res.ok) {
+        console.warn('Audit log write rejected:', res.status);
+        return;
+      }
+
+      const auditLog = data?.auditLog;
+      const isValidResponse =
+        Boolean(data && typeof data === 'object' && !Array.isArray(data)) &&
+        data.success === true &&
+        typeof data.id === 'string' &&
+        isValidAuditId(data.id, 128) &&
+        Boolean(auditLog && typeof auditLog === 'object' && !Array.isArray(auditLog)) &&
+        auditLog.id === data.id &&
+        auditLog.customerId === rawCustomerId &&
+        auditLog.action === rawAction &&
+        typeof auditLog.performedBy === 'string' &&
+        auditLog.performedBy.trim().length > 0 &&
+        typeof auditLog.details === 'string' &&
+        auditLog.details.trim().length > 0 &&
+        typeof auditLog.timestamp === 'string' &&
+        !Number.isNaN(Date.parse(auditLog.timestamp)) &&
+        (auditLog.actorUid === undefined || auditLog.actorUid === initialUid) &&
+        (auditLog.actorId === undefined || auditLog.actorId === initialUid) &&
+        (auditLog.requestId === undefined ||
+          auditLog.requestId === requestId ||
+          (rawAction === 'created' && isValidAuditId(auditLog.requestId, 128)));
+
+      if (!isValidResponse) {
+        console.warn('Audit log write returned invalid response payload');
+        return;
+      }
+
+      return;
+    } catch (err) {
+      console.warn('Audit log write error:', err);
+      return;
+    }
   }
 }
 

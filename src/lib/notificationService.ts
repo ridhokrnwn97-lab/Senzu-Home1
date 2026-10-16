@@ -1,8 +1,3 @@
-/**
- * Centralized Notification Service for Senzu Home
- * Event-Driven, Realtime, Role-Based Notification Engine
- */
-
 import {
   collection,
   doc,
@@ -14,1014 +9,1381 @@ import {
   query,
   where,
   onSnapshot,
-  orderBy,
+  writeBatch,
   limit,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import {
-  InAppNotification,
   NotificationEvent,
-  NotificationDelivery,
-  NotificationDevice,
-  NotificationRecipientRole,
   NotificationEventType,
-  NotificationPriority,
+  NotificationRecipientRole,
+  InAppNotification,
+  NotificationDelivery,
   AdminNotificationSettings,
   DEFAULT_NOTIFICATION_SETTINGS,
+  NotificationDevice,
 } from '../types/notification';
-import {
-  SenzuWhatsAppProvider,
-  SenzuEmailProvider,
-  renderWhatsAppTemplate,
-  showBrowserNotification,
-  playNotificationSound,
-} from './notificationChannels';
 import { cleanFirestoreData } from './utils';
 
-const whatsappProvider = new SenzuWhatsAppProvider();
-const emailProvider = new SenzuEmailProvider();
+const SETTINGS_DOC_ID = 'default';
 
-// In-memory deduplication cache to prevent concurrent duplicate notification bursts
-const recentNotificationKeys = new Set<string>();
-
-function getDeduplicationKey(
-  eventType: NotificationEventType,
-  bookingId?: string,
-  recipientRole?: string,
-  recipientUserId?: string
-): string {
-  return `${eventType}_${bookingId || 'none'}_${recipientRole || 'all'}_${recipientUserId || 'all'}`;
+interface AuthenticatedActorSnapshot {
+  uid: string;
+  idToken: string;
 }
 
-/**
- * Emit a System Notification Event
- * Processes recipients, channels, templates, deduplication, and persistence
- */
-export async function emitEvent(
-  eventType: NotificationEventType,
-  payload: Record<string, any>,
-  actor?: { id: string; role: string }
-): Promise<string> {
-  const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const nowIso = new Date().toISOString();
+type CanonicalStaffRole = 'admin' | 'manager' | 'supervisor' | 'css' | 'therapist';
 
-  // 1. Record raw notification event
-  const eventRecord: NotificationEvent = {
-    id: eventId,
-    eventType,
-    bookingId: payload.bookingId,
-    paymentId: payload.paymentId,
-    actorId: actor?.id,
-    actorRole: actor?.role,
-    payload: cleanFirestoreData(payload),
-    createdAt: nowIso,
-    status: 'pending',
-  };
+function normalizeTrimmedString(value: unknown, maxLen = 256): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, maxLen);
+}
 
-  try {
-    const eventRef = doc(db, 'notification_events', eventId);
-    await setDoc(eventRef, cleanFirestoreData(eventRecord));
-  } catch (err) {
-    console.warn('Failed to record notification event log:', err);
+function normalizeRecipientRole(value: unknown): NotificationRecipientRole | '' {
+  const raw = normalizeTrimmedString(value, 64).toLowerCase();
+  if (raw === 'admin') return 'admin';
+  if (raw === 'manager') return 'manager';
+  if (raw === 'supervisor') return 'supervisor';
+  if (raw === 'css') return 'css';
+  if (raw === 'therapist') return 'therapist';
+  if (raw === 'customer') return 'customer';
+  return '';
+}
+
+function isStaffStatusDisabled(value: unknown): boolean {
+  const status = normalizeTrimmedString(value, 64).toUpperCase();
+  return [
+    'INACTIVE',
+    'DISABLED',
+    'ARCHIVED',
+    'DINONAKTIFKAN',
+    'DELETED',
+    'TERMINATED',
+  ].includes(status);
+}
+
+function isStaffRecordActive(data: Record<string, any> | undefined | null): boolean {
+  if (!data || typeof data !== 'object') return false;
+  if (data.isActive === false || data.loginEnabled === false) return false;
+  if (isStaffStatusDisabled(data.status)) return false;
+  if (normalizeTrimmedString(data.loginAccountStatus, 64).toUpperCase() === 'DINONAKTIFKAN') {
+    return false;
   }
+  return true;
+}
 
-  // 2. Fetch system settings to check alert toggles
-  const settings = await getNotificationSettings();
-
-  // 3. Resolve targets (who should receive which notification)
-  const targets = resolveNotificationTargets(eventType, payload, settings);
-
-  // 4. Dispatch to each target
-  for (const target of targets) {
-    const dedupKey = getDeduplicationKey(
-      eventType,
-      payload.bookingId,
-      target.recipientRole,
-      target.recipientUserId
-    );
-
-    // Skip if identical notification emitted in recent window
-    if (recentNotificationKeys.has(dedupKey)) {
-      console.log(`[Notification] Skipping duplicate event: ${dedupKey}`);
-      continue;
-    }
-
-    recentNotificationKeys.add(dedupKey);
-    setTimeout(() => {
-      recentNotificationKeys.delete(dedupKey);
-    }, 45000); // 45 seconds dedup window
-
-    const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-    const notifItem: InAppNotification = {
-      id: notificationId,
-      eventId,
-      eventType,
-      recipientUserId: target.recipientUserId,
-      recipientRole: target.recipientRole,
-      bookingId: payload.bookingId,
-      bookingCode: payload.bookingCode,
-      customerId: payload.customerId,
-      therapistId: target.therapistId || payload.therapistId,
-      title: target.title,
-      message: target.message,
-      channel: 'in_app',
-      priority: target.priority,
-      read: false,
-      readAt: null,
-      actionUrl: target.actionUrl,
-      metadata: cleanFirestoreData({
-        ...payload,
-        actorId: actor?.id,
-        actorRole: actor?.role,
-      }),
-      createdAt: nowIso,
-    };
-
-    try {
-      // Save In-App Notification to Firestore
-      const notifRef = doc(db, 'notifications', notificationId);
-      await setDoc(notifRef, cleanFirestoreData(notifItem));
-
-      // Trigger Web Audio chime for HIGH and CRITICAL alerts
-      if (target.priority === 'HIGH' || target.priority === 'CRITICAL') {
-        playNotificationSound();
-      }
-
-      // Try browser push notification if permissions granted
-      if (settings.pushEnabled) {
-        showBrowserNotification(target.title, {
-          body: target.message,
-          icon: '/icon.svg',
-          badge: '/icon.svg',
-          data: { actionUrl: target.actionUrl, id: notificationId },
-        }).catch(() => {});
-      }
-
-      // Log delivery for in_app
-      logDelivery(notificationId, 'in_app', target.recipientUserId || target.recipientRole, 'delivered');
-
-      // Dispatch WhatsApp channel if enabled and recipient is customer
-      if (settings.whatsappEnabled && target.recipientRole === 'customer' && payload.customerWhatsApp) {
-        const waText = renderWhatsAppTemplate(eventType, payload);
-        whatsappProvider.sendMessage(payload.customerWhatsApp, waText).then((waRes) => {
-          logDelivery(
-            notificationId,
-            'whatsapp',
-            payload.customerWhatsApp,
-            waRes.success ? 'sent' : 'failed',
-            waRes.error
-          );
-        });
-      }
-
-      // Dispatch Email channel if customer email provided
-      if (settings.emailEnabled && target.recipientRole === 'customer' && payload.customerEmail) {
-        emailProvider.sendEmail(
-          payload.customerEmail,
-          `[Senzu Home] ${target.title}`,
-          `<p>${target.message}</p>`
-        ).then((emRes) => {
-          logDelivery(
-            notificationId,
-            'email',
-            payload.customerEmail,
-            emRes.success ? 'sent' : 'failed',
-            emRes.error
-          );
-        });
-      }
-    } catch (err) {
-      console.error(`Error saving notification ${notificationId}:`, err);
-    }
-  }
-
-  // 5. Update event status to processed
-  try {
-    const eventRef = doc(db, 'notification_events', eventId);
-    await updateDoc(eventRef, {
-      status: 'processed',
-      processedAt: new Date().toISOString(),
+async function getAuthenticatedActorSnapshot(): Promise<AuthenticatedActorSnapshot> {
+  const currentUser = auth?.currentUser;
+  const uid = normalizeTrimmedString(currentUser?.uid, 128);
+  if (!currentUser || !uid || typeof currentUser.getIdToken !== 'function') {
+    throw Object.assign(new Error('Autentikasi diperlukan untuk operasi notifikasi.'), {
+      code: 'AUTH_REQUIRED',
     });
-  } catch (err) {
-    // Non-blocking
   }
 
-  return eventId;
-}
-
-interface TargetResolution {
-  recipientRole: NotificationRecipientRole;
-  recipientUserId?: string;
-  therapistId?: string;
-  title: string;
-  message: string;
-  priority: NotificationPriority;
-  actionUrl: string;
-}
-
-function resolveNotificationTargets(
-  eventType: NotificationEventType,
-  p: Record<string, any>,
-  settings: AdminNotificationSettings
-): TargetResolution[] {
-  const code = p.bookingCode || 'BOOKING';
-  const customerName = p.customerName || 'Pelanggan';
-  const therapistName = p.therapistName || 'Terapis Senzu';
-  const serviceName = p.serviceName || 'Refleksi & Massage';
-  const scheduleAt = p.scheduleAt || p.scheduleDate || 'Jadwal Pesanan';
-  const bookingId = p.bookingId || '';
-
-  const targets: TargetResolution[] = [];
-
-  switch (eventType) {
-    case 'booking.created':
-      if (settings.bookingCreatedAlert) {
-        // Notify Customer Service
-        targets.push({
-          recipientRole: 'css',
-          title: 'Booking Baru Diterima',
-          message: `Order #${code} dari ${customerName} (${serviceName}) menunggu verifikasi pembayaran.`,
-          priority: 'HIGH',
-          actionUrl: `/css?booking=${code}`,
-        });
-        // Notify Manager / Management (operational visibility)
-        targets.push({
-          recipientRole: 'manager',
-          title: 'Booking Baru Diterima',
-          message: `Order #${code} dari ${customerName} (${serviceName}) masuk ke sistem. Menunggu verifikasi pembayaran.`,
-          priority: 'HIGH',
-          actionUrl: `/reconciliation?booking=${code}`,
-        });
-        // Notify Customer
-        targets.push({
-          recipientRole: 'customer',
-          recipientUserId: p.customerId,
-          title: 'Reservasi Senzu Home Diterima',
-          message: `Pesanan #${code} (${serviceName}) berhasil dibuat. Silakan lakukan pembayaran agar dapat diproses.`,
-          priority: 'NORMAL',
-          actionUrl: `/track/${code}`,
-        });
-      }
-      break;
-
-    case 'payment.proof_uploaded':
-      if (settings.paymentAlert) {
-        targets.push({
-          recipientRole: 'css',
-          title: 'Bukti Pembayaran Diunggah',
-          message: `Customer ${customerName} mengunggah bukti bayar untuk pesanan #${code}. Siap diverifikasi.`,
-          priority: 'HIGH',
-          actionUrl: `/reconciliation?booking=${code}`,
-        });
-        targets.push({
-          recipientRole: 'manager',
-          title: 'Bukti Pembayaran Diunggah',
-          message: `Customer ${customerName} mengunggah bukti bayar untuk pesanan #${code}. Siap diverifikasi.`,
-          priority: 'NORMAL',
-          actionUrl: `/reconciliation?booking=${code}`,
-        });
-        targets.push({
-          recipientRole: 'customer',
-          recipientUserId: p.customerId,
-          title: 'Bukti Pembayaran Diterima',
-          message: `Bukti transfer Anda untuk pesanan #${code} sedang diverifikasi oleh staf CSS kami.`,
-          priority: 'NORMAL',
-          actionUrl: `/track/${code}`,
-        });
-      }
-      break;
-
-    case 'payment.verified':
-      if (settings.paymentAlert) {
-        targets.push({
-          recipientRole: 'supervisor',
-          title: 'Pembayaran Lunas — Siap Ditugaskan',
-          message: `Order #${code} (${customerName}, ${serviceName}) lunas. Silakan tugaskan terapis.`,
-          priority: 'HIGH',
-          actionUrl: `/supervisor?booking=${code}`,
-        });
-        targets.push({
-          recipientRole: 'manager',
-          title: 'Pembayaran Terverifikasi Lunas',
-          message: `Order #${code} (${customerName}, ${serviceName}) lunas terverifikasi.`,
-          priority: 'NORMAL',
-          actionUrl: `/reconciliation?booking=${code}`,
-        });
-        targets.push({
-          recipientRole: 'customer',
-          recipientUserId: p.customerId,
-          title: 'Pembayaran Terverifikasi Lunas',
-          message: `Pembayaran pesanan #${code} telah terverifikasi. Tim Senzu segera menugaskan terapis profesional.`,
-          priority: 'HIGH',
-          actionUrl: `/track/${code}`,
-        });
-      }
-      break;
-
-    case 'payment.rejected':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Bukti Pembayaran Ditolak',
-        message: `Bukti pembayaran untuk #${code} belum sesuai: ${p.rejectionReason || 'Nominal tidak cocok'}. Silakan unggah ulang.`,
-        priority: 'HIGH',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'css',
-        title: 'Pembayaran Ditolak',
-        message: `Order #${code} (${customerName}) ditolak verifikasinya.`,
-        priority: 'NORMAL',
-        actionUrl: `/reconciliation?booking=${code}`,
-      });
-      break;
-
-    case 'payment.expired':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Waktu Pembayaran Berakhir',
-        message: `Batas waktu pembayaran pesanan #${code} telah berakhir. Silakan lakukan pemesanan kembali atau hubungi Customer Service jika memerlukan bantuan.`,
-        priority: 'NORMAL',
-        actionUrl: `/track/${code}`,
-      });
-      break;
-
-    case 'booking.ready_for_assignment':
-      if (settings.supervisorAlert) {
-        targets.push({
-          recipientRole: 'supervisor',
-          title: 'Order Siap Ditugaskan',
-          message: `Order #${code} untuk ${scheduleAt} di ${p.area || 'Palembang'} siap dialokasikan ke terapis.`,
-          priority: 'HIGH',
-          actionUrl: `/supervisor?booking=${code}`,
-        });
-      }
-      break;
-
-    case 'therapist.assigned':
-      // Notify Assigned Therapist
-      if (p.therapistId) {
-        targets.push({
-          recipientRole: 'therapist',
-          recipientUserId: p.therapistId,
-          therapistId: p.therapistId,
-          title: 'Tugas Treatment Baru Ditugaskan',
-          message: `Anda mendapat tugas baru #${code} (${customerName}, ${serviceName}) jadwal ${scheduleAt}. Segera konfirmasi.`,
-          priority: 'CRITICAL',
-          actionUrl: `/therapist?booking=${code}`,
-        });
-      }
-      // Notify Customer
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Terapis Senzu Telah Ditugaskan',
-        message: `Terapis ${therapistName} telah ditugaskan untuk reservasi #${code}. Bersiap menyambut relaksasi Anda.`,
-        priority: 'NORMAL',
-        actionUrl: `/track/${code}`,
-      });
-      break;
-
-    case 'therapist.reassigned':
-      if (p.therapistId) {
-        targets.push({
-          recipientRole: 'therapist',
-          recipientUserId: p.therapistId,
-          therapistId: p.therapistId,
-          title: 'Tugas Treatment Dialihkan',
-          message: `Anda ditugaskan menggantikan order #${code} (${customerName}, ${serviceName}).`,
-          priority: 'HIGH',
-          actionUrl: `/therapist?booking=${code}`,
-        });
-      }
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Pembaruan Terapis',
-        message: `Terapis untuk reservasi #${code} telah diperbarui menjadi ${therapistName}.`,
-        priority: 'NORMAL',
-        actionUrl: `/track/${code}`,
-      });
-      break;
-
-    case 'therapist.accepted':
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Terapis Menerima Tugas',
-        message: `${therapistName} telah mengonfirmasi penerimaan tugas order #${code}.`,
-        priority: 'NORMAL',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Terapis Mengonfirmasi Pesanan',
-        message: `Terapis ${therapistName} telah mengonfirmasi kesiapannya melayani Anda.`,
-        priority: 'NORMAL',
-        actionUrl: `/track/${code}`,
-      });
-      break;
-
-    case 'therapist.on_the_way':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Terapis Dalam Perjalanan',
-        message: `Terapis ${therapistName} sedang menuju ke lokasi Anda 🛵. Anda dapat melacak posisi terapis di peta.`,
-        priority: 'HIGH',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Terapis Menuju Lokasi (OTW)',
-        message: `${therapistName} berangkat menuju lokasi order #${code}.`,
-        priority: 'LOW',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'therapist.nearby':
-      if (settings.nearbyNotification) {
-        targets.push({
-          recipientRole: 'customer',
-          recipientUserId: p.customerId,
-          title: 'Terapis Hampir Sampai (±1 km)',
-          message: `Terapis ${therapistName} sudah mendekati lokasi Anda. Mohon siapkan tempat treatment.`,
-          priority: 'HIGH',
-          actionUrl: `/track/${code}`,
-        });
-      }
-      break;
-
-    case 'therapist.arrived':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Terapis Telah Tiba di Lokasi 📍',
-        message: `Terapis ${therapistName} telah sampai di alamat Anda. Mohon membukakan pintu atau menyambut terapis.`,
-        priority: 'HIGH',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Terapis Telah Sampai (Arrived)',
-        message: `${therapistName} telah tiba di lokasi customer untuk order #${code}.`,
-        priority: 'NORMAL',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'treatment.started':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Sesi Treatment Dimulai ✨',
-        message: `Sesi ${serviceName} bersama terapis ${therapistName} telah dimulai. Selamat menikmati relaksasi Senzu.`,
-        priority: 'LOW',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Treatment Dimulai (In-Treatment)',
-        message: `${therapistName} memulai sesi treatment order #${code}.`,
-        priority: 'LOW',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'treatment.completed':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Sesi Treatment Selesai ✨',
-        message: `Terima kasih telah mempercayakan kenyamanan spa & pijat Anda kepada Senzu Home Palembang.`,
-        priority: 'NORMAL',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Order Treatment Selesai',
-        message: `Order #${code} telah diselesaikan oleh ${therapistName}.`,
-        priority: 'NORMAL',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'booking.cancelled':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: 'Pemesanan Dibatalkan',
-        message: `Pesanan #${code} telah dibatalkan. Hubungi Customer Service jika ada pertanyaan.`,
-        priority: 'HIGH',
-        actionUrl: `/track/${code}`,
-      });
-      targets.push({
-        recipientRole: 'css',
-        title: 'Pesanan Dibatalkan',
-        message: `Order #${code} (${customerName}) telah dibatalkan.`,
-        priority: 'NORMAL',
-        actionUrl: `/css?booking=${code}`,
-      });
-      targets.push({
-        recipientRole: 'supervisor',
-        title: 'Order Dibatalkan',
-        message: `Order #${code} (${customerName}) telah berstatus batal.`,
-        priority: 'NORMAL',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'supervisor.unassigned_alert':
-      targets.push({
-        recipientRole: 'supervisor',
-        title: '⚠️ Peringatan: Order Belum Ditugaskan',
-        message: `Order #${code} (${customerName}) jadwal ${scheduleAt} belum dialokasikan terapis!`,
-        priority: 'CRITICAL',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'therapist.not_accepted_alert':
-      targets.push({
-        recipientRole: 'supervisor',
-        title: '⚠️ Terapis Belum Merespon Tugas',
-        message: `${therapistName} belum mengonfirmasi order #${code} melewati batas waktu toleransi.`,
-        priority: 'HIGH',
-        actionUrl: `/supervisor?booking=${code}`,
-      });
-      break;
-
-    case 'tracking.location_stale':
-      if (settings.staleGpsAlert) {
-        targets.push({
-          recipientRole: 'supervisor',
-          title: '⚠️ Sinyal GPS Terapis Stale',
-          message: `Lokasi GPS ${therapistName} untuk order #${code} tidak update lebih dari ${settings.gpsStaleMinutes} menit.`,
-          priority: 'HIGH',
-          actionUrl: `/supervisor?booking=${code}`,
-        });
-      }
-      break;
-
-    case 'loyalty.points_earned':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `+${p.pointsEarned} Senzu Points Didapatkan! 🎉`,
-        message: `Selamat! Anda mendapatkan ${p.pointsEarned} Senzu Points dari order #${code || p.bookingCode}. Saldo poin Anda sekarang: ${p.newBalance} Poin.`,
-        priority: 'NORMAL',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      break;
-
-    case 'loyalty.points_redeemed':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `${p.pointsRedeemed} Poin Senzu Digunakan`,
-        message: `Anda telah menukarkan ${p.pointsRedeemed} Poin senilai Rp ${(p.discountAmount || 0).toLocaleString('id-ID')} untuk order #${code || p.bookingCode}.`,
-        priority: 'LOW',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      break;
-
-    case 'membership.tier_upgraded':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `Selamat! Naik Tier ke ${p.newTierName} 👑`,
-        message: `Status keanggotaan Anda telah ditingkatkan menjadi ${p.newTierName}! Nikmati bonus perolehan poin ${p.earningMultiplier}x dan keuntungan eksklusif lainnya.`,
-        priority: 'HIGH',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      targets.push({
-        recipientRole: 'css',
-        title: `Customer Naik Tier: ${p.newTierName}`,
-        message: `Pelanggan ${p.customerName} berhasil naik ke tier ${p.newTierName}.`,
-        priority: 'LOW',
-        actionUrl: `/crm?customer=${p.customerId}`,
-      });
-      break;
-
-    case 'voucher.issued':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `Voucher Baru Diterima: ${p.voucherName} 🎁`,
-        message: `Anda menerima voucher diskon ${p.voucherName}. Cek dompet reward Anda untuk menggunakannya.`,
-        priority: 'NORMAL',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      break;
-
-    case 'referral.qualified':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `Bonus Referral +${p.pointsReward} Poin! 🤝`,
-        message: `Teman Anda (${p.referredCustomerName}) telah menyelesaikan treatment perdananya! Anda mendapatkan bonus ${p.pointsReward} Senzu Points.`,
-        priority: 'NORMAL',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      break;
-
-    case 'birthday.reward_issued':
-      targets.push({
-        recipientRole: 'customer',
-        recipientUserId: p.customerId,
-        title: `Selamat Ulang Tahun dari Senzu Home! 🎂`,
-        message: `Selamat ulang tahun! Kami memberikan hadiah spesial ${p.pointsReward} Senzu Points ke akun Anda.`,
-        priority: 'NORMAL',
-        actionUrl: `/portal?tab=wallet`,
-      });
-      break;
-
-    default:
-      break;
-  }
-
-  return targets;
-}
-
-// Log notification delivery record
-async function logDelivery(
-  notificationId: string,
-  channel: any,
-  recipient: string,
-  status: 'pending' | 'sent' | 'delivered' | 'failed',
-  failureReason?: string
-): Promise<void> {
+  let idToken = '';
   try {
-    const deliveryId = `deliv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const deliveryRef = doc(db, 'notification_deliveries', deliveryId);
-    const deliveryRecord: NotificationDelivery = {
-      id: deliveryId,
-      notificationId,
-      channel,
-      recipient,
-      status,
-      sentAt: new Date().toISOString(),
-      deliveredAt: status === 'delivered' ? new Date().toISOString() : null,
-      failedAt: status === 'failed' ? new Date().toISOString() : null,
-      failureReason: failureReason || null,
-      retryCount: 0,
-    };
-    await setDoc(deliveryRef, cleanFirestoreData(deliveryRecord));
-  } catch (err) {
-    // Non-blocking
+    const rawToken = await currentUser.getIdToken();
+    idToken = normalizeTrimmedString(rawToken, 8192);
+  } catch {
+    throw Object.assign(new Error('Gagal mengambil token autentikasi.'), {
+      code: 'AUTH_TOKEN_UNAVAILABLE',
+    });
+  }
+
+  if (!idToken) {
+    throw Object.assign(new Error('Token autentikasi tidak tersedia.'), {
+      code: 'AUTH_TOKEN_UNAVAILABLE',
+    });
+  }
+
+  const activeUserAfterToken = auth?.currentUser;
+  if (!activeUserAfterToken || normalizeTrimmedString(activeUserAfterToken.uid, 128) !== uid) {
+    throw Object.assign(new Error('Sesi autentikasi berubah saat memproses notifikasi.'), {
+      code: 'SESSION_CHANGED',
+    });
+  }
+
+  return { uid, idToken };
+}
+
+function ensureSessionUnchanged(initialUid: string): void {
+  const currentUid = normalizeTrimmedString(auth?.currentUser?.uid, 128);
+  if (!currentUid || currentUid !== initialUid) {
+    throw Object.assign(new Error('Sesi autentikasi berubah saat memproses notifikasi.'), {
+      code: 'SESSION_CHANGED',
+    });
   }
 }
 
-/**
- * Realtime Subscription for Role-Based Notifications
- */
-export function subscribeToRoleNotifications(
-  role: NotificationRecipientRole,
-  userId: string | undefined,
-  callback: (notifications: InAppNotification[]) => void
-): () => void {
-  const notifCol = collection(db, 'notifications');
-  const normalizedRole = (role || 'staff').toLowerCase().trim();
-
-  // Roles to match based on access level
-  const rolesToMatch = new Set<string>([normalizedRole, 'all']);
-  if (['manager', 'admin'].includes(normalizedRole)) {
-    rolesToMatch.add('css');
-    rolesToMatch.add('supervisor');
-    rolesToMatch.add('manager');
-    rolesToMatch.add('admin');
-  }
-  const roleArray = Array.from(rolesToMatch).slice(0, 10);
-
-  // Query notifications matching the user's role or specifically assigned to user
-  const q = query(
-    notifCol,
-    where('recipientRole', 'in', roleArray),
-    orderBy('createdAt', 'desc'),
-    limit(50)
-  );
-
-  let disposed = false;
-  let fallbackUnsub: (() => void) | null = null;
-
-  const primaryUnsub = onSnapshot(
-    q,
-    (snapshot) => {
-      if (disposed) return;
-      let items: InAppNotification[] = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as InAppNotification[];
-
-      // Filter: if therapist, only show broadcasts OR items targeted to this therapist's userId
-      if (normalizedRole === 'therapist' && userId) {
-        items = items.filter(
-          (n) => !n.recipientUserId || n.recipientUserId === userId
-        );
-      }
-
-      callback(items);
-    },
-    (error: any) => {
-      if (disposed) return;
-
-      const errorCode = error?.code || '';
-      const errorMessage = typeof error?.message === 'string' ? error.message : '';
-
-      // SECURITY ERROR: permission-denied or unauthenticated
-      // Strict rule: DO NOT silently fallback or mask security errors
-      if (errorCode === 'permission-denied' || errorCode === 'unauthenticated') {
-        console.warn(
-          `[Security Notice] Notifications access rejected for role="${role}": ${errorCode}. Fallback aborted.`
-        );
-        callback([]);
-        return;
-      }
-
-      // QUOTA EXHAUSTED: Spark tier daily limit reached
-      if (errorCode === 'resource-exhausted') {
-        if (!disposed) callback([]);
-        return;
-      }
-
-      // COMPATIBILITY ERROR ONLY: failed-precondition / missing composite index
-      const isIndexOrPrecondition =
-        errorCode === 'failed-precondition' ||
-        errorMessage.includes('index') ||
-        errorMessage.includes('requires an index');
-
-      if (isIndexOrPrecondition) {
-        console.info(
-          `[Notice] Notifications composite index warming up for role="${role}". Utilizing single-field query fallback.`
-        );
-        try {
-          const fallbackQuery = query(
-            notifCol,
-            where('recipientRole', 'in', roleArray),
-            limit(50)
-          );
-          if (disposed) return;
-          fallbackUnsub = onSnapshot(
-            fallbackQuery,
-            (snap) => {
-              if (disposed) return;
-              let items = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as InAppNotification[];
-              if (normalizedRole === 'therapist' && userId) {
-                items = items.filter(
-                  (n) => !n.recipientUserId || n.recipientUserId === userId
-                );
-              }
-              items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-              callback(items);
-            },
-            (fallbackErr) => {
-              console.warn('Notifications fallback subscription notice:', fallbackErr?.message);
-              if (!disposed) callback([]);
-            }
-          );
-        } catch {
-          if (!disposed) callback([]);
-        }
-      } else {
-        console.warn('subscribeToRoleNotifications unexpected error:', errorMessage);
-        if (!disposed) callback([]);
-      }
-    }
-  );
-
-  return () => {
-    disposed = true;
-    primaryUnsub();
-    if (fallbackUnsub) {
-      fallbackUnsub();
-      fallbackUnsub = null;
-    }
-  };
+interface VerifiedCallerContext {
+  uid: string;
+  isStaff: boolean;
+  staffRole?: CanonicalStaffRole;
+  staffMasterId?: string;
+  therapistIds: Set<string>;
+  customerIds: Set<string>;
 }
 
-/**
- * Realtime Subscription for Customer Notifications (by BookingCode or CustomerId)
- */
-export function subscribeToCustomerNotifications(
-  bookingCodeOrCustomerId: string,
-  callback: (notifications: InAppNotification[]) => void
-): () => void {
-  if (!bookingCodeOrCustomerId) {
-    callback([]);
-    return () => {};
-  }
+async function resolveVerifiedCallerContext(uid: string): Promise<VerifiedCallerContext> {
+  const therapistIds = new Set<string>();
+  const customerIds = new Set<string>([uid]);
+  let isStaff = false;
+  let staffRole: CanonicalStaffRole | undefined;
+  let staffMasterId: string | undefined;
 
-  const notifCol = collection(db, 'notifications');
-  const q = query(
-    notifCol,
-    where('recipientRole', '==', 'customer'),
-    limit(40)
-  );
-
-  let disposed = false;
-  const unsub = onSnapshot(
-    q,
-    (snapshot) => {
-      if (disposed) return;
-      const allCustomerNotifs = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as InAppNotification[];
-
-      // Filter specifically for this customer's booking code or customer ID
-      const matching = allCustomerNotifs.filter(
-        (n) =>
-          n.bookingCode === bookingCodeOrCustomerId ||
-          n.customerId === bookingCodeOrCustomerId ||
-          (n.metadata && n.metadata.bookingCode === bookingCodeOrCustomerId)
+  try {
+    const roleSnap = await getDoc(doc(db, 'staff_roles', uid));
+    if (roleSnap.exists()) {
+      const roleData = roleSnap.data() as Record<string, any>;
+      const roleAuthUid = normalizeTrimmedString(
+        roleData.authUserId || roleData.authUid,
+        128
       );
-
-      matching.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(matching);
-    },
-    (err: any) => {
-      if (disposed) return;
-      if (err?.code === 'permission-denied' || err?.code === 'unauthenticated') {
-        console.warn('[Security Notice] Customer notifications subscription access denied.');
-      } else {
-        console.warn('subscribeToCustomerNotifications error:', err?.message);
+      const roleMatchesUid = !roleAuthUid || roleAuthUid === uid;
+      if (roleMatchesUid && roleData.isActive === true && isStaffRecordActive(roleData)) {
+        const candidateMasterId =
+          normalizeTrimmedString(roleData.staffId, 128) ||
+          normalizeTrimmedString(roleData.staffUserId, 128) ||
+          uid;
+        const masterSnap = await getDoc(doc(db, 'staff_users', candidateMasterId));
+        if (masterSnap.exists()) {
+          const masterData = masterSnap.data() as Record<string, any>;
+          const masterAuthUid = normalizeTrimmedString(
+            masterData.authUserId || masterData.authUid,
+            128
+          );
+          const masterMatchesUid =
+            masterAuthUid === uid || candidateMasterId === uid;
+          const roleStr = normalizeRecipientRole(roleData.role);
+          const masterRoleStr = normalizeRecipientRole(masterData.role);
+          if (
+            masterMatchesUid &&
+            isStaffRecordActive(masterData) &&
+            roleStr &&
+            roleStr !== 'customer' &&
+            roleStr === masterRoleStr
+          ) {
+            isStaff = true;
+            staffRole = roleStr as CanonicalStaffRole;
+            staffMasterId = candidateMasterId;
+            if (staffRole === 'therapist') {
+              therapistIds.add(uid);
+              therapistIds.add(candidateMasterId);
+              for (const candidate of [
+                roleData.therapistId,
+                roleData.staffId,
+                roleData.staffUserId,
+                masterData.therapistId,
+                masterData.id,
+                masterData.uid,
+              ]) {
+                const clean = normalizeTrimmedString(candidate, 128);
+                if (clean) therapistIds.add(clean);
+              }
+            }
+          }
+        }
       }
-      callback([]);
     }
-  );
+  } catch {
+    // Non-staff or restricted read
+  }
 
-  return () => {
-    disposed = true;
-    unsub();
+  try {
+    const custSnap = await getDoc(doc(db, 'customers', uid));
+    if (custSnap.exists()) {
+      const custData = custSnap.data() as Record<string, any>;
+      const ownerUid = normalizeTrimmedString(
+        custData.authUserId || custData.customerAuthUid,
+        128
+      );
+      if (!ownerUid || ownerUid === uid) {
+        customerIds.add(uid);
+        const cid = normalizeTrimmedString(custData.id || custData.customerId, 128);
+        if (cid) customerIds.add(cid);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  return {
+    uid,
+    isStaff,
+    staffRole,
+    staffMasterId,
+    therapistIds,
+    customerIds,
   };
 }
 
-/**
- * Mark a single notification as read
- */
-export async function markNotificationAsRead(notificationId: string): Promise<void> {
-  try {
-    const notifRef = doc(db, 'notifications', notificationId);
-    await updateDoc(notifRef, {
-      read: true,
-      readAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error(`Failed to mark notification ${notificationId} as read:`, err);
-  }
-}
+async function isCallerAuthorizedForNotificationDoc(
+  notifData: Record<string, any> | undefined | null,
+  ctx: VerifiedCallerContext
+): Promise<boolean> {
+  if (!notifData || typeof notifData !== 'object') return false;
+  const recRole =
+    normalizeRecipientRole(notifData.recipientRole) ||
+    normalizeRecipientRole(notifData.targetRole);
+  const recId = normalizeTrimmedString(notifData.recipientId, 128);
+  const recUserId = normalizeTrimmedString(notifData.recipientUserId, 128);
 
-/**
- * Mark all notifications as read for a given role/user
- */
-export async function markAllNotificationsAsRead(
-  role: NotificationRecipientRole,
-  userId?: string
-): Promise<void> {
-  try {
-    const notifCol = collection(db, 'notifications');
-    const normalizedRole = (role || 'staff').toLowerCase().trim();
-    const rolesToMatch = new Set<string>([normalizedRole, 'all']);
-    if (['manager', 'admin'].includes(normalizedRole)) {
-      rolesToMatch.add('css');
-      rolesToMatch.add('supervisor');
-      rolesToMatch.add('manager');
-      rolesToMatch.add('admin');
-    }
-    const roleArray = Array.from(rolesToMatch).slice(0, 10);
-
-    const q = query(
-      notifCol,
-      where('recipientRole', 'in', roleArray),
-      where('read', '==', false)
-    );
-    const snap = await getDocs(q);
-    const updates = snap.docs.map((d) => {
-      const data = d.data();
-      if (normalizedRole === 'therapist' && userId && data.recipientUserId && data.recipientUserId !== userId) {
-        return Promise.resolve();
+  if (ctx.isStaff && ctx.staffRole) {
+    if (ctx.staffRole === 'admin' || ctx.staffRole === 'manager') {
+      if (
+        ['admin', 'manager', 'supervisor', 'css'].includes(recRole) ||
+        ['admin', 'manager', 'supervisor', 'css', ctx.uid, ctx.staffMasterId || ''].includes(recId) ||
+        recUserId === ctx.uid
+      ) {
+        return true;
       }
-      return updateDoc(d.ref, {
-        read: true,
-        readAt: new Date().toISOString(),
-      });
-    });
-    await Promise.all(updates);
-  } catch (err) {
-    console.error('Failed to mark all as read:', err);
-  }
-}
-
-/**
- * Delete a notification
- */
-export async function deleteNotification(notificationId: string): Promise<void> {
-  try {
-    const notifRef = doc(db, 'notifications', notificationId);
-    await deleteDoc(notifRef);
-  } catch (err) {
-    console.error(`Failed to delete notification ${notificationId}:`, err);
-  }
-}
-
-/**
- * Clear all read notifications for a role
- */
-export async function clearReadNotifications(role: NotificationRecipientRole): Promise<void> {
-  try {
-    const notifCol = collection(db, 'notifications');
-    const normalizedRole = (role || 'staff').toLowerCase().trim();
-    const rolesToMatch = new Set<string>([normalizedRole, 'all']);
-    if (['manager', 'admin'].includes(normalizedRole)) {
-      rolesToMatch.add('css');
-      rolesToMatch.add('supervisor');
-      rolesToMatch.add('manager');
-      rolesToMatch.add('admin');
     }
-    const roleArray = Array.from(rolesToMatch).slice(0, 10);
-
-    const q = query(
-      notifCol,
-      where('recipientRole', 'in', roleArray),
-      where('read', '==', true)
-    );
-    const snap = await getDocs(q);
-    const deletions = snap.docs.map((d) => deleteDoc(d.ref));
-    await Promise.all(deletions);
-  } catch (err) {
-    console.error('Failed to clear read notifications:', err);
+    if (ctx.staffRole === 'supervisor') {
+      if (
+        recRole === 'supervisor' ||
+        ['supervisor', ctx.uid, ctx.staffMasterId || ''].includes(recId) ||
+        recUserId === ctx.uid
+      ) {
+        return true;
+      }
+    }
+    if (ctx.staffRole === 'css') {
+      if (
+        ['css', 'supervisor'].includes(recRole) ||
+        ['css', ctx.uid, ctx.staffMasterId || ''].includes(recId) ||
+        recUserId === ctx.uid
+      ) {
+        return true;
+      }
+    }
+    if (ctx.staffRole === 'therapist' && recRole === 'therapist') {
+      for (const field of [
+        notifData.recipientId,
+        notifData.recipientUserId,
+        notifData.therapistId,
+        notifData.targetUserId,
+      ]) {
+        const clean = normalizeTrimmedString(field, 128);
+        if (clean && ctx.therapistIds.has(clean)) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
+
+  if (recRole === 'customer') {
+    const docCustomerAuthUid = normalizeTrimmedString(notifData.customerAuthUid, 128);
+    const docAuthUserId = normalizeTrimmedString(notifData.authUserId, 128);
+    if (docCustomerAuthUid && docAuthUserId && docCustomerAuthUid !== docAuthUserId) {
+      return false;
+    }
+    if (docCustomerAuthUid || docAuthUserId) {
+      const canonicalUid = docCustomerAuthUid || docAuthUserId;
+      return canonicalUid === ctx.uid;
+    }
+
+    if (recUserId === ctx.uid || recId === ctx.uid) {
+      return true;
+    }
+
+    const docCustomerId = normalizeTrimmedString(notifData.customerId || recId, 128);
+    if (docCustomerId) {
+      if (ctx.customerIds.has(docCustomerId)) return true;
+      try {
+        const cSnap = await getDoc(doc(db, 'customers', docCustomerId));
+        if (cSnap.exists()) {
+          const cData = cSnap.data() as Record<string, any>;
+          const cAuthUid = normalizeTrimmedString(cData.authUserId, 128);
+          const cCustAuthUid = normalizeTrimmedString(cData.customerAuthUid, 128);
+          if (cAuthUid && cCustAuthUid && cAuthUid !== cCustAuthUid) return false;
+          if ((cAuthUid || cCustAuthUid) === ctx.uid) {
+            ctx.customerIds.add(docCustomerId);
+            return true;
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    const bookingId = normalizeTrimmedString(notifData.bookingId, 128);
+    if (bookingId) {
+      try {
+        const bSnap = await getDoc(doc(db, 'bookings', bookingId));
+        if (bSnap.exists()) {
+          const bData = bSnap.data() as Record<string, any>;
+          const bCustAuthUid = normalizeTrimmedString(bData.customerAuthUid, 128);
+          const bAuthUserId = normalizeTrimmedString(bData.authUserId, 128);
+          if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) return false;
+          if (bCustAuthUid || bAuthUserId) {
+            return (bCustAuthUid || bAuthUserId) === ctx.uid;
+          }
+          const bCustomerId = normalizeTrimmedString(bData.customerId, 128);
+          if (bCustomerId && ctx.customerIds.has(bCustomerId)) {
+            return true;
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  return false;
 }
 
-/**
- * Get System Notification Settings
- */
+// ============================================================================
+// 1. NOTIFICATION SETTINGS MANAGEMENT
+// ============================================================================
+
 export async function getNotificationSettings(): Promise<AdminNotificationSettings> {
   try {
-    const ref = doc(db, 'notification_settings', 'default');
+    const ref = doc(db, 'notification_settings', SETTINGS_DOC_ID);
     const snap = await getDoc(ref);
     if (snap.exists()) {
-      return { ...DEFAULT_NOTIFICATION_SETTINGS, ...snap.data() } as AdminNotificationSettings;
+      return {
+        ...DEFAULT_NOTIFICATION_SETTINGS,
+        ...(snap.data() as Partial<AdminNotificationSettings>),
+      };
     }
+    return DEFAULT_NOTIFICATION_SETTINGS;
   } catch (err) {
-    console.warn('Using default notification settings:', err);
+    console.warn('Failed to fetch notification settings, using default:', err);
+    return DEFAULT_NOTIFICATION_SETTINGS;
   }
-  return DEFAULT_NOTIFICATION_SETTINGS;
 }
 
-/**
- * Save System Notification Settings
- */
 export async function saveNotificationSettings(
-  settings: Partial<AdminNotificationSettings>
-): Promise<void> {
-  try {
-    const ref = doc(db, 'notification_settings', 'default');
-    const dataToSave = cleanFirestoreData({
-      ...DEFAULT_NOTIFICATION_SETTINGS,
-      ...settings,
-      id: 'default',
-      updatedAt: new Date().toISOString(),
-    });
-    await setDoc(ref, dataToSave, { merge: true });
-  } catch (err) {
-    console.error('Failed to save notification settings:', err);
-    throw err;
-  }
+  settings: Partial<AdminNotificationSettings>,
+  updatedBy = 'admin'
+): Promise<AdminNotificationSettings> {
+  const current = await getNotificationSettings();
+  const merged: AdminNotificationSettings & { updatedBy?: string } = {
+    ...current,
+    ...settings,
+    id: SETTINGS_DOC_ID,
+    updatedAt: new Date().toISOString(),
+    updatedBy,
+  };
+  await setDoc(doc(db, 'notification_settings', SETTINGS_DOC_ID), cleanFirestoreData(merged), {
+    merge: true,
+  });
+  return merged;
 }
 
-/**
- * Register push notification device token
- */
-export async function registerDeviceToken(deviceData: {
+// ============================================================================
+// 2. DEVICE TOKEN MANAGEMENT (PWA / FCM)
+// ============================================================================
+
+export async function registerDeviceToken(device: {
   userId: string;
   role: NotificationRecipientRole;
   token: string;
   platform?: 'web' | 'pwa' | 'ios_pwa' | 'android_web';
   browser?: string;
   deviceName?: string;
-}): Promise<void> {
+}): Promise<NotificationDevice> {
+  const actor = await getAuthenticatedActorSnapshot();
+  const role = normalizeRecipientRole(device?.role);
+  const rawToken = normalizeTrimmedString(device?.token, 4096);
+  const requestedUserId = normalizeTrimmedString(device?.userId, 128);
+  const platform: NotificationDevice['platform'] =
+    device?.platform === 'ios_pwa' ||
+    device?.platform === 'android_web' ||
+    device?.platform === 'web'
+      ? device.platform
+      : 'pwa';
+
+  if (!role) {
+    throw Object.assign(new Error('Role penerima perangkat tidak valid.'), {
+      code: 'INVALID_DEVICE_ROLE',
+    });
+  }
+  if (!rawToken || rawToken.length < 10) {
+    throw Object.assign(new Error('Token perangkat push tidak valid.'), {
+      code: 'INVALID_DEVICE_TOKEN',
+    });
+  }
+  if (!requestedUserId || requestedUserId.toLowerCase() === 'guest') {
+    throw Object.assign(new Error('Identitas pemilik perangkat wajib terautentikasi.'), {
+      code: 'INVALID_DEVICE_OWNER',
+    });
+  }
+
+  let serverHandled = false;
+  let serverRecord: NotificationDevice | null = null;
   try {
-    const deviceId = `dev_${deviceData.userId}_${Math.random().toString(36).substring(2, 7)}`;
-    const ref = doc(db, 'notification_devices', deviceId);
-    const record: NotificationDevice = {
-      id: deviceId,
-      userId: deviceData.userId,
-      role: deviceData.role,
-      token: deviceData.token,
-      platform: deviceData.platform || 'pwa',
-      browser: deviceData.browser || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'),
-      deviceName: deviceData.deviceName || 'Browser Device',
-      enabled: true,
-      createdAt: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await setDoc(ref, cleanFirestoreData(record));
+    const res = await fetch('/api/notifications/devices/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actor.idToken}`,
+      },
+      body: JSON.stringify({
+        userId: requestedUserId,
+        role,
+        token: rawToken,
+        platform,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      }),
+    });
+
+    ensureSessionUnchanged(actor.uid);
+
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+
+    if (res.ok && body?.success === true && body?.device && typeof body.device.id === 'string') {
+      serverHandled = true;
+      serverRecord = body.device as NotificationDevice;
+    } else if (body && typeof body.code === 'string') {
+      throw Object.assign(
+        new Error(body.error || body.message || 'Registrasi perangkat ditolak oleh server.'),
+        { code: body.code, status: res.status }
+      );
+    }
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code !== 'NETWORK_ERROR') {
+      throw err;
+    }
+  }
+
+  if (serverHandled && serverRecord) {
+    return serverRecord;
+  }
+
+  ensureSessionUnchanged(actor.uid);
+  const ctx = await resolveVerifiedCallerContext(actor.uid);
+  ensureSessionUnchanged(actor.uid);
+
+  let canonicalUserId = requestedUserId;
+  if (role === 'admin' || role === 'manager') {
+    if (!ctx.isStaff || (ctx.staffRole !== 'admin' && ctx.staffRole !== 'manager')) {
+      throw Object.assign(new Error('Hanya Manager/Admin aktif yang dapat mendaftarkan perangkat role ini.'), {
+        code: 'FORBIDDEN_DEVICE_ROLE',
+      });
+    }
+    if (!['admin', 'manager', actor.uid, ctx.staffMasterId || ''].includes(requestedUserId)) {
+      throw Object.assign(new Error('Identitas pemilik perangkat tidak sesuai.'), {
+        code: 'FORBIDDEN_DEVICE_OWNER',
+      });
+    }
+  } else if (role === 'supervisor') {
+    if (!ctx.isStaff || !['supervisor', 'manager', 'admin'].includes(ctx.staffRole || '')) {
+      throw Object.assign(new Error('Hanya Supervisor aktif yang dapat mendaftarkan perangkat role ini.'), {
+        code: 'FORBIDDEN_DEVICE_ROLE',
+      });
+    }
+    if (!['supervisor', actor.uid, ctx.staffMasterId || ''].includes(requestedUserId)) {
+      throw Object.assign(new Error('Identitas pemilik perangkat tidak sesuai.'), {
+        code: 'FORBIDDEN_DEVICE_OWNER',
+      });
+    }
+  } else if (role === 'css') {
+    if (!ctx.isStaff || !['css', 'manager', 'admin'].includes(ctx.staffRole || '')) {
+      throw Object.assign(new Error('Hanya CSS aktif yang dapat mendaftarkan perangkat role ini.'), {
+        code: 'FORBIDDEN_DEVICE_ROLE',
+      });
+    }
+    if (!['css', actor.uid, ctx.staffMasterId || ''].includes(requestedUserId)) {
+      throw Object.assign(new Error('Identitas pemilik perangkat tidak sesuai.'), {
+        code: 'FORBIDDEN_DEVICE_OWNER',
+      });
+    }
+  } else if (role === 'therapist') {
+    if (!ctx.isStaff || ctx.staffRole !== 'therapist' || !ctx.therapistIds.has(requestedUserId)) {
+      throw Object.assign(new Error('Terapis hanya dapat mendaftarkan perangkat miliknya sendiri.'), {
+        code: 'FORBIDDEN_DEVICE_OWNER',
+      });
+    }
+  } else if (role === 'customer') {
+    let customerOwned = requestedUserId === actor.uid || ctx.customerIds.has(requestedUserId);
+    if (!customerOwned) {
+      const custSnap = await getDoc(doc(db, 'customers', requestedUserId));
+      if (custSnap.exists()) {
+        const cData = custSnap.data() as Record<string, any>;
+        const cAuthUid = normalizeTrimmedString(cData.authUserId, 128);
+        const cCustAuthUid = normalizeTrimmedString(cData.customerAuthUid, 128);
+        if ((!cAuthUid || !cCustAuthUid || cAuthUid === cCustAuthUid) && (cAuthUid || cCustAuthUid) === actor.uid) {
+          customerOwned = true;
+        }
+      }
+    }
+    if (!customerOwned) {
+      throw Object.assign(new Error('Pelanggan hanya dapat mendaftarkan perangkat miliknya sendiri.'), {
+        code: 'FORBIDDEN_DEVICE_OWNER',
+      });
+    }
+  }
+
+  const safeTokenKey = rawToken.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+  const id = `dev_${role}_${canonicalUserId}_${safeTokenKey}`;
+  const existingSnap = await getDoc(doc(db, 'notification_devices', id));
+  if (existingSnap.exists()) {
+    const existingData = existingSnap.data() as Record<string, any>;
+    const existingAuthUid = normalizeTrimmedString(existingData.authUid, 128);
+    if (existingAuthUid && existingAuthUid !== actor.uid) {
+      throw Object.assign(new Error('Perangkat telah terdaftar pada akun lain.'), {
+        code: 'DEVICE_OWNERSHIP_CONFLICT',
+      });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const record: NotificationDevice & { authUid: string } = {
+    id,
+    userId: canonicalUserId,
+    role,
+    token: rawToken,
+    platform,
+    browser:
+      device.browser ||
+      (typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'),
+    deviceName: device.deviceName || 'Browser Device',
+    enabled: true,
+    authUid: actor.uid,
+    createdAt: existingSnap.exists()
+      ? normalizeTrimmedString((existingSnap.data() as any)?.createdAt, 64) || now
+      : now,
+    lastSeenAt: now,
+    updatedAt: now,
+  };
+  await setDoc(doc(db, 'notification_devices', id), cleanFirestoreData(record), { merge: true });
+  return record;
+}
+
+export async function getRegisteredDevices(
+  role?: NotificationRecipientRole,
+  userId?: string
+): Promise<NotificationDevice[]> {
+  try {
+    const snap = await getDocs(collection(db, 'notification_devices'));
+    let list = snap.docs.map((d) => d.data() as NotificationDevice);
+    if (role) {
+      list = list.filter((d) => d.role === role);
+    }
+    if (userId) {
+      list = list.filter((d) => d.userId === userId);
+    }
+    return list;
   } catch (err) {
-    console.warn('Failed to register device token:', err);
+    console.warn('Error fetching registered devices:', err);
+    return [];
+  }
+}
+
+// ============================================================================
+// 3. CENTRAL EVENT DISPATCHER (emitEvent) — SERVER AUTHORITATIVE
+// ============================================================================
+
+export async function emitEvent(
+  eventType: NotificationEventType | string,
+  payload: Record<string, any>,
+  actorOrTargetRoles?:
+    | { id?: string; name?: string; role?: string }
+    | NotificationRecipientRole[],
+  idempotencyKey?: string
+): Promise<NotificationEvent | null> {
+  const normalizedEventType = normalizeTrimmedString(eventType, 128);
+  if (!normalizedEventType) {
+    throw Object.assign(new Error('Tipe event notifikasi wajib diisi.'), {
+      code: 'INVALID_EVENT_TYPE',
+    });
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw Object.assign(new Error('Payload notifikasi tidak valid.'), {
+      code: 'INVALID_EVENT_PAYLOAD',
+    });
+  }
+
+  const actorSnapshot = await getAuthenticatedActorSnapshot();
+
+  const isTargetRolesArray = Array.isArray(actorOrTargetRoles);
+  const actorMeta =
+    !isTargetRolesArray && actorOrTargetRoles && typeof actorOrTargetRoles === 'object'
+      ? actorOrTargetRoles
+      : undefined;
+  const requestedRoles = isTargetRolesArray
+    ? actorOrTargetRoles
+        .map((r) => normalizeRecipientRole(r))
+        .filter((r): r is NotificationRecipientRole => Boolean(r))
+    : undefined;
+
+  let res: Response;
+  try {
+    res = await fetch('/api/notifications/emit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actorSnapshot.idToken}`,
+      },
+      body: JSON.stringify({
+        eventType: normalizedEventType,
+        payload,
+        actor: actorMeta,
+        targetRoles: requestedRoles,
+        idempotencyKey: normalizeTrimmedString(idempotencyKey, 200) || undefined,
+      }),
+    });
+  } catch {
+    throw Object.assign(new Error('Gagal menghubungi server notifikasi.'), {
+      code: 'NETWORK_ERROR',
+    });
+  }
+
+  let body: any = null;
+  try {
+    body = await res.json();
+  } catch {
+    throw Object.assign(new Error('Respons server notifikasi tidak valid.'), {
+      code: 'MALFORMED_RESPONSE',
+      status: res?.status,
+    });
+  }
+
+  ensureSessionUnchanged(actorSnapshot.uid);
+
+  if (!res.ok || !body || body.success !== true || !body.event || typeof body.event.id !== 'string') {
+    const errCode =
+      typeof body?.code === 'string' && body.code.trim()
+        ? body.code.trim()
+        : !res.ok
+          ? `HTTP_${res.status}`
+          : 'NOTIFICATION_EMIT_REJECTED';
+    const errMsg =
+      typeof body?.error === 'string' && body.error.trim()
+        ? body.error.trim()
+        : typeof body?.message === 'string' && body.message.trim()
+          ? body.message.trim()
+          : 'Pengiriman event notifikasi ditolak oleh server.';
+    throw Object.assign(new Error(errMsg), {
+      code: errCode,
+      status: res.status,
+    });
+  }
+
+  return body.event as NotificationEvent;
+}
+
+// ============================================================================
+// 4. REALTIME SUBSCRIPTIONS & QUERIES FOR IN-APP NOTIFICATION CENTER
+// ============================================================================
+
+export interface NotificationSubscriptionFilterOptions {
+  recipientId?: string;
+  therapistId?: string;
+  customerId?: string;
+  customerAuthUid?: string;
+  bookingId?: string;
+  bookingCode?: string;
+}
+
+function matchesNotificationForStaffSubscriber(
+  n: InAppNotification & Record<string, any>,
+  role: NotificationRecipientRole,
+  canonicalId: string,
+  extraIds?: Set<string>
+): boolean {
+  const docRole =
+    normalizeRecipientRole(n.recipientRole) || normalizeRecipientRole((n as any).targetRole);
+  if (docRole !== role) return false;
+
+  if (role === 'therapist') {
+    const allowedIds = new Set<string>();
+    if (canonicalId) allowedIds.add(canonicalId);
+    if (extraIds) {
+      extraIds.forEach((id) => {
+        if (id) allowedIds.add(id);
+      });
+    }
+    if (allowedIds.size === 0) return false;
+
+    const candidates = [
+      n.recipientId,
+      n.recipientUserId,
+      n.therapistId,
+      (n as any).targetUserId,
+    ]
+      .map((v) => normalizeTrimmedString(v, 128))
+      .filter(Boolean);
+
+    if (candidates.length === 0) return false;
+    return candidates.some((c) => allowedIds.has(c));
+  }
+
+  if (role === 'supervisor' || role === 'manager' || role === 'admin' || role === 'css') {
+    const recId = normalizeTrimmedString(n.recipientId, 128);
+    const recUserId = normalizeTrimmedString(n.recipientUserId, 128);
+    if (!recId && !recUserId) return true;
+    const allowed = new Set<string>([role]);
+    if (role === 'admin' || role === 'manager') {
+      allowed.add('admin');
+      allowed.add('manager');
+    }
+    if (canonicalId) allowed.add(canonicalId);
+    if (extraIds) {
+      extraIds.forEach((id) => {
+        if (id) allowed.add(id);
+      });
+    }
+    return (recId && allowed.has(recId)) || (recUserId && allowed.has(recUserId));
+  }
+
+  return false;
+}
+
+function matchesNotificationForCustomerSubscriber(
+  n: InAppNotification & Record<string, any>,
+  customerId: string,
+  customerAuthUid: string,
+  bookingId?: string,
+  bookingCode?: string
+): boolean {
+  const docRole =
+    normalizeRecipientRole(n.recipientRole) || normalizeRecipientRole((n as any).targetRole);
+  if (docRole !== 'customer') return false;
+
+  if (!customerId && !customerAuthUid) {
+    return false;
+  }
+
+  const docCustAuthUid = normalizeTrimmedString((n as any).customerAuthUid, 128);
+  const docAuthUserId = normalizeTrimmedString((n as any).authUserId, 128);
+  if (docCustAuthUid && docAuthUserId && docCustAuthUid !== docAuthUserId) {
+    return false;
+  }
+
+  if (docCustAuthUid || docAuthUserId) {
+    const canonicalOwnerUid = docCustAuthUid || docAuthUserId;
+    if (!customerAuthUid || canonicalOwnerUid !== customerAuthUid) {
+      return false;
+    }
+  } else {
+    const allowedIds = new Set<string>();
+    if (customerId) allowedIds.add(customerId);
+    if (customerAuthUid) allowedIds.add(customerAuthUid);
+    const candidates = [n.customerId, n.recipientId, n.recipientUserId]
+      .map((v) => normalizeTrimmedString(v, 128))
+      .filter(Boolean);
+    if (candidates.length === 0 || !candidates.some((c) => allowedIds.has(c))) {
+      return false;
+    }
+  }
+
+  if (bookingId) {
+    const docBookingId = normalizeTrimmedString(n.bookingId, 128);
+    if (docBookingId && docBookingId !== bookingId) return false;
+  }
+  if (bookingCode) {
+    const docBookingCode = normalizeTrimmedString(n.bookingCode, 128).toUpperCase();
+    if (docBookingCode && docBookingCode !== bookingCode.toUpperCase()) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Subscribe to notifications for a specific role & user ID.
+ * Supports both `(role, userId, callback)` and `(role, callback, options)`.
+ */
+export function subscribeToRoleNotifications(
+  role: NotificationRecipientRole,
+  userIdOrCallback?: string | ((notifications: InAppNotification[]) => void),
+  callbackOrOptions?:
+    | ((notifications: InAppNotification[]) => void)
+    | NotificationSubscriptionFilterOptions
+): () => void {
+  const callback =
+    typeof userIdOrCallback === 'function'
+      ? userIdOrCallback
+      : typeof callbackOrOptions === 'function'
+        ? callbackOrOptions
+        : () => {};
+
+  const options: NotificationSubscriptionFilterOptions =
+    typeof userIdOrCallback === 'function'
+      ? (callbackOrOptions as NotificationSubscriptionFilterOptions) || {}
+      : {
+          recipientId: typeof userIdOrCallback === 'string' ? userIdOrCallback : undefined,
+        };
+
+  const normalizedRole = normalizeRecipientRole(role);
+  if (!normalizedRole) {
+    callback([]);
+    return () => {};
+  }
+
+  if (normalizedRole === 'customer') {
+    const cid = normalizeTrimmedString(
+      options.customerId || options.recipientId,
+      128
+    );
+    const cuid = normalizeTrimmedString(
+      options.customerAuthUid || auth?.currentUser?.uid,
+      128
+    );
+    return subscribeToCustomerNotifications(
+      {
+        customerId: cid,
+        customerAuthUid: cuid,
+        bookingId: options.bookingId,
+        bookingCode: options.bookingCode,
+      },
+      callback
+    );
+  }
+
+  const currentAuthUid = normalizeTrimmedString(auth?.currentUser?.uid, 128);
+  const canonicalId = normalizeTrimmedString(
+    normalizedRole === 'therapist'
+      ? options.therapistId || options.recipientId
+      : options.recipientId || normalizedRole,
+    128
+  );
+
+  if (
+    normalizedRole === 'therapist' &&
+    (!canonicalId || canonicalId === 'therapist' || canonicalId === 'user' || canonicalId === 'guest')
+  ) {
+    callback([]);
+    return () => {};
+  }
+
+  const extraIds = new Set<string>();
+  if (canonicalId) extraIds.add(canonicalId);
+  if (options.therapistId) extraIds.add(normalizeTrimmedString(options.therapistId, 128));
+  if (options.recipientId) extraIds.add(normalizeTrimmedString(options.recipientId, 128));
+  if (currentAuthUid) extraIds.add(currentAuthUid);
+
+  const q =
+    normalizedRole === 'therapist'
+      ? query(
+          collection(db, 'notifications'),
+          where('recipientRole', '==', 'therapist'),
+          where('recipientId', '==', canonicalId),
+          limit(150)
+        )
+      : query(
+          collection(db, 'notifications'),
+          where('recipientRole', '==', normalizedRole),
+          limit(150)
+        );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items = snap.docs
+        .map((d) => d.data() as InAppNotification & Record<string, any>)
+        .filter((n) =>
+          matchesNotificationForStaffSubscriber(n, normalizedRole, canonicalId, extraIds)
+        );
+
+      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(items);
+    },
+    (err) => {
+      console.warn('Notification subscription error:', err);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Subscribe to notifications for a specific customer (strictly scoped by authenticated customer identity, never bookingCode-only).
+ */
+export function subscribeToCustomerNotifications(
+  customerFilterOrIdentifier:
+    | string
+    | {
+        customerId?: string;
+        customerAuthUid?: string;
+        bookingId?: string;
+        bookingCode?: string;
+      },
+  callback: (notifications: InAppNotification[]) => void
+): () => void {
+  const currentAuthUid = normalizeTrimmedString(auth?.currentUser?.uid, 128);
+  let customerId = '';
+  let customerAuthUid = currentAuthUid;
+  let bookingId = '';
+  let bookingCode = '';
+
+  if (typeof customerFilterOrIdentifier === 'string') {
+    const clean = normalizeTrimmedString(customerFilterOrIdentifier, 128);
+    if (!clean) {
+      callback([]);
+      return () => {};
+    }
+    const looksLikeBookingCode = /^SH-[0-9-]+$/i.test(clean);
+    if (looksLikeBookingCode) {
+      bookingCode = clean;
+      customerId = currentAuthUid;
+    } else {
+      customerId = clean;
+      if (!customerAuthUid) {
+        customerAuthUid = clean;
+      }
+    }
+  } else if (customerFilterOrIdentifier && typeof customerFilterOrIdentifier === 'object') {
+    customerId = normalizeTrimmedString(customerFilterOrIdentifier.customerId, 128);
+    customerAuthUid =
+      normalizeTrimmedString(customerFilterOrIdentifier.customerAuthUid, 128) || currentAuthUid;
+    bookingId = normalizeTrimmedString(customerFilterOrIdentifier.bookingId, 128);
+    bookingCode = normalizeTrimmedString(customerFilterOrIdentifier.bookingCode, 128);
+  }
+
+  // Never allow unauthenticated or bookingCode-only customer notification subscriptions
+  if (!customerId && !customerAuthUid) {
+    callback([]);
+    return () => {};
+  }
+  if (currentAuthUid && customerAuthUid && currentAuthUid !== customerAuthUid) {
+    callback([]);
+    return () => {};
+  }
+
+  const effectiveCustomerId = customerId || customerAuthUid;
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipientRole', '==', 'customer'),
+    where('recipientId', '==', effectiveCustomerId),
+    limit(100)
+  );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => d.data() as InAppNotification & Record<string, any>)
+        .filter((n) =>
+          matchesNotificationForCustomerSubscriber(
+            n,
+            effectiveCustomerId,
+            customerAuthUid,
+            bookingId || undefined,
+            bookingCode || undefined
+          )
+        );
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    },
+    (err) => {
+      console.warn('Customer notification subscription error:', err);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Mark a single notification as read (verified recipient only, read/readAt fields only)
+ */
+export async function markNotificationAsRead(notificationId: string): Promise<void> {
+  const cleanId = normalizeTrimmedString(notificationId, 160);
+  if (!cleanId) {
+    throw Object.assign(new Error('ID notifikasi wajib diisi.'), {
+      code: 'INVALID_NOTIFICATION_ID',
+    });
+  }
+
+  const actor = await getAuthenticatedActorSnapshot();
+
+  let serverHandled = false;
+  try {
+    const res = await fetch('/api/notifications/mark-read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actor.idToken}`,
+      },
+      body: JSON.stringify({ notificationId: cleanId }),
+    });
+    ensureSessionUnchanged(actor.uid);
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.ok && body?.success === true) {
+      serverHandled = true;
+    } else if (body && typeof body.code === 'string') {
+      throw Object.assign(
+        new Error(body.error || body.message || 'Gagal menandai notifikasi telah dibaca.'),
+        { code: body.code, status: res.status }
+      );
+    }
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code !== 'NETWORK_ERROR') {
+      throw err;
+    }
+  }
+
+  if (serverHandled) return;
+
+  ensureSessionUnchanged(actor.uid);
+  const ctx = await resolveVerifiedCallerContext(actor.uid);
+  const notifRef = doc(db, 'notifications', cleanId);
+  const snap = await getDoc(notifRef);
+  if (!snap.exists()) {
+    throw Object.assign(new Error('Notifikasi tidak ditemukan.'), {
+      code: 'NOTIFICATION_NOT_FOUND',
+    });
+  }
+
+  const data = snap.data() as Record<string, any>;
+  const authorized = await isCallerAuthorizedForNotificationDoc(data, ctx);
+  if (!authorized) {
+    throw Object.assign(new Error('Anda tidak memiliki akses ke notifikasi ini.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+
+  await updateDoc(notifRef, {
+    read: true,
+    readAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Mark all notifications for a role/recipient as read (scoped to caller's authorized notifications)
+ */
+export async function markAllNotificationsAsRead(
+  role: NotificationRecipientRole,
+  userId?: string
+): Promise<void> {
+  const targetRole = normalizeRecipientRole(role);
+  if (!targetRole) {
+    throw Object.assign(new Error('Role notifikasi tidak valid.'), {
+      code: 'INVALID_RECIPIENT_ROLE',
+    });
+  }
+
+  const actor = await getAuthenticatedActorSnapshot();
+  const cleanUserId = normalizeTrimmedString(userId, 128);
+
+  let serverHandled = false;
+  try {
+    const res = await fetch('/api/notifications/mark-all-read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actor.idToken}`,
+      },
+      body: JSON.stringify({
+        role: targetRole,
+        userId: cleanUserId || undefined,
+      }),
+    });
+    ensureSessionUnchanged(actor.uid);
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.ok && body?.success === true) {
+      serverHandled = true;
+    } else if (body && typeof body.code === 'string') {
+      throw Object.assign(
+        new Error(body.error || body.message || 'Gagal menandai semua notifikasi.'),
+        { code: body.code, status: res.status }
+      );
+    }
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code !== 'NETWORK_ERROR') {
+      throw err;
+    }
+  }
+
+  if (serverHandled) return;
+
+  ensureSessionUnchanged(actor.uid);
+  const ctx = await resolveVerifiedCallerContext(actor.uid);
+  if (targetRole === 'therapist' && (!ctx.isStaff || ctx.staffRole !== 'therapist')) {
+    throw Object.assign(new Error('Akses notifikasi terapis ditolak.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+  if (
+    targetRole === 'therapist' &&
+    cleanUserId &&
+    !ctx.therapistIds.has(cleanUserId)
+  ) {
+    throw Object.assign(new Error('Tidak dapat memodifikasi notifikasi terapis lain.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+  if (
+    ['admin', 'manager', 'supervisor', 'css'].includes(targetRole) &&
+    !ctx.isStaff
+  ) {
+    throw Object.assign(new Error('Akses notifikasi staf ditolak.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipientRole', '==', targetRole),
+    where('read', '==', false)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const batch = writeBatch(db);
+  const now = new Date().toISOString();
+  let count = 0;
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data() as Record<string, any>;
+    if (cleanUserId) {
+      const candidates = [
+        data.recipientId,
+        data.recipientUserId,
+        data.therapistId,
+        data.customerId,
+      ]
+        .map((v) => normalizeTrimmedString(v, 128))
+        .filter(Boolean);
+      if (
+        (targetRole === 'therapist' || targetRole === 'customer') &&
+        !candidates.includes(cleanUserId)
+      ) {
+        continue;
+      }
+    }
+    const authorized = await isCallerAuthorizedForNotificationDoc(data, ctx);
+    if (!authorized) continue;
+
+    batch.update(docSnap.ref, { read: true, readAt: now });
+    count++;
+  }
+
+  if (count > 0) {
+    await batch.commit();
+  }
+}
+
+/**
+ * Delete a single notification (verified recipient only)
+ */
+export async function deleteNotification(notificationId: string): Promise<void> {
+  const cleanId = normalizeTrimmedString(notificationId, 160);
+  if (!cleanId) {
+    throw Object.assign(new Error('ID notifikasi wajib diisi.'), {
+      code: 'INVALID_NOTIFICATION_ID',
+    });
+  }
+
+  const actor = await getAuthenticatedActorSnapshot();
+
+  let serverHandled = false;
+  try {
+    const res = await fetch('/api/notifications/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actor.idToken}`,
+      },
+      body: JSON.stringify({ notificationId: cleanId }),
+    });
+    ensureSessionUnchanged(actor.uid);
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.ok && body?.success === true) {
+      serverHandled = true;
+    } else if (body && typeof body.code === 'string') {
+      throw Object.assign(
+        new Error(body.error || body.message || 'Gagal menghapus notifikasi.'),
+        { code: body.code, status: res.status }
+      );
+    }
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code !== 'NETWORK_ERROR') {
+      throw err;
+    }
+  }
+
+  if (serverHandled) return;
+
+  ensureSessionUnchanged(actor.uid);
+  const ctx = await resolveVerifiedCallerContext(actor.uid);
+  const notifRef = doc(db, 'notifications', cleanId);
+  const snap = await getDoc(notifRef);
+  if (!snap.exists()) {
+    throw Object.assign(new Error('Notifikasi tidak ditemukan.'), {
+      code: 'NOTIFICATION_NOT_FOUND',
+    });
+  }
+
+  const data = snap.data() as Record<string, any>;
+  const authorized = await isCallerAuthorizedForNotificationDoc(data, ctx);
+  if (!authorized) {
+    throw Object.assign(new Error('Anda tidak memiliki akses untuk menghapus notifikasi ini.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+
+  await deleteDoc(notifRef);
+}
+
+/**
+ * Clear all read notifications for a role/recipient (scoped strictly to caller's own read notifications)
+ */
+export async function clearReadNotifications(
+  role: NotificationRecipientRole,
+  userId?: string
+): Promise<void> {
+  const targetRole = normalizeRecipientRole(role);
+  if (!targetRole) {
+    throw Object.assign(new Error('Role notifikasi tidak valid.'), {
+      code: 'INVALID_RECIPIENT_ROLE',
+    });
+  }
+
+  const actor = await getAuthenticatedActorSnapshot();
+  const cleanUserId = normalizeTrimmedString(userId, 128);
+
+  let serverHandled = false;
+  try {
+    const res = await fetch('/api/notifications/clear-read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${actor.idToken}`,
+      },
+      body: JSON.stringify({
+        role: targetRole,
+        userId: cleanUserId || undefined,
+      }),
+    });
+    ensureSessionUnchanged(actor.uid);
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.ok && body?.success === true) {
+      serverHandled = true;
+    } else if (body && typeof body.code === 'string') {
+      throw Object.assign(
+        new Error(body.error || body.message || 'Gagal membersihkan notifikasi.'),
+        { code: body.code, status: res.status }
+      );
+    }
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code !== 'NETWORK_ERROR') {
+      throw err;
+    }
+  }
+
+  if (serverHandled) return;
+
+  ensureSessionUnchanged(actor.uid);
+  const ctx = await resolveVerifiedCallerContext(actor.uid);
+  if (targetRole === 'therapist' && (!ctx.isStaff || ctx.staffRole !== 'therapist')) {
+    throw Object.assign(new Error('Akses notifikasi terapis ditolak.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+  if (
+    targetRole === 'therapist' &&
+    cleanUserId &&
+    !ctx.therapistIds.has(cleanUserId)
+  ) {
+    throw Object.assign(new Error('Tidak dapat menghapus notifikasi terapis lain.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+  if (
+    ['admin', 'manager', 'supervisor', 'css'].includes(targetRole) &&
+    !ctx.isStaff
+  ) {
+    throw Object.assign(new Error('Akses notifikasi staf ditolak.'), {
+      code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+    });
+  }
+
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipientRole', '==', targetRole),
+    where('read', '==', true)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const batch = writeBatch(db);
+  let count = 0;
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data() as Record<string, any>;
+    if (cleanUserId) {
+      const candidates = [
+        data.recipientId,
+        data.recipientUserId,
+        data.therapistId,
+        data.customerId,
+      ]
+        .map((v) => normalizeTrimmedString(v, 128))
+        .filter(Boolean);
+      if (
+        (targetRole === 'therapist' || targetRole === 'customer') &&
+        !candidates.includes(cleanUserId)
+      ) {
+        continue;
+      }
+    }
+    const authorized = await isCallerAuthorizedForNotificationDoc(data, ctx);
+    if (!authorized) continue;
+
+    batch.delete(docSnap.ref);
+    count++;
+  }
+
+  if (count > 0) {
+    await batch.commit();
+  }
+}
+
+// ============================================================================
+// 5. AUDIT & DELIVERY HISTORY QUERIES (ADMIN / MANAGER DASHBOARD)
+// ============================================================================
+
+export async function getRecentNotificationEvents(limitCount = 50): Promise<NotificationEvent[]> {
+  try {
+    const q = query(collection(db, 'notification_events'), limit(limitCount));
+    const snap = await getDocs(q);
+    const list = snap.docs.map((d) => d.data() as NotificationEvent);
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (err) {
+    console.warn('Error fetching notification events:', err);
+    return [];
+  }
+}
+
+export async function getNotificationDeliveries(limitCount = 100): Promise<NotificationDelivery[]> {
+  try {
+    const q = query(collection(db, 'notification_deliveries'), limit(limitCount));
+    const snap = await getDocs(q);
+    const list = snap.docs.map((d) => d.data() as NotificationDelivery & Record<string, any>);
+    return list.sort(
+      (a, b) =>
+        new Date(b.createdAt || b.sentAt || b.deliveredAt || 0).getTime() -
+        new Date(a.createdAt || a.sentAt || a.deliveredAt || 0).getTime()
+    );
+  } catch (err) {
+    console.warn('Error fetching notification deliveries:', err);
+    return [];
   }
 }

@@ -10,20 +10,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isSystemServer() {
-      return isSignedIn() && (
-        request.auth.uid == 'd9TQAK0v8dV4bB9Sxm660M416Ly2' ||
-        (request.auth.token.email != null && request.auth.token.email == 'system.service@senzuhome.internal')
-      );
-    }
-
-    function isPrimaryManager() {
-      return isSignedIn() && (
-        (request.auth.token.email != null && request.auth.token.email == 'ridhokrnwn97@gmail.com') ||
-        isSystemServer()
-      );
-    }
-
     function hasStaffRoleDoc() {
       return isSignedIn() && exists(/databases/$(database)/documents/staff_roles/$(request.auth.uid));
     }
@@ -32,20 +18,73 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/staff_roles/$(request.auth.uid)).data;
     }
 
+    function staffUidFieldsMatch(data) {
+      return (data.get('authUserId', '') in ['', null, request.auth.uid])
+        && (data.get('authUid', '') in ['', null, request.auth.uid]);
+    }
+
+    function isUidBoundStaff(data, staffId) {
+      return isSignedIn() && staffUidFieldsMatch(data) && (
+        data.get('authUserId', '') == request.auth.uid
+        || data.get('authUid', '') == request.auth.uid
+        || staffId == request.auth.uid
+      );
+    }
+
+    function normalizedStaffStatus(value) {
+      return value is string ? value.trim().upper() : '';
+    }
+
+    function staffAccessDisabled(data) {
+      return data.get('isActive', true) == false
+        || data.get('loginEnabled', true) == false
+        || normalizedStaffStatus(data.get('status', '')) in [
+          'INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED'
+        ]
+        || normalizedStaffStatus(data.get('loginAccountStatus', '')) == 'DINONAKTIFKAN';
+    }
+
+    function currentStaffMasterId(role) {
+      let first = role.get('staffId', '');
+      let second = role.get('staffUserId', '');
+      return first is string && first.size() > 0
+          && exists(/databases/$(database)/documents/staff_users/$(first)) ? first
+        : (second is string && second.size() > 0
+          && exists(/databases/$(database)/documents/staff_users/$(second)) ? second : request.auth.uid);
+    }
+
+    function currentStaffAccessIsActive() {
+      let role = getStaffRole();
+      let staffId = currentStaffMasterId(role);
+      let staff = get(/databases/$(database)/documents/staff_users/$(staffId)).data;
+      let aliases = ['', null, staffId, request.auth.uid, staff.get('uid', ''), staff.get('id', '')];
+      return role.get('isActive', false) == true
+        && staffUidFieldsMatch(role)
+        && !staffAccessDisabled(role)
+        && exists(/databases/$(database)/documents/staff_users/$(staffId))
+        && isUidBoundStaff(staff, staffId)
+        && (role.get('staffId', '') == null || role.get('staffId', '') is string)
+        && (role.get('staffUserId', '') == null || role.get('staffUserId', '') is string)
+        && role.get('staffId', '') in aliases
+        && role.get('staffUserId', '') in aliases
+        && !staffAccessDisabled(staff)
+        && role.get('role', '') == staff.get('role', 'staff');
+    }
+
     function isStaffActive() {
-      return isPrimaryManager() || (hasStaffRoleDoc() && (!('isActive' in getStaffRole()) || getStaffRole().isActive == true));
+      return hasStaffRoleDoc() && currentStaffAccessIsActive();
     }
 
     function isManager() {
-      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin']);
+      return isStaffActive() && getStaffRole().get('role', '') in ['manager', 'admin'];
     }
 
     function isSupervisor() {
-      return isManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['supervisor', 'manager', 'admin']);
+      return isStaffActive() && getStaffRole().get('role', '') in ['supervisor', 'manager', 'admin'];
     }
 
     function isCSS() {
-      return isManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['css', 'admin', 'manager']);
+      return isStaffActive() && getStaffRole().get('role', '') in ['css', 'admin', 'manager'];
     }
 
     function isTherapist() {
@@ -53,11 +92,11 @@ service cloud.firestore {
     }
 
     function isStaff() {
-      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff']);
+      return isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff'];
     }
 
     function isOperationalStaff() {
-      return isPrimaryManager() || (isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css']);
+      return isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css'];
     }
 
     function getStaffTherapistId() {
@@ -111,6 +150,80 @@ service cloud.firestore {
       let booking = get(/databases/$(database)/documents/bookings/$(paymentData.bookingId)).data;
       return isSignedIn() && paymentUidMatches(paymentData) && paymentUidMatches(booking)
         && (booking.get('customerAuthUid', '') == request.auth.uid || booking.get('authUserId', '') == request.auth.uid);
+    }
+
+    // Stage 5B: Voucher-intent helpers to prevent direct client voucher-booking bypass
+    function isNullOrEmptyStringField(data, field) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() == 0);
+    }
+
+    function isNullOrZeroNumberField(data, field) {
+      return !(field in data) || data[field] == null || (data[field] is number && data[field] == 0);
+    }
+
+    // Only an existing UID-bound profile and staff-managed loyalty/catalog data can authorize a tier discount.
+    function ownedTierDiscountMatches(data, amount) {
+      let customerId = data.get('customerId', '');
+      let profile = get(/databases/$(database)/documents/customers/$(customerId)).data;
+      let account = get(/databases/$(database)/documents/loyalty_accounts/$(customerId)).data;
+      let tierId = account.get('currentTierId', '');
+      let tier = get(/databases/$(database)/documents/membership_tiers/$(tierId)).data;
+      let catalog = get(/databases/$(database)/documents/services/$(data.serviceId)).data;
+      return isSignedIn() && paymentUidMatches(data) && paymentUidMatches(profile)
+        && (profile.get('authUserId', '') == request.auth.uid || profile.get('customerAuthUid', '') == request.auth.uid)
+        && account.get('customerId', '') == customerId && paymentUidMatches(account)
+        && account.get('status', '') == 'active'
+        && tier.get('enabled', false) == true
+        && tier.discountPercentage is number && tier.discountPercentage >= 0 && tier.discountPercentage <= 100
+        && catalog.price is number && catalog.price >= 0 && data.servicePrice == catalog.price
+        && data.get('membershipTierAtBooking', '') in [tierId, tier.get('name', '')]
+        && amount == math.floor(catalog.price * tier.discountPercentage / 100);
+    }
+
+    function hasOfficialBookingPrice(data) {
+      let catalog = get(/databases/$(database)/documents/services/$(data.serviceId)).data;
+      return catalog.get('price', null) is number && catalog.price >= 0 && data.servicePrice == catalog.price;
+    }
+
+    function hasNoClientVoucherBookingIntent(data) {
+      // Keep scalar bindings simple: Rules expands expressions and has a strict evaluation budget.
+      let price = data.get('servicePrice', -1);
+      let fee = data.get('homeServiceFee', 0);
+      let total = data.get('totalAmount', -1);
+      let rawDiscount = data.get('discountAmount', 0);
+      let discount = rawDiscount == null ? 0 : rawDiscount;
+      return price is number && price >= 0 && fee is number && fee >= 0
+        && total is number && total >= 0 && discount is number && discount >= 0
+        && total >= price + fee - discount
+        // Points consumption always goes through the authenticated Admin transaction.
+        && isNullOrZeroNumberField(data, 'pointsDiscount')
+        && isNullOrZeroNumberField(data, 'pointsRedeemed')
+        && (!('tierDiscount' in data) || data.tierDiscount == null || data.tierDiscount == discount)
+        && data.get('serviceId', '') is string && data.get('serviceId', '').size() > 0
+        && (discount == 0 ? hasOfficialBookingPrice(data)
+          : (isSignedIn() && ownedTierDiscountMatches(data, discount)))
+        && isNullOrEmptyStringField(data, 'promoId')
+        && isNullOrEmptyStringField(data, 'promoCode')
+        && isNullOrEmptyStringField(data, 'promoCodeSnapshot')
+        && isNullOrEmptyStringField(data, 'promoNameSnapshot')
+        && isNullOrEmptyStringField(data, 'discountTypeSnapshot')
+        && isNullOrEmptyStringField(data, 'voucherId')
+        && isNullOrEmptyStringField(data, 'voucherCode')
+        && isNullOrEmptyStringField(data, 'customerVoucherId')
+        && isNullOrZeroNumberField(data, 'discountValueSnapshot')
+        && isNullOrZeroNumberField(data, 'promoDiscount')
+        && isNullOrZeroNumberField(data, 'voucherDiscount')
+        && !data.keys().hasAny([
+          'checkoutAttemptId',
+          'voucherCheckoutReceiptId',
+          'voucherRedemptionReceiptId',
+          'redemptionReceiptId',
+          'receiptId',
+          'serverValidated',
+          'voucherServerValidated',
+          'trustedVoucherCommit',
+          'voucherCheckoutCommittedAt'
+        ]);
     }
 
     // =============================================================
@@ -207,7 +320,7 @@ service cloud.firestore {
     // Client write is STRICTLY FORBIDDEN (handled by trusted server backend only).
     match /staff_roles/{authUid} {
       allow read: if isSignedIn() && (request.auth.uid == authUid || isOperationalStaff());
-      allow write: if isSystemServer(); // Prompt 18D: Server-Authoritative only. No browser client, including Manager, can write.
+      allow write: if false; // Trusted Admin SDK is server-only and bypasses client Rules.
     }
 
     // /staff_users/{staffId}: Staff directory
@@ -215,12 +328,11 @@ service cloud.firestore {
     // Write: Manager only (or staff updating non-role profile fields)
     match /staff_users/{staffId} {
       allow read: if isOperationalStaff() || (isSignedIn() && (
-        ('authUserId' in resource.data && resource.data.authUserId == request.auth.uid) ||
-        ('authUid' in resource.data && resource.data.authUid == request.auth.uid) ||
-        ('email' in resource.data && request.auth.token.email != null && resource.data.email == request.auth.token.email)
-      ));
-      allow create: if isSystemServer() || isManager();
-      allow update: if isSystemServer() || isManager() || (
+          resource.data.get('authUserId', '') == request.auth.uid
+          || resource.data.get('authUid', '') == request.auth.uid
+        ));
+      allow create: if isManager();
+      allow update: if isManager() || (
         isStaff() && 'authUserId' in resource.data && resource.data.authUserId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
              'displayName', 'phone', 'whatsapp', 'gender', 'internalNotes', 'updatedAt'
@@ -420,12 +532,6 @@ service cloud.firestore {
               (!('customerAuthUid' in resource.data) || resource.data.customerAuthUid == null || resource.data.customerAuthUid == '' || resource.data.customerAuthUid == request.auth.uid)
             )
           )
-        )
-        || (
-          // Unauthenticated guest tracking ONLY: booking has no authenticated owner
-          !isSignedIn() &&
-          (!('customerAuthUid' in resource.data) || resource.data.customerAuthUid == null || resource.data.customerAuthUid == '') &&
-          (!('authUserId' in resource.data) || resource.data.authUserId == null || resource.data.authUserId == '')
         );
 
       allow list: if isOperationalStaff()
@@ -440,11 +546,12 @@ service cloud.firestore {
              )
            ));
 
-      // Customer or guest can create a booking with SAFE FIELDS ONLY
-      // Cannot set operational statuses, therapist assignment, payment verification, or timestamps
+      // Customer or guest can create a no-voucher booking with SAFE FIELDS ONLY
+      // Voucher-bearing bookings must be committed via the authoritative server checkout transaction
       allow create: if request.resource.data.get('paymentPolicyVersion', 0) == 2
         && request.resource.data.get('paymentDeadline', null) == null
         && (isOperationalStaff() || (
+        hasNoClientVoucherBookingIntent(request.resource.data) &&
         request.resource.data.status in ['Menunggu Pembayaran', 'awaiting_payment', 'Draft', 'Pending'] &&
         (!('paymentStatus' in request.resource.data) || request.resource.data.paymentStatus in ['UNPAID', 'PENDING', 'pending', 'unpaid'] || request.resource.data.paymentStatus == null) &&
         (!('therapistId' in request.resource.data) || request.resource.data.therapistId == null) &&
@@ -456,7 +563,7 @@ service cloud.firestore {
         (!('acceptedAt' in request.resource.data) || request.resource.data.acceptedAt == null) &&
         (!('onTheWayAt' in request.resource.data) || request.resource.data.onTheWayAt == null) &&
         (!('arrivedAt' in request.resource.data) || request.resource.data.arrivedAt == null) &&
-        (!('totalAmount' in request.resource.data) || request.resource.data.totalAmount >= 0) &&
+        (!('totalAmount' in request.resource.data) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0)) &&
         (!('internalNotes' in request.resource.data) || request.resource.data.internalNotes == null || request.resource.data.internalNotes == '') &&
         // Spoof prevention: guests cannot set ownership UIDs; signed-in users must match request.auth.uid
         (
@@ -523,10 +630,7 @@ service cloud.firestore {
       // Admin-backed payment endpoints derive amounts, ownership, deadline and proof acceptance.
       allow create: if false;
       // Keep the existing staff correction feature; customers cannot bypass server checks.
-      allow update: if (isSupervisor() || isCSS())
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'bookingId', 'customerAuthUid', 'authUserId', 'paymentDeadline', 'amount'
-        ]);
+      allow update: if false;
 
       allow delete: if false; // Prompt 18D: Payments No-Hard-Delete policy
     }
@@ -536,14 +640,14 @@ service cloud.firestore {
     // =============================================================
 
     match /booking_status_history/{historyId} {
-      allow read: if true; // Needed for guest order tracking timeline
-      allow create: if true; // Append-only initial status created on booking submission
+      allow read: if false;
+      allow create: if false; // Trusted backend only (Stage 7B: Finding 6)
       allow update, delete: if false;
     }
 
     match /payment_status_history/{historyId} {
       allow read: if isOperationalStaff();
-      allow create: if true; // Append-only payment status history
+      allow create: if false;
       allow update, delete: if false;
     }
 
@@ -564,7 +668,7 @@ service cloud.firestore {
 
     match /customer_audit_logs/{logId} {
       allow read: if isOperationalStaff();
-      allow create: if true;
+      allow create: if false;
       allow update, delete: if false;
     }
 
@@ -600,10 +704,16 @@ service cloud.firestore {
     }
 
     match /voucher_redemptions/{redemptionId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if isOperationalStaff();
-      allow delete: if false;
+      allow read: if isOperationalStaff();
+      allow create, update, delete: if false; // Trusted server Admin SDK is the sole writer
+    }
+
+    match /voucher_redemption_receipts/{receiptId} {
+      allow read, write: if false; // Server-only financial evidence for every client role.
+    }
+
+    match /voucher_checkout_receipts/{receiptId} {
+      allow read, write: if false; // Private server-only checkout receipt ledger
     }
 
     match /referrals/{referralId} {
@@ -620,13 +730,80 @@ service cloud.firestore {
     // =============================================================
 
     match /notifications/{notifId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if isStaff() || (isSignedIn() && (
-        ('recipientUserId' in resource.data && resource.data.recipientUserId == request.auth.uid) ||
-        ('recipientRole' in resource.data && resource.data.recipientRole == 'customer')
-      ));
-      allow delete: if isOperationalStaff();
+      function isTherapistRecipientMatch(val) {
+        let role = getStaffRole();
+        let staffId = currentStaffMasterId(role);
+        let staff = get(/databases/$(database)/documents/staff_users/$(staffId)).data;
+        let candidates = [
+          request.auth.uid,
+          role.get('therapistId', ''),
+          role.get('staffId', ''),
+          role.get('staffUserId', ''),
+          staffId,
+          staff.get('therapistId', ''),
+          staff.get('id', ''),
+          staff.get('uid', '')
+        ];
+        return val is string && val.size() > 0 && val in candidates;
+      }
+
+      function isCustomerNotificationOwner(data) {
+        let hasCanonicalUid = ('customerAuthUid' in data && data.customerAuthUid is string && data.customerAuthUid.size() > 0)
+          || ('authUserId' in data && data.authUserId is string && data.authUserId.size() > 0);
+        let canonicalUidMatches = (!('customerAuthUid' in data) || data.customerAuthUid == null || data.customerAuthUid == '' || data.customerAuthUid == request.auth.uid)
+          && (!('authUserId' in data) || data.authUserId == null || data.authUserId == '' || data.authUserId == request.auth.uid)
+          && (data.get('customerAuthUid', '') == request.auth.uid || data.get('authUserId', '') == request.auth.uid);
+        return isSignedIn() && (
+          hasCanonicalUid ? canonicalUidMatches : (
+            (data.get('recipientUserId', '') == request.auth.uid) ||
+            (data.get('recipientId', '') == request.auth.uid) ||
+            (data.get('customerId', '') is string && data.get('customerId', '').size() > 0 && isCustomer(data.customerId)) ||
+            (data.get('recipientId', '') is string && data.get('recipientId', '').size() > 0 && isCustomer(data.recipientId)) ||
+            (data.get('bookingId', '') is string && data.get('bookingId', '').size() > 0
+              && exists(/databases/$(database)/documents/bookings/$(data.bookingId))
+              && isBookingCustomer(get(/databases/$(database)/documents/bookings/$(data.bookingId)).data))
+          )
+        );
+      }
+
+      function isNotificationRecipient(data) {
+        let recRole = data.get('recipientRole', data.get('targetRole', ''));
+        return isSignedIn() && (
+          (isManager() && (
+            recRole in ['admin', 'manager', 'supervisor', 'css'] ||
+            data.get('recipientId', '') in ['admin', 'manager', 'supervisor', 'css', request.auth.uid] ||
+            data.get('recipientUserId', '') == request.auth.uid
+          )) ||
+          (isSupervisor() && (
+            recRole == 'supervisor' ||
+            data.get('recipientId', '') in ['supervisor', request.auth.uid] ||
+            data.get('recipientUserId', '') == request.auth.uid
+          )) ||
+          (isCSS() && (
+            recRole in ['css', 'supervisor'] ||
+            data.get('recipientId', '') in ['css', request.auth.uid] ||
+            data.get('recipientUserId', '') == request.auth.uid
+          )) ||
+          (isTherapist() && recRole == 'therapist' && (
+            isTherapistRecipientMatch(data.get('recipientId', '')) ||
+            isTherapistRecipientMatch(data.get('recipientUserId', '')) ||
+            isTherapistRecipientMatch(data.get('therapistId', '')) ||
+            isTherapistRecipientMatch(data.get('targetUserId', ''))
+          )) ||
+          (recRole == 'customer' && isCustomerNotificationOwner(data))
+        );
+      }
+
+      allow read: if isNotificationRecipient(resource.data);
+      allow create: if false;
+      allow update: if isNotificationRecipient(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt', 'updatedAt'])
+        && request.resource.data.read is bool
+        && (
+          (request.resource.data.read == true && request.resource.data.readAt is string && request.resource.data.readAt.size() > 0) ||
+          (request.resource.data.read == false && (!('readAt' in request.resource.data) || request.resource.data.readAt == null))
+        );
+      allow delete: if isNotificationRecipient(resource.data);
     }
 
     match /notification_settings/{settingId} {
@@ -635,21 +812,56 @@ service cloud.firestore {
     }
 
     match /notification_devices/{deviceId} {
-      allow read, write: if isOperationalStaff();
+      function isDeviceRegistrationOwner(data) {
+        let role = data.get('role', '');
+        let uid = data.get('userId', '');
+        let staffRoleDoc = hasStaffRoleDoc() ? getStaffRole() : {};
+        let staffMasterId = hasStaffRoleDoc() ? currentStaffMasterId(staffRoleDoc) : '';
+        return isSignedIn()
+          && data.get('token', '') is string
+          && data.token.size() >= 10
+          && data.token.size() <= 4096
+          && (!('authUid' in data) || data.authUid == null || data.authUid == '' || data.authUid == request.auth.uid)
+          && (
+            (role in ['admin', 'manager'] && isManager() && uid in ['admin', 'manager', request.auth.uid, staffMasterId]) ||
+            (role == 'supervisor' && isSupervisor() && uid in ['supervisor', request.auth.uid, staffMasterId]) ||
+            (role == 'css' && isCSS() && uid in ['css', request.auth.uid, staffMasterId]) ||
+            (role == 'therapist' && isTherapist() && uid is string && uid.size() > 0 && (
+              uid == request.auth.uid ||
+              uid == getStaffTherapistId() ||
+              uid == staffMasterId ||
+              uid == staffRoleDoc.get('staffId', '') ||
+              uid == staffRoleDoc.get('staffUserId', '')
+            )) ||
+            (role == 'customer' && uid is string && uid.size() > 0 && isCustomer(uid))
+          );
+      }
+
+      allow read: if isOperationalStaff() || (isSignedIn() && (
+        resource.data.get('authUid', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        (resource.data.get('role', '') == 'customer' && resource.data.get('userId', '') is string && isCustomer(resource.data.userId)) ||
+        (resource.data.get('role', '') == 'therapist' && isTherapist() && resource.data.get('userId', '') == getStaffTherapistId())
+      ));
+      allow create, update: if isDeviceRegistrationOwner(request.resource.data)
+        && (resource == null || isOperationalStaff()
+          || resource.data.get('authUid', '') in ['', null, request.auth.uid]
+          || resource.data.get('userId', '') == request.resource.data.get('userId', ''));
+      allow delete: if isOperationalStaff() || (isSignedIn() && (
+        resource.data.get('authUid', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        (resource.data.get('role', '') == 'customer' && resource.data.get('userId', '') is string && isCustomer(resource.data.userId))
+      ));
     }
 
     match /notification_events/{eventId} {
       allow read: if isOperationalStaff();
-      allow create: if true;
-      allow update: if true;
-      allow delete: if isManager();
+      allow create, update, delete: if false;
     }
 
     match /notification_deliveries/{deliveryId} {
       allow read: if isOperationalStaff();
-      allow create: if true;
-      allow update: if isOperationalStaff();
-      allow delete: if isManager();
+      allow create, update, delete: if false;
     }
 
     match /reviews/{reviewId} {

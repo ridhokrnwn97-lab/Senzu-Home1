@@ -24,6 +24,7 @@ import {
   OperationalShiftStatus,
 } from '../types';
 import { addOperationalAuditLog } from './dbService';
+import { emitEvent } from './notificationService';
 import { cleanFirestoreData, getTodayDateWIB } from './utils';
 
 export function timeToMinutes(timeStr: string): number {
@@ -495,22 +496,18 @@ export async function notifyTherapistShiftChange(
   actorName: string
 ): Promise<void> {
   try {
-    const notifId = `notif_shift_${therapistId}_${Date.now()}`;
-    const notifData = {
-      id: notifId,
-      eventId: `ev_shift_${Date.now()}`,
-      eventType: 'therapist.shift_updated',
-      recipientRole: 'therapist',
-      therapistId,
-      title: 'Pembaruan Jadwal Kerja',
-      message: `Halo ${therapistName}, jadwal kerja Anda untuk tanggal ${date} telah diperbarui oleh Supervisor (${actorName}): ${changeSummary}.`,
-      channel: 'in_app',
-      priority: 'NORMAL',
-      read: false,
-      readAt: null,
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'notifications', notifId), cleanFirestoreData(notifData));
+    await emitEvent(
+      'therapist.shift_updated',
+      {
+        therapistId,
+        therapistName,
+        date,
+        changeSummary,
+        actorName,
+        rosterId: buildRosterDocId(therapistId, date),
+      },
+      ['therapist']
+    );
   } catch (err) {
     console.warn('Failed to send shift notification to therapist:', err);
   }

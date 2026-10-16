@@ -521,67 +521,820 @@ export async function addBookingStatusHistory(
   status: BookingStatus,
   updatedByRole: BookingStatusHistory['updatedByRole'],
   updatedByName: string,
-  note?: string
+  note?: string,
+  options?: { requestId?: string } | string
 ): Promise<void> {
-  // Prevent duplicate status history entries
-  try {
-    const q = query(
-      collection(db, 'booking_status_history'),
-      where('bookingCode', '==', bookingCode)
-    );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const existing = snap.docs.map((d) => d.data() as BookingStatusHistory);
-      existing.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      const last = existing[existing.length - 1];
-      if (last && last.status === status) {
-        // Status already logged as the latest state
+  void updatedByRole;
+  void updatedByName;
+
+  const isValidHistoryId = (val: unknown, maxBytes = 128): val is string => {
+    if (typeof val !== 'string') return false;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed !== val) return false;
+    if (trimmed === '.' || trimmed === '..') return false;
+    if (new TextEncoder().encode(trimmed).length > maxBytes) return false;
+    if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+    return true;
+  };
+
+  const ALLOWED_STATUSES = new Set<string>([
+    'Draft',
+    'Pending',
+    'awaiting_payment',
+    'Menunggu Pembayaran',
+    'Menunggu Verifikasi Pembayaran',
+    'Pembayaran Terverifikasi',
+    'Menunggu Penjadwalan',
+    'Terjadwal',
+    'Confirmed',
+    'Therapist Assigned',
+    'Accepted',
+    'On The Way',
+    'Arrived',
+    'Treatment',
+    'Completed',
+    'Cancelled',
+    'Rescheduled',
+    'Pembayaran Ditolak',
+  ]);
+
+  const INITIAL_GUEST_STATUSES = new Set<string>([
+    'Menunggu Pembayaran',
+    'awaiting_payment',
+    'Draft',
+    'Pending',
+  ]);
+
+  const ALLOWED_ROLES = new Set<string>([
+    'customer',
+    'css',
+    'supervisor',
+    'therapist',
+    'system',
+    'manager',
+    'admin',
+  ]);
+
+  const rawBookingId = typeof bookingId === 'string' ? bookingId.trim() : '';
+  if (!isValidHistoryId(rawBookingId, 128) || bookingId !== rawBookingId) return;
+
+  const rawBookingCode = typeof bookingCode === 'string' ? bookingCode.trim() : '';
+  if (
+    !isValidHistoryId(rawBookingCode, 64) ||
+    rawBookingCode.length < 3 ||
+    bookingCode !== rawBookingCode
+  ) {
+    return;
+  }
+
+  const rawStatus = typeof status === 'string' ? status.trim() : '';
+  if (!ALLOWED_STATUSES.has(rawStatus) || status !== rawStatus) return;
+
+  if (
+    note !== undefined &&
+    note !== null &&
+    (typeof note !== 'string' ||
+      note.length > 1000 ||
+      new TextEncoder().encode(note).length > 1000)
+  ) {
+    return;
+  }
+  const cleanNote =
+    typeof note === 'string'
+      ? note.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+      : '';
+
+  const providedRequestId =
+    typeof options === 'string'
+      ? options
+      : options && typeof options === 'object' && !Array.isArray(options)
+      ? options.requestId
+      : undefined;
+
+  let requestId = '';
+  if (providedRequestId !== undefined && providedRequestId !== null && providedRequestId !== '') {
+    if (typeof providedRequestId !== 'string' || !isValidHistoryId(providedRequestId, 128)) {
+      return;
+    }
+    requestId = providedRequestId;
+  } else {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+      requestId = `req_${globalThis.crypto.randomUUID().replace(/-/g, '')}`;
+    } else if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      requestId = `req_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    } else {
+      requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+  }
+
+  const session = auth?.currentUser;
+  if (session === null || session === undefined) {
+    if (!INITIAL_GUEST_STATUSES.has(rawStatus)) {
+      return;
+    }
+
+    const guestPayload = {
+      bookingId: rawBookingId,
+    };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (auth?.currentUser !== null && auth?.currentUser !== undefined) return;
+
+        let res: Response;
+        try {
+          res = await fetch('/api/booking-history/initial', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(guestPayload),
+          });
+        } catch (networkErr) {
+          if (auth?.currentUser !== null && auth?.currentUser !== undefined) return;
+          if (attempt === 0) continue;
+          console.warn('Booking initial status history network notice:', networkErr);
+          return;
+        }
+
+        if (auth?.currentUser !== null && auth?.currentUser !== undefined) return;
+
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+
+        if (auth?.currentUser !== null && auth?.currentUser !== undefined) return;
+
+        if ((res.status >= 500 && res.status <= 599) || res.status === 429) {
+          if (attempt === 0) continue;
+          console.warn('Booking initial status history service unavailable:', res.status);
+          return;
+        }
+
+        if (!res.ok) {
+          console.warn('Booking initial status history write rejected:', res.status);
+          return;
+        }
+
+        const isValidAck =
+          Boolean(data && typeof data === 'object' && !Array.isArray(data)) &&
+          data.success === true;
+
+        if (!isValidAck) {
+          console.warn('Booking initial status history returned invalid response payload');
+          return;
+        }
+
+        return;
+      } catch (err) {
+        if (attempt === 0 && (auth?.currentUser === null || auth?.currentUser === undefined)) {
+          continue;
+        }
+        console.warn('Failed to initialize guest booking status history:', err);
         return;
       }
     }
-  } catch (err) {
-    console.warn('Duplicate check warning:', err);
+    return;
   }
 
-  const now = new Date();
-  const historyId = `hist_${bookingCode}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const historyEntry: BookingStatusHistory = {
-    id: historyId,
-    bookingId,
-    bookingCode,
-    status,
-    note,
-    updatedByRole,
-    updatedByName,
-    timestamp: now.toISOString(),
-    formattedWIB: formatDateTimeWIB(now),
+  const initialUid = typeof session?.uid === 'string' ? session.uid.trim() : '';
+  if (
+    !initialUid ||
+    session.uid !== initialUid ||
+    !isValidHistoryId(initialUid, 128) ||
+    typeof session.getIdToken !== 'function'
+  ) {
+    return;
+  }
+
+  const payload = {
+    bookingId: rawBookingId,
+    bookingCode: rawBookingCode,
+    status: rawStatus,
+    ...(cleanNote ? { note: cleanNote } : {}),
+    requestId,
   };
-  try {
-    await setDoc(doc(db, 'booking_status_history', historyId), cleanFirestoreData(historyEntry));
-  } catch (historyErr) {
-    console.warn('Booking status history write notice:', historyErr);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+      const rawToken = await session.getIdToken();
+      const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+      if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      let res: Response;
+      try {
+        res = await fetch('/api/booking-history/append', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (networkErr) {
+        if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+        if (attempt === 0) continue;
+        console.warn('Booking status history network notice:', networkErr);
+        return;
+      }
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return;
+
+      if ((res.status >= 500 && res.status <= 599) || res.status === 429) {
+        if (attempt === 0) continue;
+        console.warn('Booking status history service unavailable:', res.status);
+        return;
+      }
+
+      if (!res.ok) {
+        console.warn('Booking status history write rejected:', res.status);
+        return;
+      }
+
+      const historyEntry = data?.historyEntry || data?.history || data?.entry;
+      const isDuplicateStatus = data?.isDuplicateStatus === true;
+      const isValidResponse =
+        Boolean(data && typeof data === 'object' && !Array.isArray(data)) &&
+        data.success === true &&
+        typeof data.id === 'string' &&
+        isValidHistoryId(data.id, 128) &&
+        Boolean(historyEntry && typeof historyEntry === 'object' && !Array.isArray(historyEntry)) &&
+        historyEntry.id === data.id &&
+        historyEntry.bookingId === rawBookingId &&
+        historyEntry.bookingCode === rawBookingCode &&
+        historyEntry.status === rawStatus &&
+        typeof historyEntry.updatedByRole === 'string' &&
+        ALLOWED_ROLES.has(historyEntry.updatedByRole) &&
+        typeof historyEntry.updatedByName === 'string' &&
+        historyEntry.updatedByName.trim().length > 0 &&
+        (historyEntry.note === undefined ||
+          (typeof historyEntry.note === 'string' && historyEntry.note.trim().length > 0)) &&
+        typeof historyEntry.timestamp === 'string' &&
+        !Number.isNaN(Date.parse(historyEntry.timestamp)) &&
+        typeof historyEntry.formattedWIB === 'string' &&
+        historyEntry.formattedWIB.trim().length > 0 &&
+        (isDuplicateStatus ||
+          historyEntry.actorUid === undefined ||
+          historyEntry.actorUid === initialUid) &&
+        (isDuplicateStatus ||
+          historyEntry.actorId === undefined ||
+          historyEntry.actorId === initialUid) &&
+        (historyEntry.requestId === undefined ||
+          historyEntry.requestId === requestId ||
+          ((data.isIdempotent === true || isDuplicateStatus) &&
+            isValidHistoryId(historyEntry.requestId, 128)));
+
+      if (!isValidResponse) {
+        console.warn('Booking status history returned invalid response payload');
+        return;
+      }
+
+      return;
+    } catch (historyErr) {
+      console.warn('Booking status history write notice:', historyErr);
+      return;
+    }
   }
 }
 
-export async function getBookingStatusHistory(bookingCode: string): Promise<BookingStatusHistory[]> {
-  try {
-    const q = query(
-      collection(db, 'booking_status_history'),
-      where('bookingCode', '==', bookingCode)
-    );
-    const snap = await getDocs(q);
-    const list = snap.docs.map((d) => d.data() as BookingStatusHistory);
-    // Sort ascending by timestamp
-    list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    
-    // Deduplicate consecutive identical status entries
-    const deduplicated: BookingStatusHistory[] = [];
-    for (const item of list) {
-      if (deduplicated.length === 0 || deduplicated[deduplicated.length - 1].status !== item.status) {
-        deduplicated.push(item);
+const BOOKING_READ_ALLOWED_STATUSES = new Set<string>([
+  'Draft',
+  'Pending',
+  'awaiting_payment',
+  'Menunggu Pembayaran',
+  'Menunggu Verifikasi Pembayaran',
+  'Pembayaran Terverifikasi',
+  'Menunggu Penjadwalan',
+  'Terjadwal',
+  'Confirmed',
+  'Therapist Assigned',
+  'Accepted',
+  'On The Way',
+  'Arrived',
+  'Treatment',
+  'Completed',
+  'Cancelled',
+  'Rescheduled',
+  'Pembayaran Ditolak',
+]);
+
+const BOOKING_READ_ALLOWED_ROLES = new Set<string>([
+  'customer',
+  'css',
+  'supervisor',
+  'therapist',
+  'system',
+  'manager',
+  'admin',
+]);
+
+const CLIENT_GUEST_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+  'id',
+  'bookingCode',
+  'status',
+  'paymentStatus',
+  'paymentMethod',
+  'paymentDeadline',
+  'serviceId',
+  'serviceName',
+  'packageName',
+  'serviceDuration',
+  'durationMinutes',
+  'scheduleDate',
+  'bookingDate',
+  'scheduleTime',
+  'timeSlot',
+  'scheduleAt',
+  'genderPreference',
+  'therapistName',
+  'totalAmount',
+  'totalPrice',
+  'servicePrice',
+  'homeServiceFee',
+  'discountAmount',
+  'area',
+  'customerName',
+  'customerWhatsApp',
+  'address',
+  'createdAt',
+  'updatedAt',
+];
+
+const CLIENT_OWNER_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+  'id',
+  'bookingCode',
+  'customerId',
+  'customerAuthUid',
+  'authUserId',
+  'customerName',
+  'customerWhatsApp',
+  'customerEmail',
+  'serviceId',
+  'serviceName',
+  'packageName',
+  'serviceDuration',
+  'durationMinutes',
+  'serviceNameSnapshot',
+  'durationMinutesSnapshot',
+  'servicePriceSnapshot',
+  'homeServiceFeeSnapshot',
+  'areaIdSnapshot',
+  'areaNameSnapshot',
+  'therapistId',
+  'assignedTherapistId',
+  'therapistName',
+  'assignedTherapistName',
+  'preferredTherapistName',
+  'scheduleDate',
+  'bookingDate',
+  'scheduleTime',
+  'timeSlot',
+  'scheduleAt',
+  'genderPreference',
+  'address',
+  'customerAddress',
+  'latitude',
+  'longitude',
+  'customerLat',
+  'customerLng',
+  'placeId',
+  'area',
+  'areaName',
+  'customerArea',
+  'addressDistrict',
+  'addressNotes',
+  'distanceKm',
+  'distanceMeters',
+  'homeServiceFeeTier',
+  'baseLocationId',
+  'baseLocationName',
+  'baseLatitude',
+  'baseLongitude',
+  'servicePrice',
+  'homeServiceFee',
+  'discountAmount',
+  'voucherId',
+  'voucherCode',
+  'voucherDiscount',
+  'promoId',
+  'promoCode',
+  'promoCodeSnapshot',
+  'promoNameSnapshot',
+  'discountTypeSnapshot',
+  'discountValueSnapshot',
+  'promoDiscount',
+  'pointsRedeemed',
+  'pointsDiscount',
+  'pointsEarned',
+  'membershipTierAtBooking',
+  'totalAmount',
+  'totalPrice',
+  'price',
+  'paymentMethod',
+  'paymentStatus',
+  'status',
+  'customerNotes',
+  'notes',
+  'branchId',
+  'branchName',
+  'assignedAt',
+  'paymentDeadline',
+  'paymentPolicyVersion',
+  'paymentExpiredAt',
+  'paymentVerifiedAt',
+  'confirmedAt',
+  'cancellationReason',
+  'acceptedAt',
+  'onTheWayAt',
+  'arrivedAt',
+  'treatmentStartedAt',
+  'completedAt',
+  'createdAt',
+  'updatedAt',
+];
+
+const CLIENT_THERAPIST_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+  ...CLIENT_OWNER_ALLOWED_BOOKING_FIELDS,
+  'acceptedBy',
+  'arrivalLatitude',
+  'arrivalLongitude',
+  'earlyCompletion',
+];
+
+const CLIENT_STAFF_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+  ...CLIENT_THERAPIST_ALLOWED_BOOKING_FIELDS,
+  'internalNotes',
+  'requiresAdminConfirmation',
+  'isReassigned',
+  'reassignedFromTherapistId',
+  'referredByCustomerId',
+  'referralCodeUsed',
+  'issueReport',
+];
+
+function isValidReadDocId(value: unknown, maxLen = 128): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= maxLen &&
+    value.trim() === value &&
+    !value.includes('/') &&
+    !/[\x00-\x1F\x7F\s]/.test(value)
+  );
+}
+
+function isValidReadBookingCode(value: unknown, maxLen = 64): value is string {
+  return (
+    isValidReadDocId(value, maxLen) &&
+    value.length >= 3 &&
+    !/^bk_/i.test(value) &&
+    /^[A-Z0-9_-]+$/.test(value)
+  );
+}
+
+function normalizeTrackingPhoneInput(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (trimmed.length < 8 || trimmed.length > 30) return '';
+  if (!/^\+?[0-9][0-9\s\-]{6,28}[0-9]$/.test(trimmed)) return '';
+  if (/--/.test(trimmed)) return '';
+  const hasLeadingPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/^\+/, '').replace(/[\s\-]/g, '');
+  if (!/^[0-9]{8,20}$/.test(digits)) return '';
+  if (hasLeadingPlus) {
+    if (digits.startsWith('0')) return '';
+    return digits;
+  }
+  if (digits.startsWith('00')) return '';
+  if (digits.startsWith('0')) {
+    return `62${digits.slice(1)}`;
+  }
+  if (digits.startsWith('8')) {
+    return `62${digits}`;
+  }
+  return digits;
+}
+
+function getClientGuestGenericActorLabel(role: string): string {
+  switch (role) {
+    case 'customer':
+      return 'Pelanggan';
+    case 'therapist':
+      return 'Terapis Senzu';
+    case 'css':
+      return 'Petugas CSS';
+    case 'supervisor':
+      return 'Supervisor Senzu';
+    case 'manager':
+    case 'admin':
+      return 'Manajemen Senzu';
+    default:
+      return 'Sistem Senzu';
+  }
+}
+
+function sanitizeBookingForClientAccess(
+  rawBooking: unknown,
+  accessLevel: 'staff' | 'therapist' | 'owner' | 'guest',
+  expectedUid?: string
+): Booking | null {
+  if (!rawBooking || typeof rawBooking !== 'object' || Array.isArray(rawBooking)) {
+    return null;
+  }
+  const b = rawBooking as Record<string, any>;
+  const id = typeof b.id === 'string' ? b.id.trim() : '';
+  const bookingCode = typeof b.bookingCode === 'string' ? b.bookingCode.trim().toUpperCase() : '';
+  if (!isValidReadDocId(id, 128) || !isValidReadBookingCode(bookingCode, 64)) {
+    return null;
+  }
+
+  if (accessLevel === 'owner') {
+    if (!expectedUid || !isValidReadDocId(expectedUid, 128)) return null;
+    for (const rawOwner of [b.customerAuthUid, b.authUserId, b.customerUid, b.userId, b.uid]) {
+      if (rawOwner !== undefined && rawOwner !== null && rawOwner !== '') {
+        if (typeof rawOwner !== 'string' || rawOwner.trim() !== expectedUid) {
+          return null;
+        }
       }
     }
-    return deduplicated;
+    const custAuthUid = typeof b.customerAuthUid === 'string' ? b.customerAuthUid.trim() : '';
+    const authUserId = typeof b.authUserId === 'string' ? b.authUserId.trim() : '';
+    if (custAuthUid !== expectedUid && authUserId !== expectedUid) {
+      return null;
+    }
+  }
+
+  const allowedKeys =
+    accessLevel === 'guest'
+      ? CLIENT_GUEST_ALLOWED_BOOKING_FIELDS
+      : accessLevel === 'owner'
+      ? CLIENT_OWNER_ALLOWED_BOOKING_FIELDS
+      : accessLevel === 'therapist'
+      ? CLIENT_THERAPIST_ALLOWED_BOOKING_FIELDS
+      : CLIENT_STAFF_ALLOWED_BOOKING_FIELDS;
+
+  const projected: Record<string, any> = {};
+  for (const key of allowedKeys) {
+    if (Object.prototype.hasOwnProperty.call(b, key) && b[key] !== undefined) {
+      projected[key] = b[key];
+    }
+  }
+  projected.id = id;
+  projected.bookingCode = bookingCode;
+  return projected as Booking;
+}
+
+function sanitizeAndDeduplicateHistoryEntries(
+  rawList: unknown,
+  expectedBookingId?: string,
+  expectedBookingCode?: string,
+  accessLevel?: 'staff' | 'therapist' | 'owner' | 'guest'
+): BookingStatusHistory[] {
+  if (!Array.isArray(rawList)) return [];
+  const validEntries: BookingStatusHistory[] = [];
+
+  for (const item of rawList) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const h = item as Record<string, unknown>;
+    const id = typeof h.id === 'string' ? h.id.trim() : '';
+    const bookingId = typeof h.bookingId === 'string' ? h.bookingId.trim() : '';
+    const bookingCode =
+      typeof h.bookingCode === 'string' ? h.bookingCode.trim().toUpperCase() : '';
+    const status = typeof h.status === 'string' ? h.status.trim() : '';
+    const updatedByRole = typeof h.updatedByRole === 'string' ? h.updatedByRole.trim() : '';
+    const rawUpdatedByName =
+      typeof h.updatedByName === 'string'
+        ? h.updatedByName.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+        : '';
+    const timestamp = typeof h.timestamp === 'string' ? h.timestamp.trim() : '';
+    const formattedWIB =
+      typeof h.formattedWIB === 'string' && h.formattedWIB.trim().length > 0
+        ? h.formattedWIB.trim()
+        : formatDateTimeWIB(timestamp);
+    const rawNote =
+      typeof h.note === 'string'
+        ? h.note.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+        : '';
+
+    if (!isValidReadDocId(id, 128)) continue;
+    if (
+      (h.bookingId !== undefined &&
+        h.bookingId !== null &&
+        h.bookingId !== '' &&
+        (!bookingId || (expectedBookingId && bookingId !== expectedBookingId))) ||
+      (h.bookingCode !== undefined &&
+        h.bookingCode !== null &&
+        h.bookingCode !== '' &&
+        (!bookingCode || (expectedBookingCode && bookingCode !== expectedBookingCode)))
+    ) {
+      return [];
+    }
+    if (!status || !BOOKING_READ_ALLOWED_STATUSES.has(status)) continue;
+    const cleanRole = BOOKING_READ_ALLOWED_ROLES.has(updatedByRole) ? updatedByRole : 'system';
+    const updatedByName =
+      accessLevel === 'guest'
+        ? getClientGuestGenericActorLabel(cleanRole)
+        : rawUpdatedByName || 'Sistem Senzu';
+    const note = accessLevel === 'guest' ? '' : rawNote;
+    if (!timestamp || Number.isNaN(Date.parse(timestamp))) continue;
+
+    validEntries.push({
+      id,
+      bookingId: bookingId || expectedBookingId || '',
+      bookingCode: bookingCode || expectedBookingCode || '',
+      status: status as BookingStatus,
+      ...(note ? { note } : {}),
+      updatedByRole: cleanRole as BookingStatusHistory['updatedByRole'],
+      updatedByName,
+      timestamp,
+      formattedWIB,
+    });
+  }
+
+  validEntries.sort((a, b) => {
+    const diff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    return diff !== 0 ? diff : a.id.localeCompare(b.id);
+  });
+
+  const deduplicated: BookingStatusHistory[] = [];
+  for (const entry of validEntries) {
+    if (
+      deduplicated.length === 0 ||
+      deduplicated[deduplicated.length - 1].status !== entry.status
+    ) {
+      deduplicated.push(entry);
+    }
+  }
+  return deduplicated;
+}
+
+export async function getBookingStatusHistory(
+  bookingCode: string,
+  options?: { bookingId?: string; phone?: string; signal?: AbortSignal }
+): Promise<BookingStatusHistory[]> {
+  try {
+    if (typeof bookingCode !== 'string') return [];
+    const trimmedTarget = bookingCode.trim();
+    if (!trimmedTarget || bookingCode !== trimmedTarget || !isValidReadDocId(trimmedTarget, 128)) {
+      return [];
+    }
+
+    let explicitBookingId = '';
+    if (options?.bookingId !== undefined && options?.bookingId !== null && options?.bookingId !== '') {
+      if (
+        typeof options.bookingId !== 'string' ||
+        options.bookingId.trim() !== options.bookingId ||
+        !isValidReadDocId(options.bookingId, 128)
+      ) {
+        return [];
+      }
+      explicitBookingId = options.bookingId;
+    }
+
+    const cleanPhone =
+      options?.phone !== undefined && options?.phone !== null && options?.phone !== ''
+        ? normalizeTrackingPhoneInput(options.phone)
+        : '';
+    if (options?.phone !== undefined && options?.phone !== null && options?.phone !== '' && !cleanPhone) {
+      return [];
+    }
+
+    const session = auth?.currentUser;
+    if (session === null || session === undefined) {
+      // Unauthenticated history reads require a valid bookingCode + verified phone via /api/bookings/track
+      if (!cleanPhone || explicitBookingId || /^bk_/i.test(trimmedTarget)) {
+        return [];
+      }
+      const upperGuestCode = trimmedTarget.toUpperCase();
+      if (!isValidReadBookingCode(upperGuestCode, 64)) {
+        return [];
+      }
+      const tracked = await trackBookingByCodeAndPhone(upperGuestCode, cleanPhone, {
+        ...(options?.signal ? { signal: options.signal } : {}),
+      });
+      if (auth?.currentUser !== null && auth?.currentUser !== undefined) return [];
+      return tracked && tracked.accessLevel === 'guest' ? tracked.history : [];
+    }
+
+    const initialUid = typeof session?.uid === 'string' ? session.uid.trim() : '';
+    if (
+      !initialUid ||
+      session.uid !== initialUid ||
+      !isValidReadDocId(initialUid, 128) ||
+      typeof session.getIdToken !== 'function'
+    ) {
+      return [];
+    }
+
+    let requestBookingId = explicitBookingId;
+    let requestBookingCode = '';
+    let requestSingleTarget = '';
+
+    if (trimmedTarget.startsWith('bk_')) {
+      if (requestBookingId && requestBookingId !== trimmedTarget) return [];
+      requestBookingId = trimmedTarget;
+      const derivedCode = trimmedTarget.slice(3).toUpperCase();
+      if (isValidReadBookingCode(derivedCode, 64)) {
+        requestBookingCode = derivedCode;
+      }
+    } else if (requestBookingId) {
+      if (trimmedTarget === requestBookingId) {
+        if (requestBookingId.startsWith('bk_')) {
+          const derivedCode = requestBookingId.slice(3).toUpperCase();
+          if (isValidReadBookingCode(derivedCode, 64)) {
+            requestBookingCode = derivedCode;
+          }
+        }
+      } else {
+        const upperCode = trimmedTarget.toUpperCase();
+        if (!isValidReadBookingCode(upperCode, 64)) return [];
+        if (
+          requestBookingId.startsWith('bk_') &&
+          requestBookingId.slice(3).toUpperCase() !== upperCode
+        ) {
+          return [];
+        }
+        requestBookingCode = upperCode;
+      }
+    } else {
+      // Single reference from authenticated caller: may be a bookingCode or arbitrary non-bk_ document ID
+      requestSingleTarget = trimmedTarget;
+    }
+
+    const rawToken = await session.getIdToken();
+    const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) return [];
+
+    const res = await fetch('/api/booking-history/read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        ...(requestBookingId ? { bookingId: requestBookingId } : {}),
+        ...(requestBookingCode ? { bookingCode: requestBookingCode } : {}),
+        ...(requestSingleTarget ? { target: requestSingleTarget } : {}),
+        ...(cleanPhone ? { phone: cleanPhone } : {}),
+      }),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+
+    if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return [];
+    if (!res.ok) return [];
+
+    const data = await res.json().catch(() => null);
+    if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return [];
+    if (!data || typeof data !== 'object' || Array.isArray(data) || data.success !== true) {
+      return [];
+    }
+
+    const accessLevel =
+      data.accessLevel === 'staff' ||
+      data.accessLevel === 'therapist' ||
+      data.accessLevel === 'owner'
+        ? data.accessLevel
+        : undefined;
+    if (!accessLevel) return [];
+
+    const resolvedId = typeof data.bookingId === 'string' ? data.bookingId.trim() : '';
+    const resolvedCode =
+      typeof data.bookingCode === 'string' ? data.bookingCode.trim().toUpperCase() : '';
+    if (!isValidReadDocId(resolvedId, 128) || !isValidReadBookingCode(resolvedCode, 64)) {
+      return [];
+    }
+    if (requestBookingId && resolvedId !== requestBookingId) return [];
+    if (requestBookingCode && resolvedCode !== requestBookingCode) return [];
+    if (
+      requestSingleTarget &&
+      resolvedId !== requestSingleTarget &&
+      resolvedId !== `bk_${requestSingleTarget.toUpperCase()}` &&
+      resolvedCode !== requestSingleTarget.toUpperCase()
+    ) {
+      return [];
+    }
+
+    return sanitizeAndDeduplicateHistoryEntries(
+      data.history,
+      resolvedId,
+      resolvedCode,
+      accessLevel
+    );
   } catch {
     return [];
   }
@@ -590,7 +1343,11 @@ export async function getBookingStatusHistory(bookingCode: string): Promise<Book
 // ----------------- BOOKINGS CRUD -----------------
 
 export async function createBooking(
-  data: Omit<Booking, 'id' | 'bookingCode' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus'>
+  data: Omit<Booking, 'id' | 'bookingCode' | 'createdAt' | 'updatedAt' | 'status' | 'paymentStatus'> & {
+    checkoutAttemptId?: string;
+    customerVoucherId?: string;
+    voucherRecoveryOnly?: boolean;
+  }
 ): Promise<Booking> {
   // Validate payment method: strictly forbid cash, tunai, pay_on_service, cod, bayar_di_tempat for new bookings
   const rawMethod = (data.paymentMethod || '').toString().toLowerCase().trim();
@@ -605,11 +1362,6 @@ export async function createBooking(
   ) {
     throw new Error('Metode pembayaran tersebut sudah tidak tersedia.');
   }
-
-  const bookingCode = generateBookingCode();
-  const docId = `bk_${bookingCode}`;
-  // Display timestamp only. Payment authority uses Firestore document createTime.
-  const now = new Date().toISOString();
 
   // Server-side / database-level validation of distance and home service fee:
   // A customer must not be able to modify homeServiceFee, distanceKm, or tier through request payload manipulation.
@@ -646,8 +1398,253 @@ export async function createBooking(
   const finalTier = authoritativeFeeCalc.tier;
   const requiresAdminConfirmation = Boolean(data.requiresAdminConfirmation);
 
-  const totalDiscounts = (data.voucherDiscount || 0) + (data.promoDiscount || 0) + (data.pointsDiscount || 0) + (data.discountAmount || 0);
-  const finalTotalAmount = Math.max(0, data.servicePrice + finalFee - totalDiscounts);
+  // Detect any voucher or promo intent on the booking request
+  const rawPromoCode = typeof data.promoCode === 'string' ? data.promoCode.trim().toUpperCase() : '';
+  const rawVoucherCode = typeof data.voucherCode === 'string' ? data.voucherCode.trim().toUpperCase() : '';
+  const rawPromoSnapshot = typeof data.promoCodeSnapshot === 'string' ? data.promoCodeSnapshot.trim().toUpperCase() : '';
+  const rawPromoId = typeof data.promoId === 'string' ? data.promoId.trim() : '';
+  const rawVoucherId = typeof data.voucherId === 'string' ? data.voucherId.trim() : '';
+  const rawCustomerVoucherId = typeof data.customerVoucherId === 'string' ? data.customerVoucherId.trim() : '';
+  const assertedDiscount = typeof data.discountAmount === 'number' && Number.isFinite(data.discountAmount)
+    ? Math.max(0, data.discountAmount) : 0;
+  const allowedNoVoucherDiscount = assertedDiscount;
+  const hasVoucherDiscountNum =
+    (typeof data.voucherDiscount === 'number' && data.voucherDiscount !== 0) ||
+    (typeof data.promoDiscount === 'number' && data.promoDiscount !== 0) ||
+    (typeof data.discountValueSnapshot === 'number' && data.discountValueSnapshot !== 0) ||
+    Boolean(typeof data.discountTypeSnapshot === 'string' && data.discountTypeSnapshot.trim()) ||
+    Boolean(typeof data.promoNameSnapshot === 'string' && data.promoNameSnapshot.trim());
+
+  const hasVoucherIntent = Boolean(
+    rawPromoCode ||
+    rawVoucherCode ||
+    rawPromoSnapshot ||
+    rawPromoId ||
+    rawVoucherId ||
+    rawCustomerVoucherId ||
+    (typeof data.checkoutAttemptId === 'string' && data.checkoutAttemptId.trim()) ||
+    hasVoucherDiscountNum
+  );
+
+  const hasPointsIntent = (data.pointsRedeemed != null && data.pointsRedeemed !== 0)
+    || (data.pointsDiscount != null && data.pointsDiscount !== 0);
+  // Both voucher and points consumption require the same authenticated atomic server checkout.
+  if (hasVoucherIntent || hasPointsIntent) {
+    const currentUser = auth?.currentUser;
+    const initialUid = typeof currentUser?.uid === 'string' ? currentUser.uid.trim() : '';
+    if (!currentUser || !initialUid || typeof currentUser.getIdToken !== 'function') {
+      throw Object.assign(
+        new Error('Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.'),
+        { code: 'AUTH_REQUIRED' }
+      );
+    }
+
+    if (
+      (data.customerAuthUid !== undefined &&
+        data.customerAuthUid !== null &&
+        String(data.customerAuthUid).trim() !== '' &&
+        String(data.customerAuthUid).trim() !== initialUid) ||
+      (data.authUserId !== undefined &&
+        data.authUserId !== null &&
+        String(data.authUserId).trim() !== '' &&
+        String(data.authUserId).trim() !== initialUid)
+    ) {
+      throw Object.assign(new Error('Sesi login tidak sesuai dengan identitas pemesanan.'), {
+        code: 'SESSION_CHANGED',
+      });
+    }
+
+    let checkoutAttemptId = '';
+    if (data.checkoutAttemptId !== undefined) {
+      checkoutAttemptId = typeof data.checkoutAttemptId === 'string' ? data.checkoutAttemptId.trim() : '';
+      if (!checkoutAttemptId || !/^[A-Za-z0-9_-]{8,128}$/.test(checkoutAttemptId)) {
+        throw Object.assign(new Error('ID percobaan checkout voucher tidak valid.'), {
+          code: 'INVALID_CHECKOUT_ATTEMPT_ID',
+        });
+      }
+    } else {
+      checkoutAttemptId = `chk_${globalThis.crypto.randomUUID()}`;
+    }
+
+    let idToken = '';
+    try {
+      const rawToken = await currentUser.getIdToken();
+      idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+    } catch {
+      throw Object.assign(new Error('Gagal mengambil token autentikasi pelanggan.'), {
+        code: 'AUTH_TOKEN_UNAVAILABLE',
+      });
+    }
+
+    if (!idToken) {
+      throw Object.assign(new Error('Token autentikasi pelanggan tidak tersedia.'), {
+        code: 'AUTH_TOKEN_UNAVAILABLE',
+      });
+    }
+
+    const activeUserAfterToken = auth?.currentUser;
+    if (!activeUserAfterToken || activeUserAfterToken.uid !== initialUid) {
+      throw Object.assign(new Error('Sesi pengguna berubah sebelum checkout voucher dikirim.'), {
+        code: 'SESSION_CHANGED',
+      });
+    }
+
+    let res: Response;
+    // A tab-scoped draft contains no token or payment proof. It permits read-only recovery after a lost response.
+    try {
+      if (!data.voucherRecoveryOnly) globalThis.sessionStorage?.setItem(`senzu:voucher-checkout:${initialUid}`, JSON.stringify({
+        uid: initialUid, checkoutAttemptId, draft: { ...data, checkoutAttemptId },
+      }));
+    } catch {}
+    try {
+      res = await fetch('/api/vouchers/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          checkoutAttemptId,
+          recoverOnly: data.voucherRecoveryOnly === true,
+          customerId: data.customerId,
+          customerAuthUid: initialUid,
+          authUserId: initialUid,
+          customerName: data.customerName,
+          customerWhatsApp: data.customerWhatsApp,
+          customerEmail: data.customerEmail,
+          serviceId: data.serviceId,
+          serviceName: data.serviceName,
+          serviceDuration: data.serviceDuration,
+          scheduleDate: data.scheduleDate,
+          scheduleTime: data.scheduleTime,
+          scheduleAt: data.scheduleAt || `${data.scheduleDate} ${data.scheduleTime}`,
+          genderPreference: data.genderPreference,
+          address: data.address,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          placeId: data.placeId,
+          addressNotes: data.addressNotes,
+          distanceKm: finalDistanceKm,
+          distanceMeters: finalDistanceMeters,
+          requiresAdminConfirmation,
+          area: data.area,
+          areaIdSnapshot: data.areaIdSnapshot,
+          areaNameSnapshot: data.areaNameSnapshot ?? data.area,
+          servicePrice: data.servicePrice,
+          homeServiceFee: finalFee,
+          promoId: rawPromoId || undefined,
+          promoCode: rawPromoCode || undefined,
+          promoCodeSnapshot: rawPromoSnapshot || rawPromoCode || undefined,
+          promoNameSnapshot: data.promoNameSnapshot,
+          discountTypeSnapshot: data.discountTypeSnapshot,
+          discountValueSnapshot: data.discountValueSnapshot,
+          voucherId: rawVoucherId || undefined,
+          voucherCode: rawVoucherCode || undefined,
+          customerVoucherId: rawCustomerVoucherId || (rawVoucherId.startsWith('cv_') ? rawVoucherId : undefined),
+          voucherDiscount: data.voucherDiscount,
+          promoDiscount: data.promoDiscount,
+          discountAmount: data.discountAmount,
+          pointsRedeemed: data.pointsRedeemed,
+          pointsDiscount: data.pointsDiscount,
+          pointsEarned: data.pointsEarned,
+          referredByCustomerId: data.referredByCustomerId,
+          referralCodeUsed: data.referralCodeUsed,
+          membershipTierAtBooking: data.membershipTierAtBooking,
+          totalAmount: data.totalAmount,
+          paymentMethod: data.paymentMethod,
+          customerNotes: data.customerNotes,
+        }),
+      });
+    } catch {
+      throw Object.assign(new Error('Gagal menghubungi server checkout voucher. Silakan coba kembali.'), {
+        code: 'NETWORK_ERROR',
+      });
+    }
+
+    let payload: any = null;
+    try {
+      payload = await res.json();
+    } catch {
+      throw Object.assign(new Error('Respons server checkout voucher tidak valid.'), {
+        code: 'MALFORMED_RESPONSE',
+        status: res?.status,
+      });
+    }
+
+    const activeUserAfterFetch = auth?.currentUser;
+    if (!activeUserAfterFetch || activeUserAfterFetch.uid !== initialUid) {
+      throw Object.assign(new Error('Sesi pengguna berubah saat memproses checkout voucher.'), {
+        code: 'SESSION_CHANGED',
+      });
+    }
+
+    if (
+      !res.ok ||
+      !payload ||
+      payload.success !== true ||
+      !payload.booking ||
+      typeof payload.booking.id !== 'string' ||
+      !payload.booking.id.trim() ||
+      typeof payload.redemptionId !== 'string' ||
+      !payload.redemptionId.trim()
+    ) {
+      const errCode =
+        typeof payload?.code === 'string' && payload.code
+          ? payload.code
+          : !res.ok
+            ? `HTTP_${res.status}`
+            : 'VOUCHER_CHECKOUT_FAILED';
+      const errMsg =
+        typeof payload?.error === 'string' && payload.error
+          ? payload.error
+          : typeof payload?.message === 'string' && payload.message
+            ? payload.message
+            : 'Checkout voucher ditolak oleh server.';
+      throw Object.assign(new Error(errMsg), {
+        code: errCode,
+        status: res.status,
+        pricingBreakdown: payload?.pricingBreakdown,
+      });
+    }
+
+    const committedBooking: Booking = { ...(payload.booking as Booking) };
+
+    const assertCurrentCheckoutUser = () => {
+      if (auth?.currentUser?.uid !== initialUid) {
+        throw Object.assign(new Error('Sesi pengguna berubah saat menyelesaikan checkout voucher.'), { code: 'SESSION_CHANGED' });
+      }
+    };
+    assertCurrentCheckoutUser();
+
+    try {
+      const pMethod = (committedBooking.paymentMethod || '').toLowerCase();
+      const methodType = pMethod.includes('qris')
+        ? 'qris'
+        : pMethod.includes('mandiri')
+        ? 'mandiri'
+        : pMethod.includes('bri')
+        ? 'bri'
+        : 'bni';
+      const payment = await createPaymentRecord(committedBooking, { methodType: methodType as any });
+      committedBooking.paymentDeadline = payment.paymentDeadline || undefined;
+    } catch (err) {
+      console.warn('Payment record initialization non-blocking warning:', err);
+    }
+
+    assertCurrentCheckoutUser();
+    if (!data.voucherRecoveryOnly) {
+      try { globalThis.sessionStorage?.removeItem(`senzu:voucher-checkout:${initialUid}`); } catch {}
+    }
+    return committedBooking;
+  }
+
+  // No-voucher booking branch
+  const bookingCode = generateBookingCode();
+  const docId = `bk_${bookingCode}`;
+  // Display timestamp only. Payment authority uses Firestore document createTime.
+  const now = new Date().toISOString();
+
+  const finalTotalAmount = Math.max(0, data.servicePrice + finalFee - allowedNoVoucherDiscount);
 
   const newBooking: Booking = {
     ...data,
@@ -669,100 +1666,34 @@ export async function createBooking(
     servicePriceSnapshot: data.servicePriceSnapshot ?? data.servicePrice,
     areaIdSnapshot: data.areaIdSnapshot,
     areaNameSnapshot: data.areaNameSnapshot ?? data.area,
-    promoId: data.promoId || data.voucherId,
-    promoCode: data.promoCode || data.voucherCode,
-    promoCodeSnapshot: data.promoCodeSnapshot || data.promoCode || data.voucherCode,
-    promoNameSnapshot: data.promoNameSnapshot,
-    discountTypeSnapshot: data.discountTypeSnapshot,
-    discountValueSnapshot: data.discountValueSnapshot,
+    promoId: undefined,
+    promoCode: undefined,
+    promoCodeSnapshot: undefined,
+    promoNameSnapshot: undefined,
+    discountTypeSnapshot: undefined,
+    discountValueSnapshot: undefined,
+    voucherId: undefined,
+    voucherCode: undefined,
+    voucherDiscount: 0,
+    promoDiscount: 0,
+    discountAmount: allowedNoVoucherDiscount,
     totalAmount: finalTotalAmount,
     requiresAdminConfirmation,
     status: 'Menunggu Pembayaran',
     paymentStatus: 'UNPAID',
     // Server-authoritative / authenticated identity: never trust client body ownership overrides
-    customerAuthUid: auth.currentUser?.uid || undefined,
-    authUserId: auth.currentUser?.uid || undefined,
+    customerAuthUid: auth?.currentUser?.uid || undefined,
+    authUserId: auth?.currentUser?.uid || undefined,
     paymentPolicyVersion: 2,
     paymentDeadline: null,
     createdAt: now,
     updatedAt: now,
   };
 
-  const appliedCode = (data.promoCode || data.voucherCode || '').trim().toUpperCase();
-  const { cleanDigits } = normalizeIndonesianPhone(data.customerWhatsApp || '');
-  const authUid = auth.currentUser?.uid || '';
-  const custId = (data.customerId || '').trim() || (cleanDigits ? `cust_${cleanDigits}` : '');
+  delete (newBooking as any).checkoutAttemptId;
+  delete (newBooking as any).customerVoucherId;
 
-  if (appliedCode) {
-    // Authoritative atomic lock verification: prevents two-tab race conditions and unauthorized reuse
-    const lockKeys: string[] = [];
-    if (authUid) lockKeys.push(`vlock_${appliedCode}_uid_${authUid}`);
-    if (cleanDigits) lockKeys.push(`vlock_${appliedCode}_phone_${cleanDigits}`);
-    if (custId) lockKeys.push(`vlock_${appliedCode}_cust_${custId}`);
-
-    const bookingRef = doc(db, 'bookings', docId);
-
-    await runTransaction(db, async (t) => {
-      for (const key of lockKeys) {
-        const lSnap = await t.get(doc(db, 'voucher_redemptions', key));
-        if (lSnap.exists()) {
-          const lData = lSnap.data();
-          if (lData?.status !== 'cancelled' && lData?.status !== 'batal') {
-            throw new Error(`Voucher ${appliedCode} sudah pernah digunakan pada akun ini.`);
-          }
-        }
-      }
-
-      t.set(bookingRef, cleanFirestoreData(newBooking));
-
-      for (const key of lockKeys) {
-        t.set(doc(db, 'voucher_redemptions', key), {
-          voucherCode: appliedCode,
-          bookingId: docId,
-          bookingCode,
-          customerAuthUid: authUid || null,
-          customerPhone: cleanDigits || null,
-          customerId: custId || null,
-          redeemedAt: now,
-          status: 'active',
-        }, { merge: true });
-      }
-    });
-  } else {
-    await setDoc(doc(db, 'bookings', docId), cleanFirestoreData(newBooking));
-  }
-
-  // If points were redeemed, deduct from loyalty ledger
-  if (data.pointsRedeemed && data.pointsRedeemed > 0) {
-    redeemPointsForBooking({
-      customerId: data.customerId || `cust_${data.customerWhatsApp.replace(/[^0-9]/g, '')}`,
-      points: data.pointsRedeemed,
-      bookingId: docId,
-      bookingCode,
-      discountRp: data.pointsDiscount || 0,
-    }).catch((err) => console.warn('Points redemption error in createBooking:', err));
-  }
-
-  // If customer voucher was applied, mark customer voucher used if applicable
-  if (data.voucherId && data.voucherId.startsWith('cv_')) {
-    markCustomerVoucherUsed(data.voucherId, docId, bookingCode).catch((err) =>
-      console.warn('Voucher mark used warning:', err)
-    );
-  }
-
-  // If general promo/voucher was applied, record authoritative redemption and usage
-  if (appliedCode) {
-    recordVoucherRedemption({
-      voucherCode: appliedCode,
-      voucherId: data.promoId || (data.voucherId && !data.voucherId.startsWith('cv_') ? data.voucherId : undefined),
-      bookingId: docId,
-      bookingCode,
-      customerId: custId,
-      customerAuthUid: authUid,
-      customerPhone: data.customerWhatsApp,
-      discountAmount: data.discountAmount || data.promoDiscount || data.voucherDiscount || 0,
-    }).catch((err) => console.warn('General voucher redemption recording warning:', err));
-  }
+  await setDoc(doc(db, 'bookings', docId), cleanFirestoreData(newBooking));
 
   // Initial history entry
   await addBookingStatusHistory(
@@ -772,10 +1703,10 @@ export async function createBooking(
     'customer',
     data.customerName,
     `Booking diajukan oleh customer melalui portal Senzu Home. Metode bayar: ${data.paymentMethod}`
-  );
+  ).catch(() => {});
 
   // CRM Update
-  await upsertCustomerCRM(newBooking);
+  await upsertCustomerCRM(newBooking).catch(() => {});
 
   // Initialize official payment record in payments collection
   try {
@@ -817,76 +1748,337 @@ export async function createBooking(
 
 export async function trackBookingByCodeAndPhone(
   bookingCode: string,
-  phoneInput: string
-): Promise<{ booking: Booking; history: BookingStatusHistory[] } | null> {
-  const cleanPhoneInput = phoneInput.replace(/[^0-9]/g, '');
-  const cleanCode = bookingCode.trim().toUpperCase();
+  phoneInput: string,
+  options?: {
+    bookingId?: string;
+    signal?: AbortSignal;
+    onError?: (err: { status: number; code: string; message: string }) => void;
+  }
+): Promise<{
+  booking: Booking;
+  history: BookingStatusHistory[];
+  accessLevel?: 'staff' | 'therapist' | 'owner' | 'guest';
+} | null> {
+  if (typeof bookingCode !== 'string' || typeof phoneInput !== 'string') {
+    return null;
+  }
+  const trimmedCode = bookingCode.trim();
+  if (!trimmedCode || bookingCode !== trimmedCode || /^bk_/i.test(trimmedCode)) {
+    options?.onError?.({
+      status: 400,
+      code: 'INVALID_BOOKING_CODE',
+      message: 'Kode booking tidak valid.',
+    });
+    return null;
+  }
+  const cleanCode = trimmedCode.toUpperCase();
+  const cleanPhoneInput = normalizeTrackingPhoneInput(phoneInput);
 
-  // Enforce minimum 8 digits for phone number to avoid accidental matches or enumeration
-  if (cleanPhoneInput.length < 8 || !cleanCode) {
+  // Enforce valid bookingCode and canonical WhatsApp phone number
+  if (!isValidReadBookingCode(cleanCode, 64)) {
+    options?.onError?.({
+      status: 400,
+      code: 'INVALID_BOOKING_CODE',
+      message: 'Kode booking tidak valid.',
+    });
+    return null;
+  }
+  if (!cleanPhoneInput) {
+    options?.onError?.({
+      status: 400,
+      code: 'INVALID_PHONE',
+      message: 'Nomor WhatsApp tidak valid.',
+    });
     return null;
   }
 
-  // 1. Try secure tracking server API (does not require broad Firestore rules)
-  try {
-    const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(cleanCode)}&phone=${encodeURIComponent(cleanPhoneInput)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.booking) {
-        return { booking: data.booking as Booking, history: data.history || [] };
-      }
+  let targetBookingId = '';
+  if (options?.bookingId !== undefined && options?.bookingId !== null && options?.bookingId !== '') {
+    if (
+      typeof options.bookingId !== 'string' ||
+      options.bookingId.trim() !== options.bookingId ||
+      !isValidReadDocId(options.bookingId, 128)
+    ) {
+      return null;
     }
-  } catch (apiErr) {
-    console.warn('API tracking lookup notice, trying direct client query:', apiErr);
+    targetBookingId = options.bookingId;
   }
 
-  // 2. Client query fallback (authorized for staff or customer owner)
   try {
-    const q = query(collection(db, 'bookings'), where('bookingCode', '==', cleanCode));
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
+    const session = auth?.currentUser;
+    let initialUid = '';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
 
-    const b = snap.docs[0].data() as Booking;
-    const dbPhoneClean = b.customerWhatsApp.replace(/[^0-9]/g, '');
-
-    // Compare phone numbers using last 8 digits
-    const last8Input = cleanPhoneInput.slice(-8);
-    const last8Db = dbPhoneClean.slice(-8);
-
-    if (last8Input !== last8Db) {
+    if (session !== null && session !== undefined) {
+      initialUid = typeof session.uid === 'string' ? session.uid.trim() : '';
+      if (
+        !initialUid ||
+        session.uid !== initialUid ||
+        !isValidReadDocId(initialUid, 128) ||
+        typeof session.getIdToken !== 'function'
+      ) {
+        return null;
+      }
+      const rawToken = await session.getIdToken();
+      const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+      if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        return null;
+      }
+      headers.Authorization = `Bearer ${idToken}`;
+    } else if (targetBookingId) {
+      // Unauthenticated guest tracking must never send bookingId
       return null;
     }
 
-    const history = await getBookingStatusHistory(b.bookingCode);
-    return { booking: b, history };
+    const res = await fetch('/api/bookings/track', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        bookingCode: cleanCode,
+        phone: cleanPhoneInput,
+        ...(initialUid && targetBookingId ? { bookingId: targetBookingId } : {}),
+      }),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+
+    if (initialUid) {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return null;
+    } else {
+      if (auth?.currentUser !== null && auth?.currentUser !== undefined) return null;
+    }
+
+    const data = await res.json().catch(() => null);
+
+    if (initialUid) {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return null;
+    } else {
+      if (auth?.currentUser !== null && auth?.currentUser !== undefined) return null;
+    }
+
+    if (!res.ok) {
+      options?.onError?.({
+        status: res.status,
+        code: typeof data?.code === 'string' ? data.code : 'TRACK_REJECTED',
+        message:
+          typeof data?.message === 'string' && data.message.trim()
+            ? data.message.trim()
+            : typeof data?.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : 'Data reservasi tidak ditemukan. Pastikan Kode Booking dan Nomor WhatsApp sesuai.',
+      });
+      return null;
+    }
+
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data) ||
+      data.success !== true ||
+      !data.booking ||
+      typeof data.booking !== 'object' ||
+      Array.isArray(data.booking)
+    ) {
+      return null;
+    }
+
+    const accessLevel: 'staff' | 'therapist' | 'owner' | 'guest' | undefined =
+      data.accessLevel === 'staff' ||
+      data.accessLevel === 'therapist' ||
+      data.accessLevel === 'owner' ||
+      data.accessLevel === 'guest'
+        ? data.accessLevel
+        : undefined;
+
+    if (!accessLevel) return null;
+    if (!initialUid && accessLevel !== 'guest') return null;
+    if (initialUid && accessLevel === 'guest') return null;
+
+    const sanitizedBooking = sanitizeBookingForClientAccess(
+      data.booking,
+      accessLevel,
+      initialUid || undefined
+    );
+    if (
+      !sanitizedBooking ||
+      sanitizedBooking.bookingCode !== cleanCode ||
+      (targetBookingId && sanitizedBooking.id !== targetBookingId)
+    ) {
+      return null;
+    }
+
+    const history = sanitizeAndDeduplicateHistoryEntries(
+      data.history,
+      sanitizedBooking.id,
+      cleanCode,
+      accessLevel
+    );
+
+    return {
+      booking: sanitizedBooking,
+      history,
+      accessLevel,
+    };
   } catch {
     return null;
   }
 }
 
-export async function getBookingByCode(bookingCode: string): Promise<Booking | null> {
+export async function getBookingByCode(
+  bookingCode: string,
+  options?: { bookingId?: string; phone?: string; signal?: AbortSignal }
+): Promise<Booking | null> {
   try {
-    const cleanCode = bookingCode.trim().toUpperCase();
-    if (!cleanCode) return null;
+    if (typeof bookingCode !== 'string') return null;
+    const trimmed = bookingCode.trim();
+    if (!trimmed || bookingCode !== trimmed || !isValidReadDocId(trimmed, 128)) return null;
 
-    // 1. Try secure tracking server API
-    try {
-      const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(cleanCode)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.booking) {
-          return data.booking as Booking;
-        }
+    let targetBookingId = '';
+    if (options?.bookingId !== undefined && options?.bookingId !== null && options?.bookingId !== '') {
+      if (
+        typeof options.bookingId !== 'string' ||
+        options.bookingId.trim() !== options.bookingId ||
+        !isValidReadDocId(options.bookingId, 128)
+      ) {
+        return null;
       }
-    } catch {
-      // ignore, fallback to direct query
+      targetBookingId = options.bookingId;
     }
 
-    // 2. Direct Firestore lookup (for staff / authenticated owner)
-    const q = query(collection(db, 'bookings'), where('bookingCode', '==', cleanCode));
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
-    return snap.docs[0].data() as Booking;
+    const cleanPhone =
+      options?.phone !== undefined && options?.phone !== null && options?.phone !== ''
+        ? normalizeTrackingPhoneInput(options.phone)
+        : '';
+    if (options?.phone !== undefined && options?.phone !== null && options?.phone !== '' && !cleanPhone) {
+      return null;
+    }
+
+    const session = auth?.currentUser;
+    if (session === null || session === undefined) {
+      if (!cleanPhone || targetBookingId || /^bk_/i.test(trimmed)) {
+        return null;
+      }
+      const cleanCode = trimmed.toUpperCase();
+      if (!isValidReadBookingCode(cleanCode, 64)) return null;
+      const tracked = await trackBookingByCodeAndPhone(cleanCode, cleanPhone, {
+        ...(options?.signal ? { signal: options.signal } : {}),
+      });
+      if (auth?.currentUser !== null && auth?.currentUser !== undefined) return null;
+      return tracked?.booking ?? null;
+    }
+
+    const initialUid = typeof session.uid === 'string' ? session.uid.trim() : '';
+    if (
+      !initialUid ||
+      session.uid !== initialUid ||
+      !isValidReadDocId(initialUid, 128) ||
+      typeof session.getIdToken !== 'function'
+    ) {
+      return null;
+    }
+
+    let requestBookingId = targetBookingId;
+    let requestBookingCode = '';
+    let requestSingleTarget = '';
+
+    if (trimmed.startsWith('bk_')) {
+      if (requestBookingId && requestBookingId !== trimmed) return null;
+      requestBookingId = trimmed;
+      const derived = trimmed.slice(3).toUpperCase();
+      if (isValidReadBookingCode(derived, 64)) {
+        requestBookingCode = derived;
+      }
+    } else if (requestBookingId) {
+      if (trimmed === requestBookingId) {
+        if (requestBookingId.startsWith('bk_')) {
+          const derived = requestBookingId.slice(3).toUpperCase();
+          if (isValidReadBookingCode(derived, 64)) {
+            requestBookingCode = derived;
+          }
+        }
+      } else {
+        const cleanCode = trimmed.toUpperCase();
+        if (!isValidReadBookingCode(cleanCode, 64)) return null;
+        if (
+          requestBookingId.startsWith('bk_') &&
+          requestBookingId.slice(3).toUpperCase() !== cleanCode
+        ) {
+          return null;
+        }
+        requestBookingCode = cleanCode;
+      }
+    } else {
+      const cleanCode = trimmed.toUpperCase();
+      if (isValidReadBookingCode(cleanCode, 64)) {
+        requestBookingCode = cleanCode;
+      } else {
+        requestSingleTarget = trimmed;
+      }
+    }
+
+    const rawToken = await session.getIdToken();
+    const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) return null;
+
+    const res = await fetch('/api/bookings/track', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        ...(requestBookingId ? { bookingId: requestBookingId } : {}),
+        ...(requestBookingCode ? { bookingCode: requestBookingCode } : {}),
+        ...(requestSingleTarget ? { target: requestSingleTarget } : {}),
+        ...(cleanPhone ? { phone: cleanPhone } : {}),
+      }),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+
+    if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return null;
+    if (!res.ok) return null;
+
+    const data = await res.json().catch(() => null);
+    if (!auth?.currentUser || auth.currentUser.uid !== initialUid) return null;
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data) ||
+      data.success !== true ||
+      !data.booking ||
+      typeof data.booking !== 'object' ||
+      Array.isArray(data.booking)
+    ) {
+      return null;
+    }
+
+    const accessLevel =
+      data.accessLevel === 'staff' ||
+      data.accessLevel === 'therapist' ||
+      data.accessLevel === 'owner'
+        ? data.accessLevel
+        : undefined;
+    if (!accessLevel) return null;
+
+    const sanitizedBooking = sanitizeBookingForClientAccess(
+      data.booking,
+      accessLevel,
+      initialUid
+    );
+    if (!sanitizedBooking) return null;
+    if (requestBookingId && sanitizedBooking.id !== requestBookingId) return null;
+    if (requestBookingCode && sanitizedBooking.bookingCode !== requestBookingCode) return null;
+    if (
+      requestSingleTarget &&
+      sanitizedBooking.id !== requestSingleTarget &&
+      sanitizedBooking.id !== `bk_${requestSingleTarget.toUpperCase()}` &&
+      sanitizedBooking.bookingCode !== requestSingleTarget.toUpperCase()
+    ) {
+      return null;
+    }
+
+    return sanitizedBooking;
   } catch {
     return null;
   }
@@ -914,29 +2106,342 @@ export function subscribeToBookingById(
 
 export function subscribeToBookingStatusHistory(
   bookingCode: string,
-  callback: (history: BookingStatusHistory[]) => void
+  callback: (history: BookingStatusHistory[]) => void,
+  options?: {
+    bookingId?: string;
+    phone?: string;
+    pollIntervalMs?: number;
+    onBookingUpdate?: (booking: Booking) => void;
+    onError?: (err: { status: number; code: string; message: string }) => void;
+  }
 ) {
-  const q = query(
-    collection(db, 'booking_status_history'),
-    where('bookingCode', '==', bookingCode)
-  );
-  return onSnapshot(
-    q,
-    (snap) => {
-      const list = snap.docs.map((d) => d.data() as BookingStatusHistory);
-      list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      const deduplicated: BookingStatusHistory[] = [];
-      for (const item of list) {
-        if (deduplicated.length === 0 || deduplicated[deduplicated.length - 1].status !== item.status) {
-          deduplicated.push(item);
+  if (typeof bookingCode !== 'string') return () => {};
+  const trimmedTarget = bookingCode.trim();
+  if (!trimmedTarget || bookingCode !== trimmedTarget || !isValidReadDocId(trimmedTarget, 128)) {
+    return () => {};
+  }
+
+  let expectedBookingId = '';
+  if (options?.bookingId !== undefined && options?.bookingId !== null && options?.bookingId !== '') {
+    if (
+      typeof options.bookingId !== 'string' ||
+      options.bookingId.trim() !== options.bookingId ||
+      !isValidReadDocId(options.bookingId, 128)
+    ) {
+      return () => {};
+    }
+    expectedBookingId = options.bookingId;
+  }
+
+  const cleanPhone =
+    options?.phone !== undefined && options?.phone !== null && options?.phone !== ''
+      ? normalizeTrackingPhoneInput(options.phone)
+      : '';
+  if (options?.phone !== undefined && options?.phone !== null && options?.phone !== '' && !cleanPhone) {
+    return () => {};
+  }
+
+  const initialSession = auth?.currentUser;
+  const initialUid =
+    initialSession && typeof initialSession.uid === 'string' ? initialSession.uid.trim() : '';
+
+  let requestBookingId = '';
+  let requestBookingCode = '';
+  let requestSingleTarget = '';
+
+  if (initialSession !== null && initialSession !== undefined) {
+    if (
+      !initialUid ||
+      initialSession.uid !== initialUid ||
+      !isValidReadDocId(initialUid, 128) ||
+      typeof initialSession.getIdToken !== 'function'
+    ) {
+      return () => {};
+    }
+
+    requestBookingId = expectedBookingId;
+    if (trimmedTarget.startsWith('bk_')) {
+      if (requestBookingId && requestBookingId !== trimmedTarget) return () => {};
+      requestBookingId = trimmedTarget;
+      expectedBookingId = trimmedTarget;
+      const derived = trimmedTarget.slice(3).toUpperCase();
+      if (isValidReadBookingCode(derived, 64)) {
+        requestBookingCode = derived;
+      }
+    } else if (requestBookingId) {
+      if (trimmedTarget === requestBookingId) {
+        if (requestBookingId.startsWith('bk_')) {
+          const derived = requestBookingId.slice(3).toUpperCase();
+          if (isValidReadBookingCode(derived, 64)) {
+            requestBookingCode = derived;
+          }
+        }
+      } else {
+        const upper = trimmedTarget.toUpperCase();
+        if (!isValidReadBookingCode(upper, 64)) return () => {};
+        if (
+          requestBookingId.startsWith('bk_') &&
+          requestBookingId.slice(3).toUpperCase() !== upper
+        ) {
+          return () => {};
+        }
+        requestBookingCode = upper;
+      }
+    } else {
+      requestSingleTarget = trimmedTarget;
+    }
+  } else {
+    // Unauthenticated guest subscription requires a valid booking code and canonical phone
+    if (/^bk_/i.test(trimmedTarget) || !cleanPhone) {
+      return () => {};
+    }
+    const upper = trimmedTarget.toUpperCase();
+    if (!isValidReadBookingCode(upper, 64)) return () => {};
+    if (
+      expectedBookingId &&
+      expectedBookingId.startsWith('bk_') &&
+      expectedBookingId.slice(3).toUpperCase() !== upper
+    ) {
+      return () => {};
+    }
+    requestBookingCode = upper;
+  }
+
+  let active = true;
+  let pollInFlight = false;
+  let timerId: ReturnType<typeof setInterval> | null = null;
+  let currentController: AbortController | null = null;
+
+  const stopSubscription = () => {
+    active = false;
+    if (timerId !== null) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+    if (currentController) {
+      currentController.abort();
+      currentController = null;
+    }
+  };
+
+  const pollOnce = async () => {
+    if (!active || pollInFlight) return;
+
+    if (initialUid) {
+      if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+        stopSubscription();
+        options?.onError?.({
+          status: 401,
+          code: 'SESSION_CHANGED',
+          message: 'Sesi autentikasi telah berakhir atau berubah.',
+        });
+        return;
+      }
+    } else {
+      if (auth?.currentUser !== null && auth?.currentUser !== undefined) {
+        stopSubscription();
+        options?.onError?.({
+          status: 401,
+          code: 'SESSION_CHANGED',
+          message: 'Sesi autentikasi telah berubah.',
+        });
+        return;
+      }
+    }
+
+    pollInFlight = true;
+    if (currentController) {
+      currentController.abort();
+    }
+    const controller = new AbortController();
+    currentController = controller;
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (initialUid) {
+        const currentSession = auth?.currentUser;
+        if (
+          !currentSession ||
+          currentSession.uid !== initialUid ||
+          typeof currentSession.getIdToken !== 'function'
+        ) {
+          stopSubscription();
+          return;
+        }
+        const rawToken = await currentSession.getIdToken();
+        const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+        if (!active || !idToken || !auth?.currentUser || auth.currentUser.uid !== initialUid) {
+          return;
+        }
+        headers.Authorization = `Bearer ${idToken}`;
+      }
+
+      // Guests must always use /api/bookings/track; authenticated callers use /api/booking-history/read unless booking updates are requested
+      const endpoint =
+        !initialUid || options?.onBookingUpdate
+          ? '/api/bookings/track'
+          : '/api/booking-history/read';
+
+      const payload = initialUid
+        ? {
+            ...(requestBookingId ? { bookingId: requestBookingId } : {}),
+            ...(requestBookingCode ? { bookingCode: requestBookingCode } : {}),
+            ...(requestSingleTarget ? { target: requestSingleTarget } : {}),
+            ...(cleanPhone ? { phone: cleanPhone } : {}),
+          }
+        : {
+            bookingCode: requestBookingCode,
+            phone: cleanPhone,
+          };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!active) return;
+      if (initialUid) {
+        if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+          stopSubscription();
+          return;
+        }
+      } else {
+        if (auth?.currentUser !== null && auth?.currentUser !== undefined) {
+          stopSubscription();
+          return;
         }
       }
-      callback(deduplicated);
-    },
-    (err) => {
-      console.warn('Status history subscription warning:', err);
+
+      const data = await res.json().catch(() => null);
+      if (!active) return;
+      if (initialUid) {
+        if (!auth?.currentUser || auth.currentUser.uid !== initialUid) {
+          stopSubscription();
+          return;
+        }
+      } else {
+        if (auth?.currentUser !== null && auth?.currentUser !== undefined) {
+          stopSubscription();
+          return;
+        }
+      }
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 409) {
+          stopSubscription();
+          options?.onError?.({
+            status: res.status,
+            code: typeof data?.code === 'string' ? data.code : 'HISTORY_ACCESS_DENIED',
+            message:
+              typeof data?.message === 'string' && data.message.trim()
+                ? data.message.trim()
+                : 'Akses ke riwayat status pesanan ditolak atau sesi berakhir.',
+          });
+        }
+        return;
+      }
+
+      if (!data || typeof data !== 'object' || Array.isArray(data) || data.success !== true) {
+        return;
+      }
+
+      const accessLevel: 'staff' | 'therapist' | 'owner' | 'guest' | undefined =
+        data.accessLevel === 'staff' ||
+        data.accessLevel === 'therapist' ||
+        data.accessLevel === 'owner' ||
+        data.accessLevel === 'guest'
+          ? data.accessLevel
+          : undefined;
+      if (!accessLevel) return;
+      if (!initialUid && accessLevel !== 'guest') {
+        stopSubscription();
+        return;
+      }
+      if (initialUid && accessLevel === 'guest') {
+        stopSubscription();
+        return;
+      }
+
+      const resolvedId =
+        typeof data.bookingId === 'string'
+          ? data.bookingId.trim()
+          : typeof data.booking?.id === 'string'
+          ? data.booking.id.trim()
+          : '';
+      const resolvedCode =
+        typeof data.bookingCode === 'string'
+          ? data.bookingCode.trim().toUpperCase()
+          : typeof data.booking?.bookingCode === 'string'
+          ? String(data.booking.bookingCode).trim().toUpperCase()
+          : '';
+
+      if (!isValidReadDocId(resolvedId, 128) || !isValidReadBookingCode(resolvedCode, 64)) {
+        return;
+      }
+      if (expectedBookingId && resolvedId !== expectedBookingId) {
+        stopSubscription();
+        return;
+      }
+      if (requestBookingCode && resolvedCode !== requestBookingCode) {
+        stopSubscription();
+        return;
+      }
+      if (
+        requestSingleTarget &&
+        resolvedId !== requestSingleTarget &&
+        resolvedId !== `bk_${requestSingleTarget.toUpperCase()}` &&
+        resolvedCode !== requestSingleTarget.toUpperCase()
+      ) {
+        stopSubscription();
+        return;
+      }
+
+      const sanitizedHistory = sanitizeAndDeduplicateHistoryEntries(
+        data.history,
+        resolvedId,
+        resolvedCode,
+        accessLevel
+      );
+
+      if (!active) return;
+      if (options?.onBookingUpdate && data.booking) {
+        const sanitizedBooking = sanitizeBookingForClientAccess(
+          data.booking,
+          accessLevel,
+          initialUid || undefined
+        );
+        if (!sanitizedBooking || sanitizedBooking.id !== resolvedId) {
+          stopSubscription();
+          return;
+        }
+        options.onBookingUpdate(sanitizedBooking);
+      }
+      callback(sanitizedHistory);
+    } catch {
+      // Ignore transient network or abort notices during subscription polling
+    } finally {
+      pollInFlight = false;
+      if (currentController === controller) {
+        currentController = null;
+      }
     }
-  );
+  };
+
+  void pollOnce();
+  const intervalMs =
+    typeof options?.pollIntervalMs === 'number' && options.pollIntervalMs >= 2000
+      ? options.pollIntervalMs
+      : 5000;
+  timerId = setInterval(() => {
+    void pollOnce();
+  }, intervalMs);
+
+  return stopSubscription;
 }
 
 export async function getAllBookings(): Promise<Booking[]> {
@@ -1771,24 +3276,6 @@ export async function therapistAcceptOrderAtomic(
 
   // Asynchronous secondary operations (Part AC): Non-blocking execution preserves UI speed
   (async () => {
-    try {
-      const historyId = `hist_${confirmedBooking.bookingCode || bookingId}_${Date.now()}`;
-      const historyEntry = {
-        id: historyId,
-        bookingId,
-        bookingCode: confirmedBooking.bookingCode || '',
-        status: 'Accepted' as BookingStatus,
-        note: `Pesanan diterima oleh Terapis ${therapistName}, bersiap menuju lokasi`,
-        updatedByRole: 'therapist' as const,
-        updatedByName: therapistName,
-        timestamp: now,
-        formattedWIB: formatDateTimeWIB(new Date(now)),
-      };
-      await setDoc(doc(db, 'booking_status_history', historyId), cleanFirestoreData(historyEntry));
-    } catch (e) {
-      console.warn('Background status history notice:', e);
-    }
-
     try {
       const basePayload = {
         bookingId,

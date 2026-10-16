@@ -40,6 +40,9 @@ interface NotificationCenterModalProps {
   onClose: () => void;
   currentUserRole?: NotificationRecipientRole;
   currentUserId?: string;
+  therapistId?: string;
+  customerId?: string;
+  customerAuthUid?: string;
   customerBookingCode?: string;
   onNavigateToAction?: (actionUrl: string) => void;
 }
@@ -49,10 +52,21 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   onClose,
   currentUserRole = 'customer',
   currentUserId,
+  therapistId,
+  customerId,
+  customerAuthUid,
   customerBookingCode,
   onNavigateToAction,
 }) => {
   const role: NotificationRecipientRole = (currentUserRole as NotificationRecipientRole) || 'customer';
+  const resolvedTherapistId = therapistId || (role === 'therapist' ? currentUserId : undefined);
+  const resolvedCustomerId = customerId || (role === 'customer' ? currentUserId : undefined);
+  const resolvedRecipientId =
+    role === 'therapist'
+      ? resolvedTherapistId
+      : role === 'customer'
+        ? resolvedCustomerId
+        : currentUserId || role;
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'booking' | 'payment' | 'therapist' | 'alert'>('all');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
@@ -74,13 +88,28 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   useEffect(() => {
     if (!isOpen) return;
 
-    let unsubscribe: () => void;
+    let unsubscribe: (() => void) | undefined;
     if (role === 'customer') {
-      unsubscribe = subscribeToCustomerNotifications(customerBookingCode || '', (list) => {
-        setNotifications(list);
-      });
+      if (!resolvedCustomerId && !customerAuthUid) {
+        setNotifications([]);
+        return;
+      }
+      unsubscribe = subscribeToCustomerNotifications(
+        {
+          customerId: resolvedCustomerId || customerAuthUid || '',
+          customerAuthUid,
+          bookingCode: customerBookingCode || undefined,
+        },
+        (list) => {
+          setNotifications(list);
+        }
+      );
     } else {
-      unsubscribe = subscribeToRoleNotifications(role, currentUserId, (list) => {
+      if (role === 'therapist' && !resolvedTherapistId) {
+        setNotifications([]);
+        return;
+      }
+      unsubscribe = subscribeToRoleNotifications(role, resolvedRecipientId, (list) => {
         setNotifications(list);
       });
     }
@@ -88,7 +117,15 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isOpen, role, currentUserId, customerBookingCode]);
+  }, [
+    isOpen,
+    role,
+    resolvedRecipientId,
+    resolvedTherapistId,
+    resolvedCustomerId,
+    customerAuthUid,
+    customerBookingCode,
+  ]);
 
   if (!isOpen) return null;
 
@@ -107,6 +144,16 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
       return;
     }
 
+    const pushOwnerId =
+      role === 'customer'
+        ? resolvedCustomerId || customerAuthUid
+        : role === 'therapist'
+          ? resolvedTherapistId
+          : resolvedRecipientId;
+    if (!pushOwnerId) {
+      return;
+    }
+
     setIsRequestingPush(true);
     try {
       const permission = await Notification.requestPermission();
@@ -114,7 +161,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
       if (permission === 'granted') {
         const dummyToken = `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         await registerDeviceToken({
-          userId: currentUserId || customerBookingCode || 'guest',
+          userId: pushOwnerId,
           role: role,
           token: dummyToken,
           platform: 'pwa',
@@ -144,11 +191,11 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   };
 
   const handleMarkAllRead = async () => {
-    await markAllNotificationsAsRead(role, currentUserId);
+    await markAllNotificationsAsRead(role, resolvedRecipientId);
   };
 
   const handleClearRead = async () => {
-    await clearReadNotifications(role);
+    await clearReadNotifications(role, resolvedRecipientId);
   };
 
   // Filter notifications based on tab

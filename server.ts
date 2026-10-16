@@ -1,5 +1,5 @@
 import { registerPaymentAcceptance, assertPaymentLink } from './src/server/paymentAcceptance.ts';
-import { randomInt, timingSafeEqual } from 'node:crypto';
+import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -45,6 +45,10 @@ import {
   calculateHomeServiceFee,
   SENZU_BASE_LOCATION,
 } from './src/lib/distanceFeeService.ts';
+import {
+  DEFAULT_LOYALTY_SETTINGS,
+  DEFAULT_MEMBERSHIP_TIERS,
+} from './src/types/loyalty.ts';
 
 // Helper to normalize DocumentSnapshot across Firebase Admin SDK and client SDK conventions
 function wrapDocSnap(snap: any) {
@@ -882,7 +886,6 @@ async function startServer() {
   // Trigger sync on server startup
   setTimeout(() => {
     syncStaffRoles().catch(() => {});
-    syncHistoricalVoucherRedemptions().catch(() => {});
   }, 1000);
 
   // Authenticated endpoint to trigger staff role synchronization (Operational Staff / Admin only)
@@ -1090,6 +1093,116 @@ async function startServer() {
     }
   });
 
+  // Resolve only an existing UID-bound Staff Master record. Email is metadata,
+  // never an authorization/linking key. Reads and allowed writes commit together.
+  async function reconcileUidBoundStaff(verifiedUid: string, verifiedEmail: string, activateFirstLogin = false) {
+    const deny = (statusCode: number, code: string, message: string) =>
+      Object.assign(new Error(message), { staffIdentityDenied: true, statusCode, code });
+    const textId = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+    if (typeof verifiedUid !== 'string' || !verifiedUid.trim() || verifiedUid !== verifiedUid.trim()) {
+      throw deny(401, 'AUTH_TOKEN_INVALID', 'Sesi autentikasi tidak valid. Silakan masuk kembali.');
+    }
+    if (!adminDb) throw new Error('Authoritative staff database unavailable');
+
+    return adminDb.runTransaction(async (transaction) => {
+      const canonical = await transaction.get(adminDb.collection('staff_users').where('authUserId', '==', verifiedUid).limit(2));
+      const legacy = await transaction.get(adminDb.collection('staff_users').where('authUid', '==', verifiedUid).limit(2));
+      const direct = await transaction.get(adminDb.collection('staff_users').doc(verifiedUid));
+      const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+      const roleSnap = await transaction.get(roleRef);
+      const matches = new Map<string, any>();
+      for (const found of [...canonical.docs, ...legacy.docs]) matches.set(found.id, found);
+      if (direct.exists) matches.set(direct.id, direct);
+      if (matches.size === 0) {
+        throw deny(403, 'STAFF_NOT_REGISTERED', 'Akun belum tertaut ke Master Staff. Silakan hubungi Manager.');
+      }
+      if (matches.size !== 1) {
+        throw deny(409, 'MULTIPLE_STAFF_MATCH', 'Identitas staf memiliki lebih dari satu profil. Hubungi Manager untuk pemeriksaan.');
+      }
+      const staffSnap = [...matches.values()][0];
+      const staff = staffSnap.data();
+      const uidConflict = (record: any) => [record.authUserId, record.authUid].some(value =>
+        value != null && value !== '' && (typeof value !== 'string' || textId(value) !== verifiedUid));
+      if (uidConflict(staff) || (staffSnap.id !== verifiedUid &&
+          textId(staff.authUserId) !== verifiedUid && textId(staff.authUid) !== verifiedUid)) {
+        throw deny(403, 'STAFF_UID_MISMATCH', 'Identitas staf tidak sesuai dengan sesi autentikasi.');
+      }
+      const disabled = (record: any) => record.isActive === false || record.loginEnabled === false ||
+        ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED']
+          .includes(textId(record.status).toUpperCase()) ||
+        textId(record.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+      if (disabled(staff)) throw deny(403, 'STAFF_INACTIVE', 'Akun staf sedang tidak aktif.');
+      const role = roleSnap.exists ? roleSnap.data() : null;
+      if (role) {
+        if (uidConflict(role)) throw deny(403, 'STAFF_UID_MISMATCH', 'Identitas role staf tidak sesuai dengan sesi.');
+        if (role.isActive !== true || disabled(role)) throw deny(403, 'STAFF_INACTIVE', 'Akun staf sedang tidak aktif.');
+        const aliases = new Set([verifiedUid, staffSnap.id, textId(staff.uid), textId(staff.id)].filter(Boolean));
+        for (const linkedId of [role.staffId, role.staffUserId]) {
+          if (linkedId != null && linkedId !== '' && (typeof linkedId !== 'string' || !aliases.has(textId(linkedId)))) {
+            throw deny(409, 'STAFF_ROLE_MAPPING_CONFLICT', 'Referensi role staf memerlukan pemeriksaan Manager.');
+          }
+        }
+      } else if (staff.isActive !== true && textId(staff.status).toUpperCase() !== 'ACTIVE') {
+        throw deny(403, 'STAFF_INACTIVE', 'Status aktif staf belum dapat diverifikasi.');
+      }
+      const canonicalRole = staff.role || 'staff';
+      if (!['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff'].includes(canonicalRole)) {
+        throw deny(403, 'STAFF_ROLE_INVALID', 'Role staf belum dapat diverifikasi. Hubungi Manager.');
+      }
+      const now = new Date().toISOString();
+      const uidBackfilled = !staff.authUserId || !staff.authUid;
+      const staffUpdates: Record<string, any> = {};
+      if (uidBackfilled) Object.assign(staffUpdates, {
+        authUserId: verifiedUid,
+        authUid: verifiedUid,
+        updatedAt: now,
+        updatedBy: 'trusted admin reconciliation',
+      });
+      if (activateFirstLogin) Object.assign(staffUpdates, {
+        mustChangePassword: false,
+        firstLoginCompleted: true,
+        firstLoginCompletedAt: staff.firstLoginCompletedAt || now,
+        loginAccountStatus: 'AKTIF',
+        passwordChangedAt: now,
+        lastLoginAt: now,
+        updatedAt: now,
+        authUserId: verifiedUid,
+        authUid: verifiedUid,
+        updatedBy: staff.name || 'Sistem Aktivasi Staf',
+      });
+      if (Object.keys(staffUpdates).length) transaction.update(staffSnap.ref, staffUpdates);
+      transaction.set(roleRef, {
+        authUserId: verifiedUid,
+        staffId: staffSnap.id,
+        staffUserId: staffSnap.id,
+        therapistId: staff.therapistId || staff.uid || staffSnap.id,
+        role: canonicalRole,
+        name: staff.name || '',
+        email: staff.email || verifiedEmail || '',
+        status: 'active',
+        isActive: true,
+        branchId: staff.branchId || 'PLG001',
+        accountType: 'STAFF',
+        updatedAt: now,
+      }, { merge: true });
+      return {
+        staffDocId: staffSnap.id as string,
+        canonicalRole,
+        now,
+        uidBackfilled,
+        resolvedStaff: {
+          ...staff,
+          ...staffUpdates,
+          id: staffSnap.id,
+          uid: staff.uid || staffSnap.id,
+          authUserId: verifiedUid,
+          authUid: verifiedUid,
+          role: canonicalRole,
+        },
+      };
+    });
+  }
+
   // Trusted Endpoint: Reconcile authenticated Firebase user with Staff Master & /staff_roles using Firebase Admin SDK
   app.post('/api/staff/reconcile', async (req, res) => {
     // 1. Authoritative Firebase ID Token Extraction
@@ -1124,205 +1237,33 @@ async function startServer() {
     const verifiedUid = verifiedAuth.uid;
     const verifiedEmail = verifiedAuth.email;
 
-    // Check in-memory reconciliation cache (2 minutes operational TTL)
-    const cached = reconciliationCache.get(verifiedUid);
-    if (cached && Date.now() - cached.verifiedAt < RECONCILIATION_TTL_MS) {
-      if (cached.staff?.mustChangePassword !== true) {
-        console.log(`[STAFF_ROLE_CACHE_HIT] Verified session served from cache for authUid: ${verifiedUid} (role: ${cached.role})`);
-        return res.json({
-          success: true,
-          reconciled: false,
-          role: cached.role,
-          staff: cached.staff,
-        });
-      }
-    }
-
-    // 3. Authoritative Staff Master Lookup via Admin Firestore against the named database
     try {
-      let matchedDoc: any = null;
-      let matchedData: any = null;
-
-      // Primary Search: Query by canonical authUserId
-      const snapAuth = await adminDb.collection('staff_users')
-        .where('authUserId', '==', verifiedUid)
-        .limit(1)
-        .get();
-
-      if (!snapAuth.empty) {
-        matchedDoc = snapAuth.docs[0];
-        matchedData = matchedDoc.data();
-      }
-
-      // Secondary Search: Query by legacy authUid
-      if (!matchedDoc) {
-        const snapLegacy = await adminDb.collection('staff_users')
-          .where('authUid', '==', verifiedUid)
-          .limit(1)
-          .get();
-
-        if (!snapLegacy.empty) {
-          matchedDoc = snapLegacy.docs[0];
-          matchedData = matchedDoc.data();
-        }
-      }
-
-      // Tertiary Search: Link existing Staff Master record by verified token email (never body email)
-      let wasReconciledByEmail = false;
-      if (!matchedDoc && verifiedEmail) {
-        const snapEmail = await adminDb.collection('staff_users')
-          .where('email', '==', verifiedEmail)
-          .limit(2)
-          .get();
-
-        if (!snapEmail.empty) {
-          if (snapEmail.docs.length > 1) {
-            console.warn(`[STAFF_RECONCILE_DENIED] Multiple staff match for email: ${verifiedEmail}`);
-            return res.status(409).json({
-              success: false,
-              code: 'MULTIPLE_STAFF_MATCH',
-              message: 'Ditemukan lebih dari satu profil staf di Master Data dengan email yang sama. Hubungi Branch Manager / Administrator.',
-            });
-          }
-
-          const legacyDoc = snapEmail.docs[0];
-          const legacyData = legacyDoc.data() as any;
-
-          // Identity collision check: ensure profile isn't already claimed by another Firebase UID
-          if (
-            (legacyData.authUserId && legacyData.authUserId !== verifiedUid) ||
-            (legacyData.authUid && legacyData.authUid !== verifiedUid)
-          ) {
-            console.warn(`[STAFF_RECONCILE_DENIED] UID mismatch for staff ${legacyDoc.id}`);
-            return res.status(403).json({
-              success: false,
-              code: 'STAFF_UID_MISMATCH',
-              message: 'Akun staf ini sudah tertaut dengan kredensial otentikasi lain.',
-            });
-          }
-
-          if (
-            legacyData.isActive === false ||
-            legacyData.status === 'INACTIVE' ||
-            legacyData.loginAccountStatus === 'DINONAKTIFKAN'
-          ) {
-            return res.status(403).json({
-              success: false,
-              code: 'STAFF_INACTIVE',
-              message: 'Akun staf sedang tidak aktif.',
-            });
-          }
-
-          // Authoritative link using Admin Firestore
-          const now = new Date().toISOString();
-          await adminDb.collection('staff_users').doc(legacyDoc.id).set({
-            authUid: verifiedUid,
-            authUserId: verifiedUid,
-            updatedAt: now,
-            updatedBy: 'trusted admin reconciliation',
-          }, { merge: true });
-
-          matchedDoc = legacyDoc;
-          matchedData = {
-            ...legacyData,
-            authUid: verifiedUid,
-            authUserId: verifiedUid,
-            updatedAt: now,
-          };
-          wasReconciledByEmail = true;
-          console.log(`[Trusted Admin RBAC] Linked staff ${legacyData.name} to UID ${verifiedUid}`);
-        }
-      }
-
-      if (!matchedDoc || !matchedData) {
-        console.warn(`[STAFF_RECONCILE_DENIED] Verified UID ${verifiedUid} not found in Staff Master`);
-        return res.status(403).json({
-          success: false,
-          code: 'STAFF_NOT_REGISTERED',
-          message: 'Akun berhasil diautentikasi, namun belum terdaftar di Master Staff. Silakan hubungi Manager.',
-        });
-      }
-
-      // 4. Verify Active Status
-      const isActive =
-        matchedData.isActive !== false &&
-        matchedData.status !== 'INACTIVE' &&
-        matchedData.loginAccountStatus !== 'DINONAKTIFKAN';
-
-      if (!isActive) {
-        reconciliationCache.delete(verifiedUid);
-        await adminDb.collection('staff_roles').doc(verifiedUid).set({
-          authUserId: verifiedUid,
-          isActive: false,
-          status: 'inactive',
-          updatedAt: new Date().toISOString(),
-        }, { merge: true }).catch(() => {});
-
-        console.warn(`[STAFF_RECONCILE_DENIED] Staff ${verifiedUid} is inactive.`);
-        return res.status(403).json({
-          success: false,
-          code: 'STAFF_INACTIVE',
-          message: 'Akun staf sedang tidak aktif.',
-        });
-      }
-
-      // Ensure canonical authUserId is recorded in Staff Master
-      if (!matchedData.authUid || !matchedData.authUserId) {
-        await adminDb.collection('staff_users').doc(matchedDoc.id).set({
-          authUid: verifiedUid,
-          authUserId: verifiedUid,
-          updatedAt: new Date().toISOString(),
-          updatedBy: 'trusted admin reconciliation',
-        }, { merge: true }).catch(() => {});
-      }
-
-      // 5. Authoritative Role Mapping Write to /staff_roles/{verifiedUid} via Admin Firestore
-      const verifiedRole = matchedData.role || 'staff';
-      const now = new Date().toISOString();
-
-      await adminDb.collection('staff_roles').doc(verifiedUid).set({
-        authUserId: verifiedUid,
-        staffId: matchedData.uid || matchedDoc.id,
-        staffUserId: matchedData.uid || matchedDoc.id,
-        therapistId: matchedData.therapistId || matchedData.uid || matchedDoc.id,
-        role: verifiedRole,
-        name: matchedData.name || '',
-        email: matchedData.email || verifiedEmail,
-        status: 'active',
-        isActive: true,
-        branchId: matchedData.branchId || 'PLG001',
-        accountType: 'STAFF',
-        updatedAt: now,
-      }, { merge: true });
-
-      const resolvedStaff = {
-        ...matchedData,
-        id: matchedDoc.id,
-        uid: matchedData.uid || matchedDoc.id,
-        authUserId: verifiedUid,
-        authUid: verifiedUid,
-      };
-
+      // Cached sessions cannot claim unbound profiles or skip current UID checks.
+      const resolved = await reconcileUidBoundStaff(verifiedUid, verifiedEmail);
+      const { staffDocId, canonicalRole, resolvedStaff } = resolved;
+      serverStaffMasterCache.set(staffDocId, resolvedStaff);
       reconciliationCache.set(verifiedUid, {
         uid: verifiedUid,
-        staffUserId: matchedData.uid || matchedDoc.id,
-        role: verifiedRole,
+        staffUserId: staffDocId,
+        role: canonicalRole,
         status: 'active',
-        branchId: matchedData.branchId || 'PLG001',
+        branchId: resolvedStaff.branchId || 'PLG001',
         verifiedAt: Date.now(),
         staff: resolvedStaff,
       });
-
-      console.log(`[STAFF_ROLE_RECONCILED] Verified staff ${verifiedUid} as role ${verifiedRole}`);
+      console.log(`[STAFF_ROLE_RECONCILED] Verified staff ${verifiedUid} as role ${canonicalRole}`);
       return res.json({
         success: true,
-        reconciled: wasReconciledByEmail,
-        role: verifiedRole,
+        reconciled: resolved.uidBackfilled,
+        role: canonicalRole,
         staff: resolvedStaff,
       });
     } catch (err: any) {
-      console.error(`[STAFF_AUTHORIZATION_ERROR] Firestore Admin error verifying UID ${verifiedUid}:`, err?.code, err?.message);
-      // Fail closed with safe classification per Prompt 9
+      reconciliationCache.delete(verifiedUid);
+      if (err.staffIdentityDenied === true) {
+        return res.status(err.statusCode).json({ success: false, code: err.code, message: err.message });
+      }
+      console.error(`[STAFF_AUTHORIZATION_ERROR] Staff identity lookup unavailable:`, err?.code);
       return res.status(503).json({
         success: false,
         code: 'STAFF_AUTHORIZATION_UNAVAILABLE',
@@ -1333,6 +1274,7 @@ async function startServer() {
 
   // Trusted Endpoint: Complete staff first-time password change and account activation (Server-Authoritative)
   app.post('/api/staff/complete-first-login', async (req, res) => {
+    let verifiedUid = '';
     try {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -1353,7 +1295,6 @@ async function startServer() {
       }
 
       // 1. Authoritatively verify Firebase ID Token via Google Identity Toolkit
-      let verifiedUid = '';
       let verifiedEmail = '';
       try {
         const resp = await fetch(
@@ -1390,186 +1331,18 @@ async function startServer() {
         });
       }
 
-      if (!db) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          message: 'Layanan database server sedang tidak tersedia.',
-        });
-      }
-
-      // Ensure server process is authenticated as system service for privileged writes
-      await ensureServerAuthenticated();
-
-      // 2. Locate Staff Master record by verified Auth UID (DO NOT trust client body parameters)
-      let matchedDoc: any = null;
-      let matchedData: any = null;
-
-      // Query by canonical authUserId
-      const qAuth = query(collection(db, 'staff_users'), where('authUserId', '==', verifiedUid), limit(1));
-      const snapAuth = await getDocs(qAuth);
-      if (!snapAuth.empty) {
-        matchedDoc = snapAuth.docs[0];
-        matchedData = matchedDoc.data();
-      }
-
-      // Query by legacy authUid
-      if (!matchedDoc) {
-        const qLegacyAuth = query(collection(db, 'staff_users'), where('authUid', '==', verifiedUid), limit(1));
-        const snapLegacy = await getDocs(qLegacyAuth);
-        if (!snapLegacy.empty) {
-          matchedDoc = snapLegacy.docs[0];
-          matchedData = snapLegacy.docs[0].data();
-        }
-      }
-
-      // Query by document ID == verifiedUid
-      if (!matchedDoc) {
-        const directSnap = await getDoc(doc(db, 'staff_users', verifiedUid));
-        if (directSnap.exists()) {
-          matchedDoc = directSnap;
-          matchedData = directSnap.data();
-        }
-      }
-
-      // Fallback: Query by verified email with strict collision and hijacking protection
-      if (!matchedDoc && verifiedEmail) {
-        const qEmail = query(collection(db, 'staff_users'), where('email', '==', verifiedEmail), limit(2));
-        const snapEmail = await getDocs(qEmail);
-        if (!snapEmail.empty && snapEmail.docs.length === 1) {
-          const candidateDoc = snapEmail.docs[0];
-          const candData = candidateDoc.data() as any;
-          const existingUid = candData.authUserId || candData.authUid;
-          if (!existingUid || existingUid === verifiedUid) {
-            matchedDoc = candidateDoc;
-            matchedData = candData;
-          }
-        }
-      }
-
-      // Fallback: Query server in-memory staff cache
-      if (!matchedDoc) {
-        for (const st of serverStaffMasterCache.values()) {
-          const sAuthUid = st.authUserId || st.authUid || st.uid;
-          if (sAuthUid && sAuthUid === verifiedUid) {
-            matchedData = st;
-            matchedDoc = { id: st.uid, data: () => st };
-            break;
-          }
-          if (verifiedEmail && st.email && st.email.toLowerCase().trim() === verifiedEmail) {
-            matchedData = st;
-            matchedDoc = { id: st.uid, data: () => st };
-            break;
-          }
-        }
-      }
-
-      if (!matchedDoc || !matchedData) {
-        return res.status(404).json({
-          success: false,
-          code: 'STAFF_NOT_FOUND',
-          message: 'Data staf tidak ditemukan di sistem.',
-        });
-      }
-
-      const staffDocId = matchedDoc.id;
-
-      // 3. Verify staff account is active (Requirement 6 & 21)
-      const isActive =
-        matchedData.isActive !== false &&
-        matchedData.status !== 'INACTIVE' &&
-        matchedData.loginAccountStatus !== 'DINONAKTIFKAN';
-
-      if (!isActive) {
-        reconciliationCache.delete(verifiedUid);
-        return res.status(403).json({
-          success: false,
-          code: 'ACCOUNT_DISABLED',
-          message: 'Akun staf sedang tidak aktif.',
-        });
-      }
-
-      // Canonical role resolution with normalized casing (Requirement 9)
-      const canonicalRole = (matchedData.role || 'staff').toLowerCase().trim();
-      const now = new Date().toISOString();
-
-      // 4. Update staff_users authoritatively (Privileged Staff Master fields)
-      const staffUpdatePayload: Record<string, any> = {
-        mustChangePassword: false,
-        firstLoginCompleted: true,
-        firstLoginCompletedAt: matchedData.firstLoginCompletedAt || now,
-        loginAccountStatus: 'AKTIF',
-        passwordChangedAt: now,
-        lastLoginAt: now,
-        updatedAt: now,
-        authUserId: verifiedUid,
-        authUid: verifiedUid,
-        updatedBy: matchedData.name || 'Sistem Aktivasi Staf',
-      };
-
-      try {
-        await updateDoc(doc(db, 'staff_users', staffDocId), sanitizeForFirestore(staffUpdatePayload));
-      } catch (updErr: any) {
-        console.error('[CompleteFirstLogin] Failed to update staff_users:', updErr);
-        return res.status(500).json({
-          success: false,
-          code: 'ACTIVATION_UPDATE_FAILED',
-          message: 'Perubahan kata sandi berhasil, tetapi aktivasi akun belum selesai. Silakan coba kembali.',
-        });
-      }
-
-      // 5. Authoritatively synchronize /staff_roles/{authUid} (Requirement 18)
-      try {
-        await setDoc(
-          doc(db, 'staff_roles', verifiedUid),
-          sanitizeForFirestore({
-            authUserId: verifiedUid,
-            staffId: staffDocId,
-            staffUserId: staffDocId,
-            therapistId: matchedData.therapistId || staffDocId,
-            role: canonicalRole,
-            name: matchedData.name || '',
-            email: matchedData.email || verifiedEmail,
-            status: 'active',
-            isActive: true,
-            branchId: matchedData.branchId || 'PLG001',
-            accountType: 'STAFF',
-            updatedAt: now,
-          }),
-          { merge: true }
-        );
-      } catch (roleErr: any) {
-        console.warn('[CompleteFirstLogin] Notice syncing staff_roles:', roleErr?.message);
-      }
-
-      // 6. Update in-memory caches
-      const resolvedStaff: any = {
-        ...matchedData,
-        ...staffUpdatePayload,
-        id: staffDocId,
-        uid: staffDocId,
-        authUserId: verifiedUid,
-        role: canonicalRole,
-      };
+      // Finish only a currently UID-bound account; no email or memory claim.
+      const { staffDocId, canonicalRole, resolvedStaff, now } =
+        await reconcileUidBoundStaff(verifiedUid, verifiedEmail, true);
+      const matchedData = resolvedStaff;
       serverStaffMasterCache.set(staffDocId, resolvedStaff);
-
-      reconciliationCache.delete(verifiedUid);
       reconciliationCache.delete(staffDocId);
       reconciliationCache.set(verifiedUid, {
         uid: verifiedUid,
         staffUserId: staffDocId,
         role: canonicalRole,
         status: 'active',
-        branchId: matchedData.branchId || 'PLG001',
-        verifiedAt: Date.now(),
-        staff: resolvedStaff,
-      });
-      reconciliationCache.set(staffDocId, {
-        uid: verifiedUid,
-        staffUserId: staffDocId,
-        role: canonicalRole,
-        status: 'active',
-        branchId: matchedData.branchId || 'PLG001',
+        branchId: resolvedStaff.branchId || 'PLG001',
         verifiedAt: Date.now(),
         staff: resolvedStaff,
       });
@@ -1598,6 +1371,11 @@ async function startServer() {
         role: canonicalRole,
       });
     } catch (err: any) {
+      if (err.staffIdentityDenied === true) {
+        reconciliationCache.delete(verifiedUid);
+        return res.status(err.statusCode).json({ success: false, code: err.code, message: err.message });
+      }
+      reconciliationCache.delete(verifiedUid);
       console.error('[CompleteFirstLogin] Unexpected error:', err);
       return res.status(500).json({
         success: false,
@@ -1781,18 +1559,14 @@ async function startServer() {
 
       // Step 12 & 18: Safe asynchronous secondary operations (Status history & audit log)
       if (updatedBookingData) {
-        const histId = `hist_${updatedBookingData.bookingCode || bookingId}_${Date.now()}`;
-        setDoc(doc(db, 'booking_status_history', histId), sanitizeForFirestore({
-          id: histId,
+        await recordAcceptedOrderStatusHistory({
           bookingId,
           bookingCode: updatedBookingData.bookingCode || '',
-          status: 'Accepted',
-          note: `Pesanan diterima oleh Terapis ${resolvedTherapistName || 'Senzu'}`,
-          updatedByRole: 'therapist',
-          updatedByName: resolvedTherapistName || 'Terapis',
-          timestamp: now,
-          formattedWIB: new Date(now).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) + ' WIB',
-        })).catch((e) => console.warn('History write notice:', e));
+          therapistId: resolvedTherapistId,
+          therapistName: resolvedTherapistName || 'Terapis',
+          actorUid: verifiedUid,
+          acceptedAt: now,
+        }).catch((e) => console.warn('History write notice:', e));
       }
 
       emitStructuredLog({
@@ -2460,6 +2234,3522 @@ async function startServer() {
   });
 
   // =============================================================
+  // STAGE 7D: AUTHORITATIVE ADMIN PAYMENT CORRECTION &
+  // MANAGER MANUAL REFUND STATUS GOVERNANCE
+  // Finding 6: payment_status_history WRITES
+  // Finding 11: Direct Client Payment Corrections
+  // =============================================================
+
+  const STAGE7D_ALLOWED_PAYMENT_STATUS_CODES = new Set<string>([
+    'unpaid',
+    'pending_manual_verification',
+    'paid',
+    'payment_rejected',
+    'pending',
+    'failed',
+    'expired',
+    'cancelled',
+    'refunded',
+    'partially_refunded',
+  ]);
+
+  const STAGE7D_ALLOWED_REFUND_STATUSES = new Set<string>([
+    'APPROVED',
+    'PROCESSING_MANUAL',
+    'COMPLETED_MANUAL',
+    'REJECTED',
+  ]);
+
+  const STAGE7D_CORRECTION_ALLOWED_BODY_KEYS = new Set<string>([
+    'paymentId',
+    'bookingId',
+    'bookingCode',
+    'newStatus',
+    'reason',
+    'requestId',
+    'staffId',
+    'staffName',
+    'actorId',
+    'actorName',
+    'actorRole',
+  ]);
+
+  const STAGE7D_MANUAL_REFUND_ALLOWED_BODY_KEYS = new Set<string>([
+    'caseId',
+    'caseCode',
+    'caseItem',
+    'bookingId',
+    'bookingCode',
+    'paymentId',
+    'newStatus',
+    'refundAmount',
+    'refundMethod',
+    'refundDate',
+    'refundReference',
+    'refundProofUrl',
+    'note',
+    'requestId',
+    'actorId',
+    'actorName',
+    'actorRole',
+    'staffId',
+    'staffName',
+  ]);
+
+  function isValidStage7dDocId(value: unknown, maxLen = 128): value is string {
+    return (
+      typeof value === 'string' &&
+      value.length >= 1 &&
+      value.length <= maxLen &&
+      value.trim() === value &&
+      !value.includes('/') &&
+      !/[\x00-\x1F\x7F\s]/.test(value)
+    );
+  }
+
+  function isValidStage7dBookingCode(value: unknown, maxLen = 64): value is string {
+    return (
+      isValidStage7dDocId(value, maxLen) &&
+      value.length >= 3 &&
+      !/^bk_/i.test(value) &&
+      /^[A-Z0-9_-]+$/.test(value)
+    );
+  }
+
+  function sanitizeStage7dText(value: unknown, maxLen = 250): string {
+    if (typeof value !== 'string') return '';
+    return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, maxLen);
+  }
+
+  function isValidStage7dDateString(value: string): boolean {
+    if (!value || value.length < 8 || value.length > 40) return false;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [y, m, d] = value.split('-').map((n) => parseInt(n, 10));
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      return (
+        dt.getUTCFullYear() === y &&
+        dt.getUTCMonth() === m - 1 &&
+        dt.getUTCDate() === d
+      );
+    }
+    return !Number.isNaN(Date.parse(value));
+  }
+
+  function formatStage7dWIB(date: Date): string {
+    const wibMs = date.getTime() + 7 * 60 * 60 * 1000;
+    const d = new Date(wibMs);
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'Mei',
+      'Jun',
+      'Jul',
+      'Agu',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Des',
+    ];
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const month = months[d.getUTCMonth()] || 'Jan';
+    const year = d.getUTCFullYear();
+    const hours = String(d.getUTCHours()).padStart(2, '0');
+    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${day} ${month} ${year}, ${hours}:${minutes} WIB`;
+  }
+
+  function setStage7dNoStore(res: express.Response): void {
+    if (typeof res.setHeader === 'function') {
+      res.setHeader('Cache-Control', 'no-store');
+    } else if (typeof (res as any).set === 'function') {
+      (res as any).set('Cache-Control', 'no-store');
+    }
+  }
+
+  function computePaymentCorrectionFingerprint(params: {
+    actorUid: string;
+    paymentId: string;
+    bookingId: string;
+    newStatus: string;
+    reason: string;
+  }): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          v: 1,
+          action: 'payment_correct',
+          actorUid: params.actorUid,
+          paymentId: params.paymentId,
+          bookingId: params.bookingId,
+          newStatus: params.newStatus,
+          reason: params.reason,
+        })
+      )
+      .digest('hex');
+  }
+
+  function computeStage7dResponseFingerprint(value: unknown): string {
+    const canonicalize = (item: any): any => {
+      if (Array.isArray(item)) return item.map(canonicalize);
+      if (item !== null && typeof item === 'object') {
+        return Object.fromEntries(
+          Object.keys(item).sort().map((key) => [key, canonicalize(item[key])])
+        );
+      }
+      return item;
+    };
+    const plain = JSON.parse(JSON.stringify(value));
+    return createHash('sha256').update(JSON.stringify(canonicalize(plain))).digest('hex');
+  }
+
+  function computeManualRefundFingerprint(params: {
+    actorUid: string;
+    caseId: string;
+    newStatus: string;
+    refundAmount: number | null;
+    refundMethod: string;
+    refundDate: string;
+    refundReference: string;
+    refundProofUrl: string;
+    note: string;
+  }): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          v: 1,
+          action: 'manual_refund_status',
+          actorUid: params.actorUid,
+          caseId: params.caseId,
+          newStatus: params.newStatus,
+          refundAmount: params.refundAmount,
+          refundMethod: params.refundMethod,
+          refundDate: params.refundDate,
+          refundReference: params.refundReference,
+          refundProofUrl: params.refundProofUrl,
+          note: params.note,
+        })
+      )
+      .digest('hex');
+  }
+
+  async function verifyStage7dBearerToken(
+    req: express.Request
+  ): Promise<{
+    ok: boolean;
+    uid?: string;
+    status?: 401 | 503;
+    code?: string;
+    message?: string;
+  }> {
+    const headersObj =
+      req.headers && typeof req.headers === 'object'
+        ? (req.headers as Record<string, unknown>)
+        : {};
+    let authHeaderCount = 0;
+    let rawAuthHeader: unknown = undefined;
+    for (const [k, v] of Object.entries(headersObj)) {
+      const lower = k.toLowerCase();
+      if (lower === 'x-firebase-auth') {
+        return {
+          ok: false,
+          status: 401,
+          code: 'AUTH_HEADER_INVALID',
+          message: 'Header autentikasi tidak valid.',
+        };
+      }
+      if (lower === 'authorization') {
+        authHeaderCount++;
+        rawAuthHeader = v;
+      }
+    }
+
+    if (authHeaderCount !== 1 || typeof rawAuthHeader !== 'string') {
+      return {
+        ok: false,
+        status: 401,
+        code: 'AUTH_REQUIRED',
+        message: 'Autentikasi Manager/Admin diperlukan.',
+      };
+    }
+
+    const match = /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim());
+    if (!match || !match[1]) {
+      return {
+        ok: false,
+        status: 401,
+        code: 'AUTH_TOKEN_INVALID',
+        message: 'Format token autentikasi tidak valid.',
+      };
+    }
+
+    if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+      return {
+        ok: false,
+        status: 503,
+        code: 'AUTH_SERVICE_UNAVAILABLE',
+        message: 'Layanan verifikasi autentikasi sedang tidak tersedia.',
+      };
+    }
+
+    try {
+      const decoded = await adminAuth.verifyIdToken(match[1]);
+      if (!decoded || !isValidStage7dDocId(decoded.uid, 128)) {
+        return {
+          ok: false,
+          status: 401,
+          code: 'AUTH_TOKEN_INVALID',
+          message: 'Identitas sesi autentikasi tidak valid.',
+        };
+      }
+      return { ok: true, uid: decoded.uid };
+    } catch (authErr: any) {
+      const errCode = String(authErr?.code || '');
+      const errMsg = String(authErr?.message || '');
+      const isInfra =
+        errCode === 'auth/internal-error' ||
+        errCode === 'auth/network-request-failed' ||
+        errCode === 'unavailable' ||
+        errCode === 'deadline-exceeded' ||
+        authErr?.status === 503 ||
+        authErr?.statusCode === 503 ||
+        /unavailable|network|econnrefused|enotfound|etimedout|eai_again|socket hang up|fetch failed|deadline|internal-error|503/i.test(
+          `${errCode} ${errMsg}`
+        );
+      if (isInfra) {
+        return {
+          ok: false,
+          status: 503,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          message: 'Layanan verifikasi autentikasi sedang mengalami kendala.',
+        };
+      }
+      return {
+        ok: false,
+        status: 401,
+        code: errCode === 'auth/id-token-expired' ? 'SESSION_EXPIRED' : 'AUTH_TOKEN_INVALID',
+        message: 'Sesi autentikasi tidak valid atau telah berakhir.',
+      };
+    }
+  }
+
+  function validateStage7dActiveManagerIdentity(
+    verifiedUid: string,
+    roleExists: boolean,
+    roleData: Record<string, any>,
+    staffDocs: Map<string, any>
+  ): {
+    ok: boolean;
+    actorUid?: string;
+    actorStaffId?: string;
+    actorRole?: 'manager' | 'admin';
+    actorRoleLabel?: 'Manager' | 'Admin';
+    actorName?: string;
+    status?: 403;
+    code?: string;
+    message?: string;
+  } {
+    const textId = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+    const hasUidConflict = (record: any): boolean =>
+      [record?.authUserId, record?.authUid].some(
+        (value) =>
+          value !== undefined &&
+          value !== null &&
+          value !== '' &&
+          (typeof value !== 'string' ||
+            value.trim() !== value ||
+            !isValidStage7dDocId(value, 128) ||
+            value !== verifiedUid)
+      );
+
+    const isStaffDisabled = (record: any): boolean =>
+      !record ||
+      record.isActive === false ||
+      record.loginEnabled === false ||
+      [
+        'INACTIVE',
+        'DISABLED',
+        'ARCHIVED',
+        'DINONAKTIFKAN',
+        'DELETED',
+        'TERMINATED',
+        'SUSPENDED',
+      ].includes(textId(record.status).toUpperCase()) ||
+      textId(record.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+
+    if (!roleExists || staffDocs.size === 0) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_AUTHORIZATION_DENIED',
+        message: 'Identitas staf belum terikat atau tidak memiliki otorisasi aktif.',
+      };
+    }
+
+    if (staffDocs.size > 1) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_DUPLICATE_MAPPING',
+        message: 'Identitas staf memiliki duplikasi pemetaan pada Staff Master.',
+      };
+    }
+
+    const staffSnap = [...staffDocs.values()][0];
+    const staff = staffSnap.data() || {};
+    const role = roleData || {};
+
+    if (hasUidConflict(staff) || hasUidConflict(role)) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_UID_MISMATCH',
+        message: 'Identitas UID staf tidak sesuai dengan sesi autentikasi.',
+      };
+    }
+
+    const isUidBound =
+      staffSnap.id === verifiedUid ||
+      (typeof staff.authUserId === 'string' && staff.authUserId === verifiedUid) ||
+      (typeof staff.authUid === 'string' && staff.authUid === verifiedUid);
+    if (!isUidBound) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_UID_UNBOUND',
+        message: 'Profil Staff Master tidak terikat pada UID sesi saat ini.',
+      };
+    }
+
+    if (
+      (staff.isStaffMaster !== undefined &&
+        staff.isStaffMaster !== null &&
+        staff.isStaffMaster !== true) ||
+      (role.isStaffMaster !== undefined &&
+        role.isStaffMaster !== null &&
+        role.isStaffMaster !== true)
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_MASTER_FLAG_INVALID',
+        message: 'Atribut Staff Master tidak valid.',
+      };
+    }
+
+    for (const srcSys of [staff.sourceSystem, role.sourceSystem]) {
+      if (srcSys !== undefined && srcSys !== null && srcSys !== '') {
+        if (typeof srcSys !== 'string' || srcSys.trim() !== 'STAFF_MASTER_GOVERNANCE') {
+          return {
+            ok: false,
+            status: 403,
+            code: 'STAFF_MASTER_FLAG_INVALID',
+            message: 'Atribut sourceSystem Staff Master tidak valid.',
+          };
+        }
+      }
+    }
+
+    for (const acctType of [staff.accountType, role.accountType]) {
+      if (acctType !== undefined && acctType !== null && acctType !== '') {
+        if (typeof acctType !== 'string' || acctType.trim().toUpperCase() === 'CUSTOMER') {
+          return {
+            ok: false,
+            status: 403,
+            code: 'STAFF_ACCOUNT_TYPE_INVALID',
+            message: 'Tipe akun bukan akun staf yang sah.',
+          };
+        }
+      }
+    }
+
+    if (
+      isStaffDisabled(staff) ||
+      isStaffDisabled(role) ||
+      role.isActive !== true ||
+      (staff.isActive !== undefined && staff.isActive !== null && staff.isActive !== true)
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_INACTIVE',
+        message: 'Akun staf sedang tidak aktif atau telah dinonaktifkan.',
+      };
+    }
+
+    const staffRole = textId(staff.role);
+    const activeRole = textId(role.role);
+    if (
+      !staffRole ||
+      staff.role !== staffRole ||
+      role.role !== activeRole ||
+      activeRole !== staffRole
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_ROLE_MISMATCH',
+        message: 'Role staf tidak sesuai dengan Staff Master saat ini.',
+      };
+    }
+
+    for (const aliasField of [staff.uid, staff.id]) {
+      if (aliasField !== undefined && aliasField !== null && aliasField !== '') {
+        if (typeof aliasField !== 'string' || !isValidStage7dDocId(aliasField, 128)) {
+          return {
+            ok: false,
+            status: 403,
+            code: 'STAFF_ROLE_MAPPING_CONFLICT',
+            message: 'Alias identitas Staff Master tidak valid.',
+          };
+        }
+      }
+    }
+
+    if (
+      typeof staff.uid === 'string' &&
+      staff.uid !== '' &&
+      typeof staff.id === 'string' &&
+      staff.id !== '' &&
+      staff.uid !== staff.id &&
+      ![verifiedUid, staffSnap.id].includes(staff.uid) &&
+      ![verifiedUid, staffSnap.id].includes(staff.id)
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'STAFF_ROLE_MAPPING_CONFLICT',
+        message: 'Konflik alias uid/id pada Staff Master.',
+      };
+    }
+
+    const aliases = new Set(
+      [verifiedUid, staffSnap.id, textId(staff.uid), textId(staff.id)].filter(Boolean)
+    );
+    for (const linkedId of [role.staffId, role.staffUserId]) {
+      if (linkedId !== undefined && linkedId !== null && linkedId !== '') {
+        if (
+          typeof linkedId !== 'string' ||
+          !isValidStage7dDocId(linkedId, 128) ||
+          !aliases.has(linkedId)
+        ) {
+          return {
+            ok: false,
+            status: 403,
+            code: 'STAFF_ROLE_MAPPING_CONFLICT',
+            message: 'Referensi Staff Master pada staff_roles tidak sesuai.',
+          };
+        }
+      }
+    }
+
+    if (staffRole !== 'manager' && staffRole !== 'admin') {
+      return {
+        ok: false,
+        status: 403,
+        code: 'MANAGER_ROLE_REQUIRED',
+        message:
+          'Akses Ditolak: Hanya Manager atau Admin aktif yang berwenang melakukan tindakan ini.',
+      };
+    }
+
+    const actorName =
+      sanitizeStage7dText(staff.name, 120) ||
+      sanitizeStage7dText(staff.displayName, 120) ||
+      sanitizeStage7dText(staff.fullName, 120) ||
+      sanitizeStage7dText(role.name, 120) ||
+      (staffRole === 'admin' ? 'Admin Senzu' : 'Manager Senzu');
+
+    return {
+      ok: true,
+      actorUid: verifiedUid,
+      actorStaffId: staffSnap.id,
+      actorRole: staffRole,
+      actorRoleLabel: staffRole === 'admin' ? 'Admin' : 'Manager',
+      actorName,
+    };
+  }
+
+  function extractConsistentRecordOwnerUid(
+    record: Record<string, any> | null | undefined
+  ): { ok: boolean; ownerUid?: string | null; code?: string; message?: string } {
+    if (!record || typeof record !== 'object') {
+      return { ok: true, ownerUid: null };
+    }
+    const populatedUids = new Set<string>();
+    for (const field of [
+      record.customerAuthUid,
+      record.authUserId,
+      record.customerUid,
+      record.userId,
+      record.uid,
+    ]) {
+      if (field !== undefined && field !== null && field !== '') {
+        if (typeof field !== 'string' || !isValidStage7dDocId(field, 128)) {
+          return {
+            ok: false,
+            code: 'OWNERSHIP_FIELD_INVALID',
+            message: 'Atribut kepemilikan pengguna tidak valid.',
+          };
+        }
+        populatedUids.add(field);
+      }
+    }
+    if (populatedUids.size > 1) {
+      return {
+        ok: false,
+        code: 'OWNERSHIP_UID_CONFLICT',
+        message: 'Konflik atribut kepemilikan pengguna pada dokumen.',
+      };
+    }
+    const ownerUid = populatedUids.size === 1 ? [...populatedUids][0] : null;
+    return { ok: true, ownerUid };
+  }
+
+  // 1. Admin Payment Correction Endpoint
+  app.post('/api/payments/:paymentId/correct', async (req, res) => {
+    setStage7dNoStore(res);
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+    const textId = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    try {
+      const authResult = await verifyStage7dBearerToken(req);
+      if (!authResult.ok) {
+        return res.status(authResult.status || 401).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+      const verifiedUid = authResult.uid!;
+
+      const rawPaymentId = req.params?.paymentId;
+      if (!isValidStage7dDocId(rawPaymentId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYMENT_ID',
+          error: 'ID pembayaran tidak valid.',
+          message: 'ID pembayaran tidak valid.',
+        });
+      }
+      const paymentId = rawPaymentId;
+
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYLOAD',
+          error: 'Format permintaan koreksi pembayaran tidak valid.',
+          message: 'Format permintaan koreksi pembayaran tidak valid.',
+        });
+      }
+
+      for (const key of Object.keys(req.body)) {
+        if (!STAGE7D_CORRECTION_ALLOWED_BODY_KEYS.has(key)) {
+          return res.status(400).json({
+            success: false,
+            code: 'FORBIDDEN_CORRECTION_FIELD',
+            error: 'Permintaan koreksi pembayaran memuat atribut yang tidak diizinkan.',
+            message: 'Permintaan koreksi pembayaran memuat atribut yang tidak diizinkan.',
+          });
+        }
+      }
+
+      if (req.body.paymentId !== undefined) {
+        if (typeof req.body.paymentId !== 'string' || req.body.paymentId.trim() !== paymentId) {
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_ID_MISMATCH',
+            error: 'ID pembayaran pada body tidak sesuai dengan parameter URL.',
+            message: 'ID pembayaran pada body tidak sesuai dengan parameter URL.',
+          });
+        }
+      }
+
+      // Actor fields in body are ignored for authority, but malformed non-string types are rejected
+      for (const actorKey of ['staffId', 'staffName', 'actorId', 'actorName', 'actorRole']) {
+        const val = req.body[actorKey];
+        if (val !== undefined && val !== null) {
+          if (typeof val !== 'string' || val.length > 200 || /[\x00-\x1F\x7F]/.test(val)) {
+            return res.status(400).json({
+              success: false,
+              code: 'INVALID_ACTOR_FIELD',
+              error: 'Format atribut identitas pemohon tidak valid.',
+              message: 'Format atribut identitas pemohon tidak valid.',
+            });
+          }
+        }
+      }
+
+      const rawBookingId = req.body.bookingId;
+      if (!isValidStage7dDocId(rawBookingId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_ID',
+          error: 'ID reservasi tidak valid.',
+          message: 'ID reservasi tidak valid.',
+        });
+      }
+      const bookingId = rawBookingId;
+
+      let suppliedBookingCode = '';
+      if (req.body.bookingCode !== undefined && req.body.bookingCode !== null) {
+        if (typeof req.body.bookingCode !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode reservasi tidak valid.',
+            message: 'Kode reservasi tidak valid.',
+          });
+        }
+        const upperCode = req.body.bookingCode.trim().toUpperCase();
+        if (!isValidStage7dBookingCode(upperCode, 64)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode reservasi tidak valid.',
+            message: 'Kode reservasi tidak valid.',
+          });
+        }
+        suppliedBookingCode = upperCode;
+      }
+
+      const rawNewStatus = req.body.newStatus;
+      if (
+        typeof rawNewStatus !== 'string' ||
+        !STAGE7D_ALLOWED_PAYMENT_STATUS_CODES.has(rawNewStatus)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYMENT_STATUS',
+          error: 'Status pembayaran baru tidak valid.',
+          message: 'Status pembayaran baru tidak valid.',
+        });
+      }
+      const newStatus = rawNewStatus;
+
+      const rawReason = req.body.reason;
+      if (
+        typeof rawReason !== 'string' ||
+        rawReason.length > 500 ||
+        Buffer.byteLength(rawReason, 'utf8') > 1000
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CORRECTION_REASON',
+          error: 'Alasan koreksi pembayaran wajib diisi dan tidak boleh melebihi batas.',
+          message: 'Alasan koreksi pembayaran wajib diisi dan tidak boleh melebihi batas.',
+        });
+      }
+      const sanitizedReason = rawReason.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+      if (!sanitizedReason) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CORRECTION_REASON',
+          error: 'Alasan koreksi pembayaran wajib diisi.',
+          message: 'Alasan koreksi pembayaran wajib diisi.',
+        });
+      }
+
+      const rawRequestId = req.body.requestId;
+      let cleanRequestId = '';
+      if (rawRequestId !== undefined) {
+        if (!isValidStage7dDocId(rawRequestId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REQUEST_ID',
+            error: 'ID permintaan (requestId) tidak valid.',
+            message: 'ID permintaan (requestId) tidak valid.',
+          });
+        }
+        cleanRequestId = rawRequestId;
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      const receiptId = cleanRequestId
+        ? `pgr_corr_${createHash('sha256')
+            .update(`payment_correct:${verifiedUid}:${cleanRequestId}`)
+            .digest('hex')
+            .slice(0, 40)}`
+        : '';
+
+      const deterministicCorrHistId = cleanRequestId
+        ? `psh_corr_${createHash('sha256')
+            .update(`payment_correct:${verifiedUid}:${cleanRequestId}`)
+            .digest('hex')
+            .slice(0, 32)}`
+        : `psh_corr_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+      const fallbackCorrHistId = `psh_corr_${createHash('sha256')
+        .update(`payment_correct_alt:${verifiedUid}:${paymentId}:${cleanRequestId || Date.now()}`)
+        .digest('hex')
+        .slice(0, 20)}_${Date.now().toString(36)}_${randomInt(100000, 1000000).toString(36)}`;
+
+      const requestFingerprint = computePaymentCorrectionFingerprint({
+        actorUid: verifiedUid,
+        paymentId,
+        bookingId,
+        newStatus,
+        reason: sanitizedReason,
+      });
+
+      const txResult: any = await adminDb.runTransaction(async (transaction: any) => {
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const canonicalStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const legacyStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUid', '==', verifiedUid)
+          .limit(2);
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const paymentRef = adminDb.collection('payments').doc(paymentId);
+        const suppliedBookingRef = adminDb.collection('bookings').doc(bookingId);
+        const receiptRef = receiptId
+          ? adminDb.collection('payment_governance_receipts').doc(receiptId)
+          : null;
+        const deterministicCorrHistRef = adminDb
+          .collection('payment_status_history')
+          .doc(deterministicCorrHistId);
+        const fallbackCorrHistRef = adminDb
+          .collection('payment_status_history')
+          .doc(fallbackCorrHistId);
+
+        const [
+          roleSnap,
+          canonicalStaffSnap,
+          legacyStaffSnap,
+          directStaffSnap,
+          paymentSnap,
+          suppliedBookingSnap,
+          receiptSnap,
+          deterministicCorrHistSnap,
+          fallbackCorrHistSnap,
+        ] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(canonicalStaffQuery),
+          transaction.get(legacyStaffQuery),
+          transaction.get(directStaffRef),
+          transaction.get(paymentRef),
+          transaction.get(suppliedBookingRef),
+          receiptRef ? transaction.get(receiptRef) : Promise.resolve(null),
+          transaction.get(deterministicCorrHistRef),
+          transaction.get(fallbackCorrHistRef),
+        ]);
+
+        const fetchedCorrHistoryDocs = new Map<string, any>();
+        if (snapExists(deterministicCorrHistSnap)) {
+          fetchedCorrHistoryDocs.set(deterministicCorrHistId, deterministicCorrHistSnap);
+        }
+        if (snapExists(fallbackCorrHistSnap)) {
+          fetchedCorrHistoryDocs.set(fallbackCorrHistId, fallbackCorrHistSnap);
+        }
+
+        if (snapExists(receiptSnap)) {
+          const rData = receiptSnap.data() || {};
+          const rHistId = textId(rData?.responsePayload?.historyId);
+          if (
+            isValidStage7dDocId(rHistId, 128) &&
+            !fetchedCorrHistoryDocs.has(rHistId) &&
+            rHistId !== deterministicCorrHistId &&
+            rHistId !== fallbackCorrHistId
+          ) {
+            const extraHistSnap = await transaction.get(
+              adminDb.collection('payment_status_history').doc(rHistId)
+            );
+            if (snapExists(extraHistSnap)) {
+              fetchedCorrHistoryDocs.set(rHistId, extraHistSnap);
+            }
+          }
+        }
+
+        const staffDocs = new Map<string, any>();
+        for (const d of [
+          ...(canonicalStaffSnap?.docs || []),
+          ...(legacyStaffSnap?.docs || []),
+        ]) {
+          if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaffSnap)) {
+          staffDocs.set(directStaffSnap.id, directStaffSnap);
+        }
+
+        const roleExists = snapExists(roleSnap);
+        const roleData = roleExists ? roleSnap.data() || {} : {};
+        if (roleExists) {
+          for (const linked of [roleData.staffId, roleData.staffUserId]) {
+            if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !staffDocs.has(linked)) {
+              const linkedSnap = await transaction.get(
+                adminDb.collection('staff_users').doc(linked)
+              );
+              if (snapExists(linkedSnap)) {
+                staffDocs.set(linkedSnap.id, linkedSnap);
+              }
+            }
+          }
+        }
+
+        let authoritativeBookingSnap: any = suppliedBookingSnap;
+        let bookingByCodeSnap: any = null;
+        let customerSnap: any = null;
+
+        if (snapExists(paymentSnap)) {
+          const pData = paymentSnap.data() || {};
+          const pBookingId = textId(pData.bookingId);
+          if (isValidStage7dDocId(pBookingId, 128) && pBookingId !== bookingId) {
+            authoritativeBookingSnap = await transaction.get(
+              adminDb.collection('bookings').doc(pBookingId)
+            );
+          }
+          const bData = snapExists(authoritativeBookingSnap)
+            ? authoritativeBookingSnap.data() || {}
+            : {};
+          const candidateCode = (
+            textId(bData.bookingCode) || textId(pData.bookingCode)
+          ).toUpperCase();
+          if (isValidStage7dBookingCode(candidateCode, 64)) {
+            bookingByCodeSnap = await transaction.get(
+              adminDb.collection('bookings').where('bookingCode', '==', candidateCode).limit(2)
+            );
+          }
+          const candidateCustomerId = textId(bData.customerId) || textId(pData.customerId);
+          if (isValidStage7dDocId(candidateCustomerId, 128)) {
+            customerSnap = await transaction.get(
+              adminDb.collection('customers').doc(candidateCustomerId)
+            );
+          }
+        }
+
+        // 1. Verify current active Manager/Admin identity inside transaction
+        const managerCheck = validateStage7dActiveManagerIdentity(
+          verifiedUid,
+          roleExists,
+          roleData,
+          staffDocs
+        );
+        if (!managerCheck.ok) {
+          return {
+            status: managerCheck.status,
+            code: managerCheck.code,
+            message: managerCheck.message,
+          };
+        }
+
+        // 2. Verify authoritative payment & booking linkage before receipt replay or mutation
+        if (!snapExists(paymentSnap)) {
+          return {
+            status: 404,
+            code: 'PAYMENT_NOT_FOUND',
+            message: 'Data pembayaran tidak ditemukan.',
+          };
+        }
+        const paymentData = paymentSnap.data() || {};
+        if (
+          paymentData.id !== undefined &&
+          paymentData.id !== null &&
+          paymentData.id !== '' &&
+          (typeof paymentData.id !== 'string' || paymentData.id !== paymentId)
+        ) {
+          return {
+            status: 409,
+            code: 'PAYMENT_ID_CONFLICT',
+            message: 'Identitas dokumen pembayaran tidak konsisten.',
+          };
+        }
+
+        const persistedBookingId = textId(paymentData.bookingId);
+        if (!isValidStage7dDocId(persistedBookingId, 128)) {
+          return {
+            status: 409,
+            code: 'INVALID_PAYMENT_BOOKING_LINK',
+            message: 'Data pembayaran tidak memiliki ID reservasi yang valid.',
+          };
+        }
+
+        if (bookingId !== persistedBookingId) {
+          return {
+            status: 400,
+            code: 'BOOKING_ID_MISMATCH',
+            message:
+              'ID reservasi pada permintaan tidak sesuai dengan catatan pembayaran tersimpan.',
+          };
+        }
+
+        if (!snapExists(authoritativeBookingSnap)) {
+          return {
+            status: 404,
+            code: 'BOOKING_NOT_FOUND',
+            message: 'Data reservasi terkait pembayaran tidak ditemukan.',
+          };
+        }
+        const bookingData = authoritativeBookingSnap.data() || {};
+        if (
+          bookingData.id !== undefined &&
+          bookingData.id !== null &&
+          bookingData.id !== '' &&
+          (typeof bookingData.id !== 'string' || bookingData.id !== persistedBookingId)
+        ) {
+          return {
+            status: 409,
+            code: 'BOOKING_ID_CONFLICT',
+            message: 'Identitas dokumen reservasi tidak konsisten.',
+          };
+        }
+
+        const payBookingCode = textId(paymentData.bookingCode).toUpperCase();
+        const bkBookingCode = textId(bookingData.bookingCode).toUpperCase();
+        if (payBookingCode && bkBookingCode && payBookingCode !== bkBookingCode) {
+          return {
+            status: 409,
+            code: 'BOOKING_CODE_MISMATCH',
+            message: 'Kode reservasi pada pembayaran tidak sesuai dengan dokumen reservasi.',
+          };
+        }
+        const canonicalBookingCode = bkBookingCode || payBookingCode;
+        if (!isValidStage7dBookingCode(canonicalBookingCode, 64)) {
+          return {
+            status: 409,
+            code: 'INVALID_BOOKING_CODE',
+            message: 'Kode reservasi pada dokumen tidak valid.',
+          };
+        }
+        if (suppliedBookingCode && suppliedBookingCode !== canonicalBookingCode) {
+          return {
+            status: 409,
+            code: 'BOOKING_CODE_MISMATCH',
+            message: 'Kode reservasi pada permintaan tidak sesuai dengan dokumen tersimpan.',
+          };
+        }
+
+        for (const d of bookingByCodeSnap?.docs || []) {
+          if (snapExists(d) && d.id !== persistedBookingId) {
+            return {
+              status: 409,
+              code: 'BOOKING_CODE_CONFLICT',
+              message: 'Kode reservasi merujuk pada lebih dari satu dokumen.',
+            };
+          }
+        }
+
+        const payOwnerRes = extractConsistentRecordOwnerUid(paymentData);
+        if (!payOwnerRes.ok) {
+          return {
+            status: 403,
+            code: payOwnerRes.code,
+            message: payOwnerRes.message,
+          };
+        }
+        const bkOwnerRes = extractConsistentRecordOwnerUid(bookingData);
+        if (!bkOwnerRes.ok) {
+          return {
+            status: 403,
+            code: bkOwnerRes.code,
+            message: bkOwnerRes.message,
+          };
+        }
+        if (
+          payOwnerRes.ownerUid &&
+          bkOwnerRes.ownerUid &&
+          payOwnerRes.ownerUid !== bkOwnerRes.ownerUid
+        ) {
+          return {
+            status: 403,
+            code: 'CROSS_DOCUMENT_OWNERSHIP_CONFLICT',
+            message: 'Kepemilikan pembayaran dan reservasi mengalami konflik.',
+          };
+        }
+        if (payOwnerRes.ownerUid && !bkOwnerRes.ownerUid) {
+          return {
+            status: 403,
+            code: 'UNOWNED_BOOKING_PAYMENT_UID_CONFLICT',
+            message: 'Pembayaran memiliki UID pemilik pada reservasi tanpa pemilik.',
+          };
+        }
+
+        const payCustomerId = textId(paymentData.customerId);
+        const bkCustomerId = textId(bookingData.customerId);
+        if (payCustomerId && bkCustomerId && payCustomerId !== bkCustomerId) {
+          return {
+            status: 409,
+            code: 'CUSTOMER_ID_MISMATCH',
+            message: 'ID pelanggan pada pembayaran dan reservasi tidak sesuai.',
+          };
+        }
+
+        if (snapExists(customerSnap)) {
+          const custOwnerRes = extractConsistentRecordOwnerUid(customerSnap.data() || {});
+          if (!custOwnerRes.ok) {
+            return {
+              status: 403,
+              code: custOwnerRes.code,
+              message: custOwnerRes.message,
+            };
+          }
+          const authoritativeOwner = bkOwnerRes.ownerUid || payOwnerRes.ownerUid;
+          if (
+            authoritativeOwner &&
+            custOwnerRes.ownerUid &&
+            custOwnerRes.ownerUid !== authoritativeOwner
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              message: 'Profil CRM pelanggan memiliki UID yang bertentangan dengan pemilik reservasi.',
+            };
+          }
+        }
+
+        // 3. Validate committed idempotency receipt and complete responsePayload BEFORE new-transition checks
+        if (receiptRef && snapExists(receiptSnap)) {
+          const receipt = receiptSnap.data() || {};
+          const resp = receipt?.responsePayload;
+          const allowedCorrRespKeys = new Set<string>([
+            'paymentId',
+            'bookingId',
+            'bookingCode',
+            'oldStatus',
+            'newStatus',
+            'correctedBy',
+            'correctedAt',
+            'correctionReason',
+            'historyId',
+            'auditId',
+            'payment',
+          ]);
+
+          const isValidEnvelope =
+            Boolean(receipt && typeof receipt === 'object' && !Array.isArray(receipt)) &&
+            receipt.id === receiptId &&
+            receipt.action === 'payment_correct' &&
+            receipt.actorUid === verifiedUid &&
+            isValidStage7dDocId(receipt.actorStaffId, 128) &&
+            (receipt.actorRole === 'manager' || receipt.actorRole === 'admin') &&
+            typeof receipt.actorName === 'string' &&
+            receipt.actorName.trim().length > 0 &&
+            receipt.actorName.length <= 120 &&
+            receipt.requestId === cleanRequestId &&
+            isValidStage7dDocId(receipt.paymentId, 128) &&
+            isValidStage7dDocId(receipt.bookingId, 128) &&
+            typeof receipt.newStatus === 'string' &&
+            STAGE7D_ALLOWED_PAYMENT_STATUS_CODES.has(receipt.newStatus) &&
+            typeof receipt.reason === 'string' &&
+            receipt.reason.trim().length > 0 &&
+            receipt.reason.length <= 500 &&
+            typeof receipt.fingerprint === 'string' &&
+            /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
+            receipt.fingerprint ===
+              computePaymentCorrectionFingerprint({
+                actorUid: receipt.actorUid,
+                paymentId: receipt.paymentId,
+                bookingId: receipt.bookingId,
+                newStatus: receipt.newStatus,
+                reason: receipt.reason,
+              }) &&
+            typeof receipt.committedAt === 'string' &&
+            !Number.isNaN(Date.parse(receipt.committedAt)) &&
+            Boolean(resp && typeof resp === 'object' && !Array.isArray(resp));
+
+          let isValidResponseShape = false;
+          if (isValidEnvelope) {
+            const expectedAuditId = `audit_pcorr_${createHash('sha256')
+              .update(`payment_correct:${receipt.actorUid}:${receipt.requestId}`)
+              .digest('hex')
+              .slice(0, 32)}`;
+            const respKeysOk = Object.keys(resp).every((k) => allowedCorrRespKeys.has(k));
+            const respPay = resp.payment;
+            const respPayOwner =
+              respPay && typeof respPay === 'object' && !Array.isArray(respPay)
+                ? extractConsistentRecordOwnerUid(respPay)
+                : { ok: false };
+            const linkedHistSnap = isValidStage7dDocId(resp.historyId, 128)
+              ? fetchedCorrHistoryDocs.get(resp.historyId)
+              : null;
+            const linkedHistData = snapExists(linkedHistSnap) ? linkedHistSnap.data() || {} : null;
+
+            isValidResponseShape =
+              respKeysOk &&
+              resp.paymentId === receipt.paymentId &&
+              resp.bookingId === receipt.bookingId &&
+              isValidStage7dBookingCode(resp.bookingCode, 64) &&
+              typeof resp.oldStatus === 'string' &&
+              STAGE7D_ALLOWED_PAYMENT_STATUS_CODES.has(resp.oldStatus) &&
+              resp.oldStatus !== receipt.newStatus &&
+              resp.newStatus === receipt.newStatus &&
+              resp.correctedBy === receipt.actorName &&
+              resp.correctedAt === receipt.committedAt &&
+              resp.correctionReason === receipt.reason &&
+              isValidStage7dDocId(resp.historyId, 128) &&
+              resp.auditId === expectedAuditId &&
+              Boolean(respPay && typeof respPay === 'object' && !Array.isArray(respPay)) &&
+              respPay.id === receipt.paymentId &&
+              respPay.bookingId === receipt.bookingId &&
+              textId(respPay.bookingCode).toUpperCase() === resp.bookingCode &&
+              respPay.status === receipt.newStatus &&
+              respPay.correctedBy === receipt.actorName &&
+              respPay.correctedAt === receipt.committedAt &&
+              respPay.correctionReason === receipt.reason &&
+              respPay.updatedAt === receipt.committedAt &&
+              (respPay.amount === undefined ||
+                (typeof respPay.amount === 'number' &&
+                  Number.isFinite(respPay.amount) &&
+                  respPay.amount > 0)) &&
+              respPayOwner.ok === true &&
+              Boolean(linkedHistData) &&
+              linkedHistData.id === resp.historyId &&
+              linkedHistData.paymentId === receipt.paymentId &&
+              linkedHistData.bookingId === receipt.bookingId &&
+              textId(linkedHistData.bookingCode).toUpperCase() === resp.bookingCode &&
+              linkedHistData.oldStatus === resp.oldStatus &&
+              linkedHistData.newStatus === receipt.newStatus &&
+              linkedHistData.actorUid === receipt.actorUid &&
+              linkedHistData.userId === receipt.actorStaffId &&
+              linkedHistData.userName === receipt.actorName &&
+              linkedHistData.eventType === 'payment_corrected' &&
+              linkedHistData.serverAuthoritative === true;
+          }
+
+          if (!isValidEnvelope || !isValidResponseShape) {
+            return {
+              status: 409,
+              code: 'RECEIPT_CORRUPTED',
+              message: 'Bukti idempotensi koreksi pembayaran tidak valid atau mengalami konflik.',
+            };
+          }
+
+          if (
+            receipt.fingerprint !== requestFingerprint ||
+            receipt.paymentId !== paymentId ||
+            receipt.bookingId !== persistedBookingId ||
+            receipt.newStatus !== newStatus ||
+            receipt.reason !== sanitizedReason
+          ) {
+            return {
+              status: 409,
+              code: 'IDEMPOTENCY_PARAMETER_MISMATCH',
+              message:
+                'ID permintaan (requestId) telah digunakan untuk koreksi pembayaran dengan parameter berbeda.',
+            };
+          }
+
+          const respPayOwner = extractConsistentRecordOwnerUid(resp.payment);
+          const isCanonicalTargetMatch =
+            resp.paymentId === paymentId &&
+            resp.bookingId === persistedBookingId &&
+            resp.bookingCode === canonicalBookingCode &&
+            (typeof paymentData.amount !== 'number' ||
+              resp.payment.amount === paymentData.amount) &&
+            textId(resp.payment.customerId) === payCustomerId &&
+            respPayOwner.ok === true &&
+            respPayOwner.ownerUid === payOwnerRes.ownerUid;
+
+          if (!isCanonicalTargetMatch) {
+            return {
+              status: 409,
+              code: 'RECEIPT_CORRUPTED',
+              message: 'Respons idempotensi koreksi pembayaran tidak sesuai dengan dokumen otoritatif.',
+            };
+          }
+
+          return {
+            paymentId: resp.paymentId,
+            bookingId: resp.bookingId,
+            bookingCode: resp.bookingCode,
+            oldStatus: resp.oldStatus,
+            newStatus: resp.newStatus,
+            correctedBy: resp.correctedBy,
+            correctedAt: resp.correctedAt,
+            correctionReason: resp.correctionReason,
+            historyId: resp.historyId,
+            auditId: resp.auditId,
+            payment: resp.payment,
+            status: 200,
+            isIdempotent: true,
+          };
+        }
+
+        const oldStatus = textId(paymentData.status);
+        if (!oldStatus || !STAGE7D_ALLOWED_PAYMENT_STATUS_CODES.has(oldStatus)) {
+          return {
+            status: 409,
+            code: 'INVALID_CURRENT_PAYMENT_STATUS',
+            message: 'Status pembayaran tersimpan tidak valid untuk dikoreksi.',
+          };
+        }
+
+        // 4. Same-state no-op without an existing receipt must not invent another correction event
+        if (oldStatus === newStatus) {
+          return {
+            status: 200,
+            isIdempotent: true,
+            noOp: true,
+            paymentId,
+            bookingId: persistedBookingId,
+            bookingCode: canonicalBookingCode,
+            oldStatus,
+            newStatus,
+            payment: {
+              ...paymentData,
+              id: paymentId,
+            },
+          };
+        }
+
+        // Never overwrite an existing payment_status_history document
+        let actualCorrHistId = '';
+        let actualCorrHistRef: any = null;
+        if (!snapExists(deterministicCorrHistSnap)) {
+          actualCorrHistId = deterministicCorrHistId;
+          actualCorrHistRef = deterministicCorrHistRef;
+        } else if (!snapExists(fallbackCorrHistSnap)) {
+          actualCorrHistId = fallbackCorrHistId;
+          actualCorrHistRef = fallbackCorrHistRef;
+        } else {
+          return {
+            status: 409,
+            code: 'HISTORY_ID_COLLISION',
+            message: 'Konflik ID riwayat pembayaran; tidak dapat menimpa riwayat yang sudah ada.',
+          };
+        }
+
+        const nowDate = new Date();
+        const nowIso = nowDate.toISOString();
+        const formattedWIB = formatStage7dWIB(nowDate);
+
+        const paymentUpdates = {
+          status: newStatus,
+          correctedBy: managerCheck.actorName,
+          correctedAt: nowIso,
+          correctionReason: sanitizedReason,
+          updatedAt: nowIso,
+        };
+
+        const bookingUpdates = {
+          paymentStatus: newStatus,
+          updatedAt: nowIso,
+        };
+
+        const historyEntry = {
+          id: actualCorrHistId,
+          paymentId,
+          bookingId: persistedBookingId,
+          bookingCode: canonicalBookingCode,
+          oldStatus,
+          newStatus,
+          source: managerCheck.actorRole,
+          userId: managerCheck.actorStaffId,
+          actorUid: managerCheck.actorUid,
+          userName: managerCheck.actorName,
+          userRole: managerCheck.actorRole,
+          eventType: 'payment_corrected',
+          reason: sanitizedReason,
+          note: `Koreksi status oleh ${managerCheck.actorRoleLabel} (${managerCheck.actorName}): ${sanitizedReason}`,
+          serverAuthoritative: true,
+          createdAt: nowIso,
+          timestamp: nowIso,
+        };
+
+        const auditId = cleanRequestId
+          ? `audit_pcorr_${createHash('sha256')
+              .update(`payment_correct:${verifiedUid}:${cleanRequestId}`)
+              .digest('hex')
+              .slice(0, 32)}`
+          : `audit_pcorr_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+        const auditEntry = {
+          id: auditId,
+          bookingId: persistedBookingId,
+          bookingCode: canonicalBookingCode,
+          ...(bkCustomerId || payCustomerId ? { customerId: bkCustomerId || payCustomerId } : {}),
+          entityId: paymentId,
+          entityType: 'payment',
+          action: 'payment_corrected',
+          actorId: managerCheck.actorStaffId,
+          actorUid: managerCheck.actorUid,
+          actorRole: managerCheck.actorRole,
+          actorName: managerCheck.actorName,
+          oldValue: oldStatus,
+          newValue: newStatus,
+          reason: sanitizedReason,
+          note: `Koreksi status pembayaran ${paymentId} (${canonicalBookingCode}) dari ${oldStatus} ke ${newStatus} oleh ${managerCheck.actorName}: ${sanitizedReason}`,
+          timestamp: nowIso,
+          createdAt: nowIso,
+          formattedWIB,
+        };
+
+        transaction.update(paymentRef, paymentUpdates);
+        transaction.update(suppliedBookingRef, bookingUpdates);
+        transaction.set(actualCorrHistRef, historyEntry);
+        transaction.set(adminDb.collection('operational_audit_logs').doc(auditId), auditEntry);
+
+        const updatedPayment = {
+          ...paymentData,
+          ...paymentUpdates,
+          id: paymentId,
+        };
+
+        const responsePayload = {
+          paymentId,
+          bookingId: persistedBookingId,
+          bookingCode: canonicalBookingCode,
+          oldStatus,
+          newStatus,
+          correctedBy: managerCheck.actorName,
+          correctedAt: nowIso,
+          correctionReason: sanitizedReason,
+          historyId: actualCorrHistId,
+          auditId,
+          payment: updatedPayment,
+        };
+
+        if (receiptRef) {
+          transaction.set(receiptRef, {
+            id: receiptId,
+            action: 'payment_correct',
+            actorUid: verifiedUid,
+            actorStaffId: managerCheck.actorStaffId,
+            actorRole: managerCheck.actorRole,
+            actorName: managerCheck.actorName,
+            requestId: cleanRequestId,
+            paymentId,
+            bookingId: persistedBookingId,
+            newStatus,
+            reason: sanitizedReason,
+            fingerprint: requestFingerprint,
+            committedAt: nowIso,
+            responsePayload,
+          });
+        }
+
+        return {
+          ...responsePayload,
+          status: 200,
+          isIdempotent: false,
+        };
+      });
+
+      if (txResult.status !== 200) {
+        return res.status(txResult.status).json({
+          success: false,
+          code: txResult.code || 'PAYMENT_CORRECTION_REJECTED',
+          error: txResult.message || 'Gagal melakukan koreksi pembayaran.',
+          message: txResult.message || 'Gagal melakukan koreksi pembayaran.',
+        });
+      }
+
+      const { status: _st, ...payloadOut } = txResult;
+      return res.status(200).json({
+        ...payloadOut,
+        success: true,
+      });
+    } catch (err: any) {
+      const errCode = String(err?.code || '');
+      const errMsg = String(err?.message || '');
+      const isInfra =
+        errCode === 'unavailable' ||
+        errCode === 'deadline-exceeded' ||
+        err?.status === 503 ||
+        /unavailable|network|econnrefused|enotfound|etimedout|deadline/i.test(
+          `${errCode} ${errMsg}`
+        );
+      return res.status(isInfra ? 503 : 500).json({
+        success: false,
+        code: isInfra ? 'SERVICE_UNAVAILABLE' : 'INTERNAL_ERROR',
+        error: isInfra
+          ? 'Layanan database sedang tidak tersedia.'
+          : 'Terjadi kesalahan saat memproses koreksi pembayaran.',
+        message: isInfra
+          ? 'Layanan database sedang tidak tersedia.'
+          : 'Terjadi kesalahan saat memproses koreksi pembayaran.',
+      });
+    }
+  });
+
+  // 2. Manager Manual Refund Status Endpoint
+  app.post('/api/cases/:caseId/manual-refund-status', async (req, res) => {
+    setStage7dNoStore(res);
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+    const textId = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    try {
+      const authResult = await verifyStage7dBearerToken(req);
+      if (!authResult.ok) {
+        return res.status(authResult.status || 401).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+      const verifiedUid = authResult.uid!;
+
+      const rawCaseId = req.params?.caseId;
+      if (!isValidStage7dDocId(rawCaseId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CASE_ID',
+          error: 'ID kasus tidak valid.',
+          message: 'ID kasus tidak valid.',
+        });
+      }
+      const caseId = rawCaseId;
+
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYLOAD',
+          error: 'Format permintaan status refund manual tidak valid.',
+          message: 'Format permintaan status refund manual tidak valid.',
+        });
+      }
+
+      for (const key of Object.keys(req.body)) {
+        if (!STAGE7D_MANUAL_REFUND_ALLOWED_BODY_KEYS.has(key)) {
+          return res.status(400).json({
+            success: false,
+            code: 'FORBIDDEN_REFUND_FIELD',
+            error: 'Permintaan status refund manual memuat atribut yang tidak diizinkan.',
+            message: 'Permintaan status refund manual memuat atribut yang tidak diizinkan.',
+          });
+        }
+      }
+
+      if (req.body.caseId !== undefined) {
+        if (typeof req.body.caseId !== 'string' || req.body.caseId.trim() !== caseId) {
+          return res.status(400).json({
+            success: false,
+            code: 'CASE_ID_CONFLICT',
+            error: 'ID kasus pada body tidak sesuai dengan parameter URL.',
+            message: 'ID kasus pada body tidak sesuai dengan parameter URL.',
+          });
+        }
+      }
+
+      if (req.body.caseItem !== undefined) {
+        if (
+          !req.body.caseItem ||
+          typeof req.body.caseItem !== 'object' ||
+          Array.isArray(req.body.caseItem)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_CASE_SNAPSHOT',
+            error: 'Data caseItem tidak valid.',
+            message: 'Data caseItem tidak valid.',
+          });
+        }
+        if (
+          req.body.caseItem.id !== undefined &&
+          (typeof req.body.caseItem.id !== 'string' || req.body.caseItem.id.trim() !== caseId)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'CASE_ID_CONFLICT',
+            error: 'ID kasus pada caseItem tidak sesuai dengan parameter URL.',
+            message: 'ID kasus pada caseItem tidak sesuai dengan parameter URL.',
+          });
+        }
+      }
+
+      // Actor fields in body are ignored as authority, but malformed non-string types are rejected
+      for (const actorKey of ['actorId', 'actorName', 'actorRole', 'staffId', 'staffName']) {
+        const val = req.body[actorKey];
+        if (val !== undefined && val !== null) {
+          if (typeof val !== 'string' || val.length > 200 || /[\x00-\x1F\x7F]/.test(val)) {
+            return res.status(400).json({
+              success: false,
+              code: 'INVALID_ACTOR_FIELD',
+              error: 'Format atribut identitas pemohon tidak valid.',
+              message: 'Format atribut identitas pemohon tidak valid.',
+            });
+          }
+        }
+      }
+
+      let suppliedCaseCode = '';
+      const rawCaseCodeCandidate =
+        req.body.caseCode !== undefined ? req.body.caseCode : req.body.caseItem?.caseCode;
+      if (
+        rawCaseCodeCandidate !== undefined &&
+        rawCaseCodeCandidate !== null &&
+        rawCaseCodeCandidate !== ''
+      ) {
+        if (
+          typeof rawCaseCodeCandidate !== 'string' ||
+          rawCaseCodeCandidate.trim().length > 64 ||
+          /[\x00-\x1F\x7F]/.test(rawCaseCodeCandidate)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_CASE_CODE',
+            error: 'Kode kasus tidak valid.',
+            message: 'Kode kasus tidak valid.',
+          });
+        }
+        suppliedCaseCode = rawCaseCodeCandidate.trim();
+      }
+
+      let suppliedCustomerId = '';
+      if (
+        req.body.caseItem?.customerId !== undefined &&
+        req.body.caseItem?.customerId !== null &&
+        req.body.caseItem?.customerId !== ''
+      ) {
+        if (!isValidStage7dDocId(req.body.caseItem.customerId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_CUSTOMER_ID',
+            error: 'ID pelanggan pada caseItem tidak valid.',
+            message: 'ID pelanggan pada caseItem tidak valid.',
+          });
+        }
+        suppliedCustomerId = req.body.caseItem.customerId;
+      }
+
+      let suppliedBookingId = '';
+      const rawBookingIdCandidate =
+        req.body.bookingId !== undefined ? req.body.bookingId : req.body.caseItem?.bookingId;
+      if (
+        rawBookingIdCandidate !== undefined &&
+        rawBookingIdCandidate !== null &&
+        rawBookingIdCandidate !== ''
+      ) {
+        if (!isValidStage7dDocId(rawBookingIdCandidate, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_ID',
+            error: 'ID reservasi tidak valid.',
+            message: 'ID reservasi tidak valid.',
+          });
+        }
+        suppliedBookingId = rawBookingIdCandidate;
+      } else if (req.body.bookingId === '') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_ID',
+          error: 'ID reservasi tidak valid.',
+          message: 'ID reservasi tidak valid.',
+        });
+      }
+
+      let suppliedBookingCode = '';
+      const rawBookingCodeCandidate =
+        req.body.bookingCode !== undefined ? req.body.bookingCode : req.body.caseItem?.bookingCode;
+      if (
+        rawBookingCodeCandidate !== undefined &&
+        rawBookingCodeCandidate !== null &&
+        rawBookingCodeCandidate !== ''
+      ) {
+        if (typeof rawBookingCodeCandidate !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode reservasi tidak valid.',
+            message: 'Kode reservasi tidak valid.',
+          });
+        }
+        const upper = rawBookingCodeCandidate.trim().toUpperCase();
+        if (!isValidStage7dBookingCode(upper, 64)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode reservasi tidak valid.',
+            message: 'Kode reservasi tidak valid.',
+          });
+        }
+        suppliedBookingCode = upper;
+      } else if (req.body.bookingCode === '') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_CODE',
+          error: 'Kode reservasi tidak valid.',
+          message: 'Kode reservasi tidak valid.',
+        });
+      }
+
+      let suppliedPaymentId = '';
+      if (req.body.paymentId !== undefined && req.body.paymentId !== null) {
+        if (!isValidStage7dDocId(req.body.paymentId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PAYMENT_ID',
+            error: 'ID pembayaran tidak valid.',
+            message: 'ID pembayaran tidak valid.',
+          });
+        }
+        suppliedPaymentId = req.body.paymentId;
+      }
+
+      const rawNewStatus = req.body.newStatus;
+      if (
+        typeof rawNewStatus !== 'string' ||
+        !STAGE7D_ALLOWED_REFUND_STATUSES.has(rawNewStatus)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_REFUND_STATUS',
+          error: 'Status refund manual tidak didukung.',
+          message: 'Status refund manual tidak didukung.',
+        });
+      }
+      const newStatus = rawNewStatus;
+
+      const rawRefundAmount = req.body.refundAmount;
+      let validatedRefundAmount: number | null = null;
+      if (rawRefundAmount !== undefined && rawRefundAmount !== null) {
+        if (
+          typeof rawRefundAmount !== 'number' ||
+          !Number.isFinite(rawRefundAmount) ||
+          rawRefundAmount <= 0 ||
+          rawRefundAmount > 100_000_000
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_AMOUNT',
+            error: 'Nominal refund manual tidak valid.',
+            message: 'Nominal refund manual tidak valid.',
+          });
+        }
+        validatedRefundAmount = rawRefundAmount;
+      }
+
+      const rawRefundMethod = req.body.refundMethod;
+      let sanitizedMethod = '';
+      if (rawRefundMethod !== undefined && rawRefundMethod !== null) {
+        if (typeof rawRefundMethod !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_METHOD',
+            error: 'Metode refund manual tidak valid.',
+            message: 'Metode refund manual tidak valid.',
+          });
+        }
+        sanitizedMethod = rawRefundMethod.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+        if (!sanitizedMethod || sanitizedMethod.length > 100) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_METHOD',
+            error: 'Metode refund manual tidak valid.',
+            message: 'Metode refund manual tidak valid.',
+          });
+        }
+      }
+
+      const rawRefundDate = req.body.refundDate;
+      let sanitizedDate = '';
+      if (rawRefundDate !== undefined && rawRefundDate !== null) {
+        if (typeof rawRefundDate !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_DATE',
+            error: 'Tanggal refund manual tidak valid.',
+            message: 'Tanggal refund manual tidak valid.',
+          });
+        }
+        sanitizedDate = rawRefundDate.trim();
+        if (!isValidStage7dDateString(sanitizedDate)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_DATE',
+            error: 'Tanggal refund manual tidak valid.',
+            message: 'Tanggal refund manual tidak valid.',
+          });
+        }
+      }
+
+      const rawRefundReference = req.body.refundReference;
+      let sanitizedReference = '';
+      if (rawRefundReference !== undefined && rawRefundReference !== null) {
+        if (typeof rawRefundReference !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_REFERENCE',
+            error: 'Referensi refund manual tidak valid.',
+            message: 'Referensi refund manual tidak valid.',
+          });
+        }
+        sanitizedReference = rawRefundReference
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+          .trim();
+        if (sanitizedReference.length > 150) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_REFERENCE',
+            error: 'Referensi refund manual melebihi batas.',
+            message: 'Referensi refund manual melebihi batas.',
+          });
+        }
+      }
+
+      const rawRefundProofUrl = req.body.refundProofUrl;
+      let sanitizedProofUrl = '';
+      if (rawRefundProofUrl !== undefined && rawRefundProofUrl !== null) {
+        if (typeof rawRefundProofUrl !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_PROOF_URL',
+            error: 'URL bukti refund manual tidak valid.',
+            message: 'URL bukti refund manual tidak valid.',
+          });
+        }
+        sanitizedProofUrl = rawRefundProofUrl
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+          .trim();
+        if (sanitizedProofUrl.length > 2000) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_PROOF_URL',
+            error: 'URL bukti refund manual melebihi batas.',
+            message: 'URL bukti refund manual melebihi batas.',
+          });
+        }
+      }
+
+      const rawNote = req.body.note;
+      let sanitizedNote = '';
+      if (rawNote !== undefined && rawNote !== null) {
+        if (
+          typeof rawNote !== 'string' ||
+          rawNote.length > 1000 ||
+          Buffer.byteLength(rawNote, 'utf8') > 1000
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REFUND_NOTE',
+            error: 'Catatan refund manual tidak valid atau melebihi batas.',
+            message: 'Catatan refund manual tidak valid atau melebihi batas.',
+          });
+        }
+        sanitizedNote = rawNote.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+      }
+
+      const rawRequestId = req.body.requestId;
+      let cleanRequestId = '';
+      if (rawRequestId !== undefined) {
+        if (!isValidStage7dDocId(rawRequestId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REQUEST_ID',
+            error: 'ID permintaan (requestId) tidak valid.',
+            message: 'ID permintaan (requestId) tidak valid.',
+          });
+        }
+        cleanRequestId = rawRequestId;
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      const receiptId = cleanRequestId
+        ? `pgr_mref_${createHash('sha256')
+            .update(`manual_refund_status:${verifiedUid}:${cleanRequestId}`)
+            .digest('hex')
+            .slice(0, 40)}`
+        : '';
+
+      const completionGuardId = `pgr_mref_guard_${createHash('sha256')
+        .update(`case_manual_refund_guard:${caseId}`)
+        .digest('hex')
+        .slice(0, 40)}`;
+
+      const manualRefundHistId = `psh_mref_${createHash('sha256')
+        .update(`case_manual_refund:${caseId}`)
+        .digest('hex')
+        .slice(0, 36)}`;
+
+      const fallbackManualRefundHistId = `psh_mref_${createHash('sha256')
+        .update(`case_manual_refund:${caseId}`)
+        .digest('hex')
+        .slice(0, 20)}_${Date.now().toString(36)}_${randomInt(100000, 1000000).toString(36)}`;
+
+      const requestFingerprint = computeManualRefundFingerprint({
+        actorUid: verifiedUid,
+        caseId,
+        newStatus,
+        refundAmount: validatedRefundAmount,
+        refundMethod: sanitizedMethod,
+        refundDate: sanitizedDate,
+        refundReference: sanitizedReference,
+        refundProofUrl: sanitizedProofUrl,
+        note: sanitizedNote,
+      });
+
+      const txResult: any = await adminDb.runTransaction(async (transaction: any) => {
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const canonicalStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const legacyStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUid', '==', verifiedUid)
+          .limit(2);
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const caseRef = adminDb.collection('cases').doc(caseId);
+        const receiptRef = receiptId
+          ? adminDb.collection('payment_governance_receipts').doc(receiptId)
+          : null;
+        const completionGuardRef = adminDb
+          .collection('payment_governance_receipts')
+          .doc(completionGuardId);
+        const caseReceiptsQuery = adminDb
+          .collection('payment_governance_receipts')
+          .where('caseId', '==', caseId);
+        const manualRefundHistRef = adminDb
+          .collection('payment_status_history')
+          .doc(manualRefundHistId);
+        const fallbackManualRefundHistRef = adminDb
+          .collection('payment_status_history')
+          .doc(fallbackManualRefundHistId);
+        const caseRefundHistQuery = adminDb
+          .collection('payment_status_history')
+          .where('caseId', '==', caseId);
+
+        const [
+          roleSnap,
+          canonicalStaffSnap,
+          legacyStaffSnap,
+          directStaffSnap,
+          caseSnap,
+          receiptSnap,
+          completionGuardSnap,
+          caseReceiptsQuerySnap,
+          manualRefundHistSnap,
+          fallbackManualRefundHistSnap,
+          caseRefundHistQuerySnap,
+        ] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(canonicalStaffQuery),
+          transaction.get(legacyStaffQuery),
+          transaction.get(directStaffRef),
+          transaction.get(caseRef),
+          receiptRef ? transaction.get(receiptRef) : Promise.resolve(null),
+          transaction.get(completionGuardRef),
+          transaction.get(caseReceiptsQuery),
+          transaction.get(manualRefundHistRef),
+          transaction.get(fallbackManualRefundHistRef),
+          transaction.get(caseRefundHistQuery),
+        ]);
+
+        const staffDocs = new Map<string, any>();
+        for (const d of [
+          ...(canonicalStaffSnap?.docs || []),
+          ...(legacyStaffSnap?.docs || []),
+        ]) {
+          if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaffSnap)) {
+          staffDocs.set(directStaffSnap.id, directStaffSnap);
+        }
+
+        const roleExists = snapExists(roleSnap);
+        const roleData = roleExists ? roleSnap.data() || {} : {};
+        if (roleExists) {
+          for (const linked of [roleData.staffId, roleData.staffUserId]) {
+            if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !staffDocs.has(linked)) {
+              const linkedSnap = await transaction.get(
+                adminDb.collection('staff_users').doc(linked)
+              );
+              if (snapExists(linkedSnap)) {
+                staffDocs.set(linkedSnap.id, linkedSnap);
+              }
+            }
+          }
+        }
+
+        let bookingSnap: any = null;
+        let bookingByCodeSnap: any = null;
+        let paymentsByBookingIdSnap: any = null;
+        let customerSnap: any = null;
+        const allFetchedPayments = new Map<string, any>();
+        const allFetchedHistoryDocs = new Map<string, any>();
+
+        if (snapExists(manualRefundHistSnap)) {
+          allFetchedHistoryDocs.set(manualRefundHistId, manualRefundHistSnap);
+        }
+        if (snapExists(fallbackManualRefundHistSnap)) {
+          allFetchedHistoryDocs.set(fallbackManualRefundHistId, fallbackManualRefundHistSnap);
+        }
+        for (const d of caseRefundHistQuerySnap?.docs || []) {
+          if (snapExists(d)) {
+            allFetchedHistoryDocs.set(d.id, d);
+          }
+        }
+
+        if (snapExists(caseSnap)) {
+          const cData = caseSnap.data() || {};
+          const cBookingId = textId(cData.bookingId);
+          const cBookingCode = textId(cData.bookingCode).toUpperCase();
+          const cCustomerId = textId(cData.customerId);
+
+          if (isValidStage7dDocId(cBookingId, 128)) {
+            const [bSnap, pSnap] = await Promise.all([
+              transaction.get(adminDb.collection('bookings').doc(cBookingId)),
+              transaction.get(
+                adminDb.collection('payments').where('bookingId', '==', cBookingId)
+              ),
+            ]);
+            bookingSnap = bSnap;
+            paymentsByBookingIdSnap = pSnap;
+            for (const d of paymentsByBookingIdSnap?.docs || []) {
+              if (snapExists(d)) {
+                allFetchedPayments.set(d.id, d);
+              }
+            }
+          }
+
+          const candidateCustId =
+            cCustomerId ||
+            (snapExists(bookingSnap) ? textId((bookingSnap.data() || {}).customerId) : '');
+          if (isValidStage7dDocId(candidateCustId, 128)) {
+            customerSnap = await transaction.get(
+              adminDb.collection('customers').doc(candidateCustId)
+            );
+          }
+
+          const extraPayIds = new Set<string>();
+          if (snapExists(bookingSnap)) {
+            const activePayId = textId((bookingSnap.data() || {}).activePaymentId);
+            if (isValidStage7dDocId(activePayId, 128)) extraPayIds.add(activePayId);
+          }
+          const recPayId = textId(cData?.recovery?.refundPaymentId);
+          if (isValidStage7dDocId(recPayId, 128)) extraPayIds.add(recPayId);
+          if (snapExists(receiptSnap)) {
+            const rPayId = textId(receiptSnap.data()?.responsePayload?.paymentId);
+            if (isValidStage7dDocId(rPayId, 128)) extraPayIds.add(rPayId);
+          }
+          if (snapExists(completionGuardSnap)) {
+            const gPayId = textId(completionGuardSnap.data()?.paymentId);
+            if (isValidStage7dDocId(gPayId, 128)) extraPayIds.add(gPayId);
+          }
+          for (const d of caseReceiptsQuerySnap?.docs || []) {
+            if (snapExists(d)) {
+              const dPayId = textId(d.data()?.responsePayload?.paymentId);
+              if (isValidStage7dDocId(dPayId, 128)) extraPayIds.add(dPayId);
+            }
+          }
+          if (suppliedPaymentId) extraPayIds.add(suppliedPaymentId);
+
+          for (const payId of extraPayIds) {
+            if (!allFetchedPayments.has(payId)) {
+              const pDocSnap = await transaction.get(
+                adminDb.collection('payments').doc(payId)
+              );
+              if (snapExists(pDocSnap)) {
+                allFetchedPayments.set(payId, pDocSnap);
+              }
+            }
+          }
+
+          const extraHistIds = new Set<string>();
+          const recHistId = textId(cData?.recovery?.refundPaymentHistoryId);
+          if (isValidStage7dDocId(recHistId, 128)) extraHistIds.add(recHistId);
+          if (snapExists(receiptSnap)) {
+            const rHistId = textId(receiptSnap.data()?.responsePayload?.paymentHistoryId);
+            if (isValidStage7dDocId(rHistId, 128)) extraHistIds.add(rHistId);
+          }
+          if (snapExists(completionGuardSnap)) {
+            const gHistId = textId(completionGuardSnap.data()?.paymentHistoryId);
+            if (isValidStage7dDocId(gHistId, 128)) extraHistIds.add(gHistId);
+          }
+          for (const d of caseReceiptsQuerySnap?.docs || []) {
+            if (snapExists(d)) {
+              const dHistId = textId(d.data()?.responsePayload?.paymentHistoryId);
+              if (isValidStage7dDocId(dHistId, 128)) extraHistIds.add(dHistId);
+            }
+          }
+
+          for (const hId of extraHistIds) {
+            if (!allFetchedHistoryDocs.has(hId)) {
+              const hDocSnap = await transaction.get(
+                adminDb.collection('payment_status_history').doc(hId)
+              );
+              if (snapExists(hDocSnap)) {
+                allFetchedHistoryDocs.set(hId, hDocSnap);
+              }
+            }
+          }
+
+          const lookupCode =
+            (snapExists(bookingSnap)
+              ? textId((bookingSnap.data() || {}).bookingCode).toUpperCase()
+              : '') || cBookingCode;
+          if (isValidStage7dBookingCode(lookupCode, 64)) {
+            bookingByCodeSnap = await transaction.get(
+              adminDb.collection('bookings').where('bookingCode', '==', lookupCode).limit(2)
+            );
+          }
+        }
+
+        // 1. Verify current active Manager/Admin identity inside transaction
+        const managerCheck = validateStage7dActiveManagerIdentity(
+          verifiedUid,
+          roleExists,
+          roleData,
+          staffDocs
+        );
+        if (!managerCheck.ok) {
+          return {
+            status: managerCheck.status,
+            code: managerCheck.code,
+            message: managerCheck.message,
+          };
+        }
+
+        // 2. Verify persisted case, recovery, and booking linkage
+        if (!snapExists(caseSnap)) {
+          return {
+            status: 404,
+            code: 'CASE_NOT_FOUND',
+            message: 'Data kasus tidak ditemukan.',
+          };
+        }
+        const caseData = caseSnap.data() || {};
+        if (
+          caseData.id !== undefined &&
+          caseData.id !== null &&
+          caseData.id !== '' &&
+          (typeof caseData.id !== 'string' || caseData.id !== caseId)
+        ) {
+          return {
+            status: 409,
+            code: 'CASE_ID_CONFLICT',
+            message: 'Identitas dokumen kasus tidak konsisten.',
+          };
+        }
+
+        if (
+          caseData.caseCode !== undefined &&
+          caseData.caseCode !== null &&
+          caseData.caseCode !== '' &&
+          (typeof caseData.caseCode !== 'string' ||
+            caseData.caseCode.trim().length > 64 ||
+            /[\x00-\x1F\x7F]/.test(caseData.caseCode))
+        ) {
+          return {
+            status: 409,
+            code: 'INVALID_CASE_CODE',
+            message: 'Kode kasus pada dokumen tidak valid.',
+          };
+        }
+        const persistedCaseCode = textId(caseData.caseCode) || caseId;
+        if (suppliedCaseCode && suppliedCaseCode !== persistedCaseCode) {
+          return {
+            status: 409,
+            code: 'FOREIGN_CASE_CODE_LINKAGE',
+            message: 'Kode kasus pada permintaan tidak sesuai dengan kasus tersimpan.',
+          };
+        }
+
+        const persistedCustomerId = textId(caseData.customerId);
+        if (suppliedCustomerId && persistedCustomerId && suppliedCustomerId !== persistedCustomerId) {
+          return {
+            status: 409,
+            code: 'FOREIGN_CUSTOMER_LINKAGE',
+            message: 'ID pelanggan pada permintaan tidak sesuai dengan kasus tersimpan.',
+          };
+        }
+
+        const caseOwnerRes = extractConsistentRecordOwnerUid(caseData);
+        if (!caseOwnerRes.ok) {
+          return {
+            status: 409,
+            code: caseOwnerRes.code,
+            message: caseOwnerRes.message,
+          };
+        }
+
+        if (
+          !caseData.recovery ||
+          typeof caseData.recovery !== 'object' ||
+          Array.isArray(caseData.recovery)
+        ) {
+          return {
+            status: 400,
+            code: 'RECOVERY_NOT_FOUND',
+            message: 'Kasus ini belum memiliki recovery record.',
+          };
+        }
+        const rec = caseData.recovery as Record<string, any>;
+
+        const persistedBookingId = textId(caseData.bookingId);
+        const persistedBookingCode = textId(caseData.bookingCode).toUpperCase();
+
+        if (suppliedBookingId && suppliedBookingId !== persistedBookingId) {
+          return {
+            status: 409,
+            code: 'FOREIGN_BOOKING_LINKAGE',
+            message: 'ID reservasi pada permintaan tidak sesuai dengan kasus tersimpan.',
+          };
+        }
+        if (suppliedBookingCode && suppliedBookingCode !== persistedBookingCode) {
+          return {
+            status: 409,
+            code: 'FOREIGN_BOOKING_CODE_LINKAGE',
+            message: 'Kode reservasi pada permintaan tidak sesuai dengan kasus tersimpan.',
+          };
+        }
+
+        if (
+          caseData.bookingId !== undefined &&
+          caseData.bookingId !== null &&
+          caseData.bookingId !== '' &&
+          !isValidStage7dDocId(persistedBookingId, 128)
+        ) {
+          return {
+            status: 409,
+            code: 'INVALID_CASE_BOOKING_ID',
+            message: 'ID reservasi pada dokumen kasus tidak valid.',
+          };
+        }
+
+        let canonicalBookingCode = persistedBookingCode;
+        let bookingData: Record<string, any> | null = null;
+        let bkOwnerUid: string | null = null;
+        let bkCustomerId = '';
+
+        if (persistedBookingId && snapExists(bookingSnap)) {
+          bookingData = bookingSnap.data() || {};
+          if (
+            bookingData!.id !== undefined &&
+            bookingData!.id !== null &&
+            bookingData!.id !== '' &&
+            (typeof bookingData!.id !== 'string' || bookingData!.id !== persistedBookingId)
+          ) {
+            return {
+              status: 409,
+              code: 'BOOKING_ID_CONFLICT',
+              message: 'Identitas dokumen reservasi terkait kasus tidak konsisten.',
+            };
+          }
+          const bkCode = textId(bookingData!.bookingCode).toUpperCase();
+          if (persistedBookingCode && bkCode && persistedBookingCode !== bkCode) {
+            return {
+              status: 409,
+              code: 'FOREIGN_BOOKING_CODE_LINKAGE',
+              message: 'Kode reservasi pada kasus tidak sesuai dengan dokumen reservasi.',
+            };
+          }
+          canonicalBookingCode = bkCode || persistedBookingCode;
+          for (const d of bookingByCodeSnap?.docs || []) {
+            if (snapExists(d) && d.id !== persistedBookingId) {
+              return {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'Kode reservasi merujuk pada lebih dari satu dokumen pesanan.',
+              };
+            }
+          }
+          bkCustomerId = textId(bookingData!.customerId);
+          if (persistedCustomerId && bkCustomerId && persistedCustomerId !== bkCustomerId) {
+            return {
+              status: 409,
+              code: 'FOREIGN_CUSTOMER_LINKAGE',
+              message: 'ID pelanggan pada kasus tidak sesuai dengan dokumen reservasi.',
+            };
+          }
+          if (suppliedCustomerId && bkCustomerId && suppliedCustomerId !== bkCustomerId) {
+            return {
+              status: 409,
+              code: 'FOREIGN_CUSTOMER_LINKAGE',
+              message: 'ID pelanggan pada permintaan tidak sesuai dengan dokumen reservasi.',
+            };
+          }
+          const bkOwnerRes = extractConsistentRecordOwnerUid(bookingData);
+          if (!bkOwnerRes.ok) {
+            return {
+              status: 409,
+              code: bkOwnerRes.code,
+              message: bkOwnerRes.message,
+            };
+          }
+          bkOwnerUid = bkOwnerRes.ownerUid || null;
+          if (
+            caseOwnerRes.ownerUid &&
+            bkOwnerUid &&
+            caseOwnerRes.ownerUid !== bkOwnerUid
+          ) {
+            return {
+              status: 409,
+              code: 'FOREIGN_OWNER_LINKAGE',
+              message: 'Kepemilikan pengguna pada kasus tidak sesuai dengan dokumen reservasi.',
+            };
+          }
+        }
+
+        let custOwnerUid: string | null = null;
+        if (snapExists(customerSnap)) {
+          const custOwnerRes = extractConsistentRecordOwnerUid(customerSnap.data() || {});
+          if (!custOwnerRes.ok) {
+            return {
+              status: 409,
+              code: custOwnerRes.code,
+              message: custOwnerRes.message,
+            };
+          }
+          custOwnerUid = custOwnerRes.ownerUid || null;
+          const authoritativeOwner = bkOwnerUid || caseOwnerRes.ownerUid || null;
+          if (authoritativeOwner && custOwnerUid && custOwnerUid !== authoritativeOwner) {
+            return {
+              status: 409,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              message: 'Profil CRM pelanggan memiliki UID yang bertentangan dengan pemilik reservasi/kasus.',
+            };
+          }
+        }
+
+        // Evaluate current payment candidates and helper for current linked-payment revalidation
+        const validPaymentCandidates: Array<{ id: string; data: Record<string, any> }> = [];
+        let hasInvalidOrConflictingPayment = false;
+
+        if (persistedBookingId && bookingData) {
+          const bookingCandidateDocs = new Map<string, any>();
+          for (const d of paymentsByBookingIdSnap?.docs || []) {
+            if (snapExists(d)) bookingCandidateDocs.set(d.id, d);
+          }
+          const activePayId = textId(bookingData.activePaymentId);
+          if (activePayId && allFetchedPayments.has(activePayId)) {
+            bookingCandidateDocs.set(activePayId, allFetchedPayments.get(activePayId));
+          }
+
+          for (const [pId, pSnap] of bookingCandidateDocs.entries()) {
+            const pData = pSnap.data() || {};
+            if (
+              pData.id !== undefined &&
+              pData.id !== null &&
+              pData.id !== '' &&
+              pData.id !== pId
+            ) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            if (textId(pData.bookingId) !== persistedBookingId) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            const pCode = textId(pData.bookingCode).toUpperCase();
+            if (pCode && canonicalBookingCode && pCode !== canonicalBookingCode) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            const pCustId = textId(pData.customerId);
+            if (
+              (pCustId && bkCustomerId && pCustId !== bkCustomerId) ||
+              (pCustId && persistedCustomerId && pCustId !== persistedCustomerId)
+            ) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            const pOwnerRes = extractConsistentRecordOwnerUid(pData);
+            if (!pOwnerRes.ok) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            if (
+              (pOwnerRes.ownerUid && bkOwnerUid && pOwnerRes.ownerUid !== bkOwnerUid) ||
+              (pOwnerRes.ownerUid && !bkOwnerUid) ||
+              (pOwnerRes.ownerUid &&
+                caseOwnerRes.ownerUid &&
+                pOwnerRes.ownerUid !== caseOwnerRes.ownerUid) ||
+              (pOwnerRes.ownerUid && custOwnerUid && pOwnerRes.ownerUid !== custOwnerUid)
+            ) {
+              hasInvalidOrConflictingPayment = true;
+              continue;
+            }
+            validPaymentCandidates.push({ id: pId, data: pData });
+          }
+        }
+
+        const validateCurrentLinkedPayment = (
+          targetPaymentId: string
+        ): { ok: boolean; code?: string; message?: string } => {
+          if (!isValidStage7dDocId(targetPaymentId, 128) || !persistedBookingId || !bookingData) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_MISSING_BOOKING',
+              message: 'Dokumen reservasi untuk pembayaran tertaut tidak valid atau tidak ditemukan.',
+            };
+          }
+          const pSnap = allFetchedPayments.get(targetPaymentId);
+          if (!snapExists(pSnap)) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_NOT_FOUND',
+              message: 'Dokumen pembayaran tertaut tidak ditemukan.',
+            };
+          }
+          const pData = pSnap.data() || {};
+          if (
+            pData.id !== undefined &&
+            pData.id !== null &&
+            pData.id !== '' &&
+            pData.id !== targetPaymentId
+          ) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_ID_CONFLICT',
+              message: 'Identitas dokumen pembayaran tertaut tidak konsisten.',
+            };
+          }
+          if (textId(pData.bookingId) !== persistedBookingId) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_BOOKING_MISMATCH',
+              message: 'Dokumen pembayaran tertaut merujuk pada reservasi yang berbeda.',
+            };
+          }
+          const pCode = textId(pData.bookingCode).toUpperCase();
+          if (pCode && canonicalBookingCode && pCode !== canonicalBookingCode) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_BOOKING_CODE_MISMATCH',
+              message: 'Kode reservasi pada pembayaran tertaut mengalami konflik.',
+            };
+          }
+          const pCustId = textId(pData.customerId);
+          if (
+            (pCustId && bkCustomerId && pCustId !== bkCustomerId) ||
+            (pCustId && persistedCustomerId && pCustId !== persistedCustomerId)
+          ) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_CUSTOMER_MISMATCH',
+              message: 'ID pelanggan pada pembayaran tertaut mengalami konflik.',
+            };
+          }
+          const pOwnerRes = extractConsistentRecordOwnerUid(pData);
+          if (!pOwnerRes.ok) {
+            return {
+              ok: false,
+              code: pOwnerRes.code || 'LINKED_PAYMENT_OWNERSHIP_INVALID',
+              message:
+                pOwnerRes.message || 'Atribut kepemilikan pada pembayaran tertaut mengalami konflik.',
+            };
+          }
+          if (
+            (pOwnerRes.ownerUid && bkOwnerUid && pOwnerRes.ownerUid !== bkOwnerUid) ||
+            (pOwnerRes.ownerUid && !bkOwnerUid) ||
+            (pOwnerRes.ownerUid &&
+              caseOwnerRes.ownerUid &&
+              pOwnerRes.ownerUid !== caseOwnerRes.ownerUid) ||
+            (pOwnerRes.ownerUid && custOwnerUid && pOwnerRes.ownerUid !== custOwnerUid)
+          ) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_OWNERSHIP_CONFLICT',
+              message: 'Kepemilikan pengguna pada pembayaran tertaut bertentangan dengan reservasi/kasus.',
+            };
+          }
+          const activePayId = textId(bookingData.activePaymentId);
+          if (activePayId && activePayId !== targetPaymentId) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_REASSIGNED',
+              message: 'activePaymentId pada reservasi tidak lagi merujuk pada pembayaran tertaut.',
+            };
+          }
+          const recPayId = textId(rec.refundPaymentId);
+          if (recPayId && recPayId !== targetPaymentId) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_RECOVERY_MISMATCH',
+              message: 'Referensi pembayaran pada recovery kasus mengalami konflik.',
+            };
+          }
+          if (hasInvalidOrConflictingPayment) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_CANDIDATE_CONFLICT',
+              message: 'Ditemukan kandidat pembayaran lain yang mengalami konflik kepemilikan atau identitas.',
+            };
+          }
+          const otherPaid = validPaymentCandidates.filter(
+            (c) => c.id !== targetPaymentId && textId(c.data.status).toLowerCase() === 'paid'
+          );
+          if (otherPaid.length > 0) {
+            return {
+              ok: false,
+              code: 'LINKED_PAYMENT_AMBIGUOUS',
+              message: 'Terdapat lebih dari satu pembayaran terverifikasi untuk reservasi ini.',
+            };
+          }
+          return { ok: true };
+        };
+
+        const validateTrustedRefundHistoryDoc = (params: {
+          histId: string;
+          expectedPaymentId: string;
+          expectedAmount: number;
+          expectedActorUid: string;
+          expectedActorStaffId: string;
+        }): boolean => {
+          if (
+            !isValidStage7dDocId(params.histId, 128) ||
+            !isValidStage7dDocId(params.expectedPaymentId, 128)
+          ) {
+            return false;
+          }
+          const hSnap = allFetchedHistoryDocs.get(params.histId);
+          if (!snapExists(hSnap)) return false;
+          const hData = hSnap.data() || {};
+          return (
+            hData.id === params.histId &&
+            hData.caseId === caseId &&
+            hData.caseCode === persistedCaseCode &&
+            hData.paymentId === params.expectedPaymentId &&
+            hData.bookingId === persistedBookingId &&
+            textId(hData.bookingCode).toUpperCase() === canonicalBookingCode &&
+            typeof hData.amount === 'number' &&
+            Number.isFinite(hData.amount) &&
+            hData.amount === params.expectedAmount &&
+            hData.eventType === 'refund_processed' &&
+            hData.confirmationType === 'MANUAL_MANAGER_CONFIRMATION' &&
+            hData.serverAuthoritative === true &&
+            hData.actorUid === params.expectedActorUid &&
+            hData.userId === params.expectedActorStaffId
+          );
+        };
+
+        const allowedManualRefundRespKeys = new Set<string>([
+          'caseId',
+          'caseCode',
+          'bookingId',
+          'bookingCode',
+          'oldStatus',
+          'newStatus',
+          'recovery',
+          'paymentHistoryLinked',
+          'reviewRequired',
+          'paymentId',
+          'paymentHistoryId',
+          'linkageReviewReason',
+          'caseEventId',
+          'auditId',
+        ]);
+
+        const validateManualRefundReceiptDoc = (
+          expectedReceiptId: string,
+          receipt: Record<string, any>
+        ): boolean => {
+          const resp = receipt?.responsePayload;
+          const isValidEnvelope =
+            Boolean(receipt && typeof receipt === 'object' && !Array.isArray(receipt)) &&
+            receipt.id === expectedReceiptId &&
+            receipt.action === 'manual_refund_status' &&
+            isValidStage7dDocId(receipt.actorUid, 128) &&
+            isValidStage7dDocId(receipt.actorStaffId, 128) &&
+            (receipt.actorRole === 'manager' || receipt.actorRole === 'admin') &&
+            typeof receipt.actorName === 'string' &&
+            receipt.actorName.trim().length > 0 &&
+            receipt.actorName.length <= 120 &&
+            isValidStage7dDocId(receipt.requestId, 128) &&
+            isValidStage7dDocId(receipt.caseId, 128) &&
+            typeof receipt.newStatus === 'string' &&
+            STAGE7D_ALLOWED_REFUND_STATUSES.has(receipt.newStatus) &&
+            (receipt.refundAmount === null ||
+              (typeof receipt.refundAmount === 'number' &&
+                Number.isFinite(receipt.refundAmount) &&
+                receipt.refundAmount > 0 &&
+                receipt.refundAmount <= 100_000_000)) &&
+            typeof receipt.refundMethod === 'string' &&
+            receipt.refundMethod.length <= 100 &&
+            typeof receipt.refundDate === 'string' &&
+            (receipt.refundDate === '' || isValidStage7dDateString(receipt.refundDate)) &&
+            typeof receipt.refundReference === 'string' &&
+            receipt.refundReference.length <= 150 &&
+            typeof receipt.refundProofUrl === 'string' &&
+            receipt.refundProofUrl.length <= 2000 &&
+            typeof receipt.note === 'string' &&
+            receipt.note.length <= 1000 &&
+            typeof receipt.fingerprint === 'string' &&
+            /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
+            receipt.fingerprint ===
+              computeManualRefundFingerprint({
+                actorUid: receipt.actorUid,
+                caseId: receipt.caseId,
+                newStatus: receipt.newStatus,
+                refundAmount: receipt.refundAmount,
+                refundMethod: receipt.refundMethod,
+                refundDate: receipt.refundDate,
+                refundReference: receipt.refundReference,
+                refundProofUrl: receipt.refundProofUrl,
+                note: receipt.note,
+              }) &&
+            typeof receipt.committedAt === 'string' &&
+            !Number.isNaN(Date.parse(receipt.committedAt)) &&
+            Boolean(resp && typeof resp === 'object' && !Array.isArray(resp)) &&
+            (receipt.responseFingerprint === undefined ||
+              (typeof receipt.responseFingerprint === 'string' &&
+                /^[a-f0-9]{64}$/.test(receipt.responseFingerprint) &&
+                receipt.responseFingerprint === computeStage7dResponseFingerprint(resp)));
+
+          if (!isValidEnvelope) return false;
+
+          const expectedCaseEventId = `cevt_mref_${createHash('sha256')
+            .update(`manual_refund_status:${receipt.actorUid}:${receipt.requestId}`)
+            .digest('hex')
+            .slice(0, 32)}`;
+          const expectedAuditId = `audit_mref_${createHash('sha256')
+            .update(`manual_refund_status:${receipt.actorUid}:${receipt.requestId}`)
+            .digest('hex')
+            .slice(0, 32)}`;
+
+          const respKeysOk = Object.keys(resp).every((k) => allowedManualRefundRespKeys.has(k));
+          const respRec = resp.recovery;
+          if (
+            !respKeysOk ||
+            resp.caseId !== receipt.caseId ||
+            typeof resp.caseCode !== 'string' ||
+            !resp.caseCode.trim() ||
+            resp.caseCode.length > 64 ||
+            typeof resp.bookingId !== 'string' ||
+            typeof resp.bookingCode !== 'string' ||
+            !(
+              resp.oldStatus === null ||
+              (typeof resp.oldStatus === 'string' && resp.oldStatus.length <= 64)
+            ) ||
+            resp.newStatus !== receipt.newStatus ||
+            typeof resp.paymentHistoryLinked !== 'boolean' ||
+            typeof resp.reviewRequired !== 'boolean' ||
+            resp.caseEventId !== expectedCaseEventId ||
+            resp.auditId !== expectedAuditId ||
+            !respRec ||
+            typeof respRec !== 'object' ||
+            Array.isArray(respRec)
+          ) {
+            return false;
+          }
+
+          if (
+            respRec.refundStatus !== receipt.newStatus ||
+            respRec.refundProcessedBy !== receipt.actorStaffId ||
+            respRec.refundProcessedByName !== receipt.actorName ||
+            respRec.refundProcessedAt !== receipt.committedAt ||
+            typeof respRec.refundDate !== 'string' ||
+            !isValidStage7dDateString(respRec.refundDate) ||
+            (receipt.refundDate !== '' && respRec.refundDate !== receipt.refundDate) ||
+            (receipt.refundMethod !== '' && respRec.refundMethod !== receipt.refundMethod) ||
+            (receipt.refundReference !== '' &&
+              respRec.refundReference !== receipt.refundReference) ||
+            (receipt.refundProofUrl !== '' && respRec.refundProofUrl !== receipt.refundProofUrl)
+          ) {
+            return false;
+          }
+
+          if (receipt.refundAmount !== null && respRec.refundAmount !== receipt.refundAmount) {
+            return false;
+          }
+          if (
+            respRec.refundAmount !== undefined &&
+            respRec.refundAmount !== null &&
+            (typeof respRec.refundAmount !== 'number' ||
+              !Number.isFinite(respRec.refundAmount) ||
+              respRec.refundAmount <= 0 ||
+              respRec.refundAmount > 100_000_000)
+          ) {
+            return false;
+          }
+
+          if (receipt.newStatus !== 'COMPLETED_MANUAL') {
+            if (
+              resp.paymentHistoryLinked !== false ||
+              resp.reviewRequired !== false ||
+              resp.paymentId !== undefined ||
+              resp.paymentHistoryId !== undefined
+            ) {
+              return false;
+            }
+          } else {
+            if (
+              typeof respRec.refundAmount !== 'number' ||
+              !Number.isFinite(respRec.refundAmount) ||
+              respRec.refundAmount <= 0 ||
+              resp.paymentHistoryLinked !== !resp.reviewRequired ||
+              respRec.refundPaymentHistoryLinked !== resp.paymentHistoryLinked ||
+              respRec.refundLinkageReviewRequired !== resp.reviewRequired
+            ) {
+              return false;
+            }
+            if (resp.paymentHistoryLinked) {
+              if (
+                !isValidStage7dDocId(resp.paymentId, 128) ||
+                !isValidStage7dDocId(resp.paymentHistoryId, 128) ||
+                respRec.refundPaymentId !== resp.paymentId ||
+                respRec.refundPaymentHistoryId !== resp.paymentHistoryId ||
+                resp.linkageReviewReason !== undefined
+              ) {
+                return false;
+              }
+            } else {
+              if (
+                resp.paymentId !== undefined ||
+                resp.paymentHistoryId !== undefined ||
+                respRec.refundPaymentId !== undefined ||
+                respRec.refundPaymentHistoryId !== undefined ||
+                (resp.linkageReviewReason !== undefined &&
+                  (typeof resp.linkageReviewReason !== 'string' ||
+                    !resp.linkageReviewReason.trim() ||
+                    resp.linkageReviewReason.length > 500))
+              ) {
+                return false;
+              }
+            }
+          }
+
+          return true;
+        };
+
+        // 3. Validate committed idempotency receipt BEFORE new-transition checks
+        if (receiptRef && snapExists(receiptSnap)) {
+          const receipt = receiptSnap.data() || {};
+          const isValidReceipt =
+            receipt.actorUid === verifiedUid &&
+            receipt.requestId === cleanRequestId &&
+            validateManualRefundReceiptDoc(receiptId, receipt);
+
+          if (!isValidReceipt) {
+            return {
+              status: 409,
+              code: 'RECEIPT_CORRUPTED',
+              message: 'Bukti idempotensi status refund manual tidak valid atau rusak.',
+            };
+          }
+
+          if (
+            receipt.fingerprint !== requestFingerprint ||
+            receipt.caseId !== caseId ||
+            receipt.newStatus !== newStatus
+          ) {
+            return {
+              status: 409,
+              code: 'IDEMPOTENCY_PARAMETER_MISMATCH',
+              message:
+                'ID permintaan (requestId) telah digunakan untuk pembaruan refund manual dengan parameter berbeda.',
+            };
+          }
+
+          const resp = receipt.responsePayload;
+          const respRec = resp.recovery;
+          const isCanonicalCaseMatch =
+            resp.caseId === caseId &&
+            resp.caseCode === persistedCaseCode &&
+            resp.bookingId === (persistedBookingId || '') &&
+            resp.bookingCode === (canonicalBookingCode || '') &&
+            (receipt.newStatus !== 'COMPLETED_MANUAL' ||
+              receipt.refundAmount !== null ||
+              typeof rec.refundAmount !== 'number' ||
+              respRec.refundAmount === rec.refundAmount);
+
+          if (!isCanonicalCaseMatch) {
+            return {
+              status: 409,
+              code: 'RECEIPT_CORRUPTED',
+              message: 'Respons idempotensi refund manual tidak sesuai dengan dokumen kasus otoritatif.',
+            };
+          }
+
+          if (receipt.newStatus === 'COMPLETED_MANUAL') {
+            if (textId(rec.refundStatus) !== 'COMPLETED_MANUAL') {
+              return {
+                status: 409,
+                code: 'RECEIPT_CORRUPTED',
+                message: 'Status penyelesaian refund manual pada kasus tidak konsisten dengan bukti idempotensi.',
+              };
+            }
+            if (resp.paymentHistoryLinked) {
+              const histValid = validateTrustedRefundHistoryDoc({
+                histId: resp.paymentHistoryId,
+                expectedPaymentId: resp.paymentId,
+                expectedAmount: respRec.refundAmount,
+                expectedActorUid: receipt.actorUid,
+                expectedActorStaffId: receipt.actorStaffId,
+              });
+              if (!histValid) {
+                return {
+                  status: 409,
+                  code: 'RECEIPT_CORRUPTED',
+                  message: 'Riwayat pembayaran tertaut pada bukti idempotensi tidak valid atau mengalami konflik.',
+                };
+              }
+              const currentLinkCheck = validateCurrentLinkedPayment(resp.paymentId);
+              if (!currentLinkCheck.ok) {
+                return {
+                  status: 409,
+                  code: currentLinkCheck.code || 'LINKED_PAYMENT_CONFLICT',
+                  reviewRequired: true,
+                  message:
+                    currentLinkCheck.message ||
+                    'Tautan pembayaran untuk konfirmasi refund manual mengalami konflik kepemilikan atau identitas.',
+                };
+              }
+              if (suppliedPaymentId && suppliedPaymentId !== resp.paymentId) {
+                return {
+                  status: 409,
+                  code: 'FOREIGN_PAYMENT_LINKAGE',
+                  reviewRequired: true,
+                  message: 'ID pembayaran pada permintaan tidak sesuai dengan pembayaran tertaut.',
+                };
+              }
+            }
+          }
+
+          return {
+            caseId: resp.caseId,
+            caseCode: resp.caseCode,
+            bookingId: resp.bookingId,
+            bookingCode: resp.bookingCode,
+            oldStatus: resp.oldStatus,
+            newStatus: resp.newStatus,
+            recovery: respRec,
+            paymentHistoryLinked: resp.paymentHistoryLinked,
+            reviewRequired: resp.reviewRequired,
+            ...(resp.paymentHistoryLinked && resp.paymentId && resp.paymentHistoryId
+              ? {
+                  paymentId: resp.paymentId,
+                  paymentHistoryId: resp.paymentHistoryId,
+                }
+              : {}),
+            ...(resp.reviewRequired && typeof resp.linkageReviewReason === 'string'
+              ? { linkageReviewReason: resp.linkageReviewReason }
+              : {}),
+            caseEventId: resp.caseEventId,
+            auditId: resp.auditId,
+            status: 200,
+            isIdempotent: true,
+          };
+        }
+
+        // Validate persisted refundAmount if present
+        if (rec.refundAmount !== undefined && rec.refundAmount !== null) {
+          if (
+            typeof rec.refundAmount !== 'number' ||
+            !Number.isFinite(rec.refundAmount) ||
+            rec.refundAmount <= 0 ||
+            rec.refundAmount > 100_000_000
+          ) {
+            return {
+              status: 400,
+              code: 'INVALID_PERSISTED_REFUND_AMOUNT',
+              message: 'Nominal refund pada recovery kasus tidak valid.',
+            };
+          }
+        }
+
+        const effectiveRefundAmount: number | undefined =
+          validatedRefundAmount !== null
+            ? validatedRefundAmount
+            : typeof rec.refundAmount === 'number'
+            ? rec.refundAmount
+            : undefined;
+
+        if (
+          newStatus === 'COMPLETED_MANUAL' &&
+          (effectiveRefundAmount === undefined ||
+            !Number.isFinite(effectiveRefundAmount) ||
+            effectiveRefundAmount <= 0)
+        ) {
+          return {
+            status: 400,
+            code: 'REFUND_AMOUNT_REQUIRED',
+            message: 'Nominal refund wajib bernilai positif untuk penyelesaian refund manual.',
+          };
+        }
+
+        // 4. Inspect trusted private server completion provenance (never trust public payment_status_history rows alone)
+        let trustedCompletion: {
+          refundAmount: number;
+          paymentHistoryLinked: boolean;
+          reviewRequired: boolean;
+          paymentId?: string;
+          paymentHistoryId?: string;
+          linkageReviewReason?: string;
+        } | null = null;
+
+        if (snapExists(completionGuardSnap)) {
+          const guard = completionGuardSnap.data() || {};
+          const isValidGuardBase =
+            Boolean(guard && typeof guard === 'object' && !Array.isArray(guard)) &&
+            guard.id === completionGuardId &&
+            guard.action === 'manual_refund_completion_guard' &&
+            guard.caseId === caseId &&
+            guard.caseCode === persistedCaseCode &&
+            guard.bookingId === (persistedBookingId || '') &&
+            guard.bookingCode === (canonicalBookingCode || '') &&
+            guard.newStatus === 'COMPLETED_MANUAL' &&
+            isValidStage7dDocId(guard.actorUid, 128) &&
+            isValidStage7dDocId(guard.actorStaffId, 128) &&
+            (guard.actorRole === 'manager' || guard.actorRole === 'admin') &&
+            typeof guard.actorName === 'string' &&
+            guard.actorName.trim().length > 0 &&
+            typeof guard.refundAmount === 'number' &&
+            Number.isFinite(guard.refundAmount) &&
+            guard.refundAmount > 0 &&
+            guard.refundAmount <= 100_000_000 &&
+            typeof guard.paymentHistoryLinked === 'boolean' &&
+            typeof guard.reviewRequired === 'boolean' &&
+            guard.paymentHistoryLinked === !guard.reviewRequired &&
+            typeof guard.committedAt === 'string' &&
+            !Number.isNaN(Date.parse(guard.committedAt));
+
+          let isValidGuardLinks = false;
+          if (isValidGuardBase) {
+            if (guard.paymentHistoryLinked) {
+              isValidGuardLinks =
+                isValidStage7dDocId(guard.paymentId, 128) &&
+                isValidStage7dDocId(guard.paymentHistoryId, 128) &&
+                validateTrustedRefundHistoryDoc({
+                  histId: guard.paymentHistoryId,
+                  expectedPaymentId: guard.paymentId,
+                  expectedAmount: guard.refundAmount,
+                  expectedActorUid: guard.actorUid,
+                  expectedActorStaffId: guard.actorStaffId,
+                });
+            } else {
+              isValidGuardLinks =
+                guard.paymentId === undefined && guard.paymentHistoryId === undefined;
+            }
+          }
+
+          if (!isValidGuardBase || !isValidGuardLinks || textId(rec.refundStatus) !== 'COMPLETED_MANUAL') {
+            return {
+              status: 409,
+              code: 'COMPLETION_GUARD_CORRUPTED',
+              reviewRequired: true,
+              message: 'Bukti provenance penyelesaian refund manual pada server tidak konsisten atau rusak.',
+            };
+          }
+
+          trustedCompletion = {
+            refundAmount: guard.refundAmount,
+            paymentHistoryLinked: guard.paymentHistoryLinked,
+            reviewRequired: guard.reviewRequired,
+            ...(guard.paymentHistoryLinked
+              ? {
+                  paymentId: guard.paymentId,
+                  paymentHistoryId: guard.paymentHistoryId,
+                }
+              : {}),
+            ...(typeof guard.linkageReviewReason === 'string' && guard.linkageReviewReason
+              ? { linkageReviewReason: guard.linkageReviewReason }
+              : {}),
+          };
+        } else {
+          // Preserve legitimate prior Stage 7D completions recorded before completionGuardId existed
+          for (const d of caseReceiptsQuerySnap?.docs || []) {
+            if (!snapExists(d) || !d.id.startsWith('pgr_mref_')) continue;
+            const rData = d.data() || {};
+            if (
+              rData.action !== 'manual_refund_status' ||
+              rData.caseId !== caseId ||
+              rData.newStatus !== 'COMPLETED_MANUAL'
+            ) {
+              continue;
+            }
+            if (!validateManualRefundReceiptDoc(d.id, rData)) continue;
+            const rResp = rData.responsePayload;
+            if (
+              rResp.caseId !== caseId ||
+              rResp.caseCode !== persistedCaseCode ||
+              rResp.bookingId !== (persistedBookingId || '') ||
+              rResp.bookingCode !== (canonicalBookingCode || '')
+            ) {
+              continue;
+            }
+            if (rResp.paymentHistoryLinked) {
+              const histOk = validateTrustedRefundHistoryDoc({
+                histId: rResp.paymentHistoryId,
+                expectedPaymentId: rResp.paymentId,
+                expectedAmount: rResp.recovery.refundAmount,
+                expectedActorUid: rData.actorUid,
+                expectedActorStaffId: rData.actorStaffId,
+              });
+              if (!histOk) continue;
+            }
+            if (textId(rec.refundStatus) === 'COMPLETED_MANUAL') {
+              trustedCompletion = {
+                refundAmount: rResp.recovery.refundAmount,
+                paymentHistoryLinked: rResp.paymentHistoryLinked,
+                reviewRequired: rResp.reviewRequired,
+                ...(rResp.paymentHistoryLinked
+                  ? {
+                      paymentId: rResp.paymentId,
+                      paymentHistoryId: rResp.paymentHistoryId,
+                    }
+                  : {}),
+                ...(typeof rResp.linkageReviewReason === 'string' && rResp.linkageReviewReason
+                  ? { linkageReviewReason: rResp.linkageReviewReason }
+                  : {}),
+              };
+              break;
+            }
+          }
+        }
+
+        const isAlreadyCompletedManual =
+          trustedCompletion !== null || textId(rec.refundStatus) === 'COMPLETED_MANUAL';
+
+        if (isAlreadyCompletedManual) {
+          const persistedAmt =
+            typeof rec.refundAmount === 'number'
+              ? rec.refundAmount
+              : trustedCompletion?.refundAmount;
+          const hasConflictingRewrite =
+            newStatus !== 'COMPLETED_MANUAL' ||
+            (validatedRefundAmount !== null &&
+              persistedAmt !== undefined &&
+              validatedRefundAmount !== persistedAmt) ||
+            (Boolean(sanitizedMethod) && sanitizedMethod !== textId(rec.refundMethod)) ||
+            (Boolean(sanitizedDate) && sanitizedDate !== textId(rec.refundDate)) ||
+            (Boolean(sanitizedReference) && sanitizedReference !== textId(rec.refundReference)) ||
+            (Boolean(sanitizedProofUrl) && sanitizedProofUrl !== textId(rec.refundProofUrl));
+
+          if (hasConflictingRewrite) {
+            return {
+              status: 409,
+              code: 'MANUAL_REFUND_ALREADY_COMPLETED_CONFLICT',
+              reviewRequired: true,
+              message:
+                'Konfirmasi refund manual pada kasus ini telah tercatat dan tidak dapat ditulis ulang dengan parameter berbeda.',
+            };
+          }
+
+          if (trustedCompletion) {
+            if (trustedCompletion.paymentHistoryLinked && trustedCompletion.paymentId) {
+              const currentLinkCheck = validateCurrentLinkedPayment(trustedCompletion.paymentId);
+              if (!currentLinkCheck.ok) {
+                return {
+                  status: 409,
+                  code: currentLinkCheck.code || 'LINKED_PAYMENT_CONFLICT',
+                  reviewRequired: true,
+                  message:
+                    currentLinkCheck.message ||
+                    'Tautan pembayaran untuk konfirmasi refund manual mengalami konflik kepemilikan atau identitas.',
+                };
+              }
+              const recHistId = textId(rec.refundPaymentHistoryId);
+              if (
+                recHistId &&
+                trustedCompletion.paymentHistoryId &&
+                recHistId !== trustedCompletion.paymentHistoryId
+              ) {
+                return {
+                  status: 409,
+                  code: 'LINKED_PAYMENT_HISTORY_MISMATCH',
+                  reviewRequired: true,
+                  message: 'Referensi riwayat pembayaran pada recovery kasus mengalami konflik.',
+                };
+              }
+              if (suppliedPaymentId && suppliedPaymentId !== trustedCompletion.paymentId) {
+                return {
+                  status: 409,
+                  code: 'FOREIGN_PAYMENT_LINKAGE',
+                  reviewRequired: true,
+                  message: 'ID pembayaran pada permintaan tidak sesuai dengan pembayaran tertaut.',
+                };
+              }
+            } else if (
+              hasInvalidOrConflictingPayment ||
+              (textId(rec.refundPaymentId) &&
+                !validateCurrentLinkedPayment(textId(rec.refundPaymentId)).ok) ||
+              (suppliedPaymentId && !validateCurrentLinkedPayment(suppliedPaymentId).ok)
+            ) {
+              return {
+                status: 409,
+                code: 'LINKED_PAYMENT_CONFLICT',
+                reviewRequired: true,
+                message:
+                  'Tautan pembayaran untuk konfirmasi refund manual mengalami konflik kepemilikan atau identitas.',
+              };
+            }
+
+            return {
+              caseId,
+              caseCode: persistedCaseCode,
+              bookingId: persistedBookingId || '',
+              bookingCode: canonicalBookingCode || '',
+              oldStatus: 'COMPLETED_MANUAL',
+              newStatus: 'COMPLETED_MANUAL',
+              recovery: rec,
+              paymentHistoryLinked: trustedCompletion.paymentHistoryLinked,
+              reviewRequired: trustedCompletion.reviewRequired,
+              ...(trustedCompletion.paymentHistoryLinked &&
+              trustedCompletion.paymentId &&
+              trustedCompletion.paymentHistoryId
+                ? {
+                    paymentId: trustedCompletion.paymentId,
+                    paymentHistoryId: trustedCompletion.paymentHistoryId,
+                  }
+                : {}),
+              ...(trustedCompletion.reviewRequired && trustedCompletion.linkageReviewReason
+                ? { linkageReviewReason: trustedCompletion.linkageReviewReason }
+                : {}),
+              status: 200,
+              isIdempotent: true,
+              noOp: true,
+            };
+          }
+
+          // Legacy already-completed recovery without verifiable private completion evidence:
+          // still revalidate any linked/candidate payment for foreign or missing linkage before returning no-op.
+          const candidateLinkedPayId =
+            textId(rec.refundPaymentId) ||
+            (bookingData ? textId(bookingData.activePaymentId) : '') ||
+            suppliedPaymentId ||
+            (validPaymentCandidates.length === 1 ? validPaymentCandidates[0].id : '');
+          if (hasInvalidOrConflictingPayment) {
+            return {
+              status: 409,
+              code: 'LINKED_PAYMENT_CANDIDATE_CONFLICT',
+              reviewRequired: true,
+              message:
+                'Ditemukan kandidat pembayaran yang mengalami konflik kepemilikan atau identitas.',
+            };
+          }
+          if (candidateLinkedPayId) {
+            const legacyLinkCheck = validateCurrentLinkedPayment(candidateLinkedPayId);
+            if (!legacyLinkCheck.ok) {
+              return {
+                status: 409,
+                code: legacyLinkCheck.code || 'LINKED_PAYMENT_CONFLICT',
+                reviewRequired: true,
+                message:
+                  legacyLinkCheck.message ||
+                  'Tautan pembayaran untuk konfirmasi refund manual mengalami konflik kepemilikan atau identitas.',
+              };
+            }
+          }
+
+          return {
+            caseId,
+            caseCode: persistedCaseCode,
+            bookingId: persistedBookingId || '',
+            bookingCode: canonicalBookingCode || '',
+            oldStatus: 'COMPLETED_MANUAL',
+            newStatus: 'COMPLETED_MANUAL',
+            recovery: rec,
+            paymentHistoryLinked: false,
+            reviewRequired: true,
+            linkageReviewReason:
+              'Status COMPLETED_MANUAL telah tercatat sebelumnya tanpa bukti provenance server privat yang dapat diverifikasi.',
+            status: 200,
+            isIdempotent: true,
+            noOp: true,
+          };
+        }
+
+        // Check same-state no-op for non-completed statuses without an existing receipt
+        const currentRefundStatus = textId(rec.refundStatus);
+        if (
+          currentRefundStatus === newStatus &&
+          (validatedRefundAmount === null || validatedRefundAmount === rec.refundAmount) &&
+          (!sanitizedMethod || sanitizedMethod === textId(rec.refundMethod)) &&
+          (!sanitizedDate || sanitizedDate === textId(rec.refundDate)) &&
+          (!sanitizedReference || sanitizedReference === textId(rec.refundReference)) &&
+          (!sanitizedProofUrl || sanitizedProofUrl === textId(rec.refundProofUrl))
+        ) {
+          return {
+            caseId,
+            caseCode: persistedCaseCode,
+            bookingId: persistedBookingId || '',
+            bookingCode: canonicalBookingCode || '',
+            oldStatus: currentRefundStatus,
+            newStatus,
+            recovery: rec,
+            paymentHistoryLinked: false,
+            reviewRequired: false,
+            status: 200,
+            isIdempotent: true,
+            noOp: true,
+          };
+        }
+
+        // 5. Resolve authoritative unambiguous payment link when booking is present
+        let linkedPayment: { id: string; data: Record<string, any> } | null = null;
+        let linkageReviewReason = '';
+
+        if (!persistedBookingId || !bookingData) {
+          linkageReviewReason =
+            'Dokumen reservasi terkait tidak ditemukan untuk ditautkan secara otoritatif.';
+        } else {
+          const activePaymentId = textId(bookingData.activePaymentId);
+          if (hasInvalidOrConflictingPayment) {
+            linkageReviewReason =
+              'Ditemukan konflik kepemilikan atau identitas pada kandidat dokumen pembayaran.';
+          } else if (activePaymentId) {
+            const activeMatch = validPaymentCandidates.find((c) => c.id === activePaymentId);
+            const otherPaid = validPaymentCandidates.filter(
+              (c) =>
+                c.id !== activePaymentId && textId(c.data.status).toLowerCase() === 'paid'
+            );
+            if (activeMatch && otherPaid.length === 0) {
+              linkedPayment = activeMatch;
+            } else {
+              linkageReviewReason = activeMatch
+                ? 'Terdapat lebih dari satu pembayaran terverifikasi untuk reservasi ini.'
+                : 'activePaymentId pada reservasi tidak merujuk pada dokumen pembayaran yang valid.';
+            }
+          } else if (validPaymentCandidates.length === 1) {
+            linkedPayment = validPaymentCandidates[0];
+          } else if (validPaymentCandidates.length === 0) {
+            linkageReviewReason =
+              'Tidak ditemukan dokumen pembayaran yang tertaut pada reservasi ini.';
+          } else {
+            const paidCandidates = validPaymentCandidates.filter(
+              (c) => textId(c.data.status).toLowerCase() === 'paid'
+            );
+            if (paidCandidates.length === 1) {
+              linkedPayment = paidCandidates[0];
+            } else {
+              linkageReviewReason =
+                'Terdapat lebih dari satu dokumen pembayaran tanpa activePaymentId yang tidak ambigu.';
+            }
+          }
+        }
+
+        if (suppliedPaymentId) {
+          if (!linkedPayment || linkedPayment.id !== suppliedPaymentId) {
+            return {
+              status: 409,
+              code: 'FOREIGN_PAYMENT_LINKAGE',
+              message: 'ID pembayaran pada permintaan tidak sesuai dengan pembayaran sah reservasi ini.',
+            };
+          }
+        }
+
+        const nowDate = new Date();
+        const nowIso = nowDate.toISOString();
+        const formattedWIB = formatStage7dWIB(nowDate);
+
+        const effectiveRefundMethod = sanitizedMethod || textId(rec.refundMethod) || undefined;
+        const effectiveRefundDate =
+          sanitizedDate || textId(rec.refundDate) || nowIso.split('T')[0];
+        const effectiveRefundReference =
+          sanitizedReference || textId(rec.refundReference) || undefined;
+        const effectiveRefundProofUrl =
+          sanitizedProofUrl || textId(rec.refundProofUrl) || undefined;
+
+        const paymentHistoryLinked =
+          newStatus === 'COMPLETED_MANUAL' && Boolean(linkedPayment);
+        const reviewRequired =
+          newStatus === 'COMPLETED_MANUAL' && !linkedPayment;
+
+        // Never overwrite an existing payment_status_history document on collision
+        let actualManualRefundHistId = '';
+        let actualManualRefundHistRef: any = null;
+        if (paymentHistoryLinked && linkedPayment) {
+          if (!snapExists(manualRefundHistSnap)) {
+            actualManualRefundHistId = manualRefundHistId;
+            actualManualRefundHistRef = manualRefundHistRef;
+          } else if (!snapExists(fallbackManualRefundHistSnap)) {
+            actualManualRefundHistId = fallbackManualRefundHistId;
+            actualManualRefundHistRef = fallbackManualRefundHistRef;
+          } else {
+            return {
+              status: 409,
+              code: 'HISTORY_ID_COLLISION',
+              reviewRequired: true,
+              message: 'Konflik ID riwayat pembayaran; tidak dapat menimpa riwayat yang sudah ada.',
+            };
+          }
+        }
+
+        const updatedRec: Record<string, any> = {
+          ...rec,
+          refundStatus: newStatus,
+          ...(effectiveRefundAmount !== undefined ? { refundAmount: effectiveRefundAmount } : {}),
+          ...(effectiveRefundMethod !== undefined ? { refundMethod: effectiveRefundMethod } : {}),
+          refundDate: effectiveRefundDate,
+          ...(effectiveRefundReference !== undefined
+            ? { refundReference: effectiveRefundReference }
+            : {}),
+          ...(effectiveRefundProofUrl !== undefined
+            ? { refundProofUrl: effectiveRefundProofUrl }
+            : {}),
+          refundProcessedBy: managerCheck.actorStaffId,
+          refundProcessedByName: managerCheck.actorName,
+          refundProcessedAt: nowIso,
+        };
+
+        if (newStatus === 'COMPLETED_MANUAL') {
+          updatedRec.refundPaymentHistoryLinked = paymentHistoryLinked;
+          updatedRec.refundLinkageReviewRequired = reviewRequired;
+          if (paymentHistoryLinked && linkedPayment) {
+            updatedRec.refundPaymentId = linkedPayment.id;
+            updatedRec.refundPaymentHistoryId = actualManualRefundHistId;
+          }
+        }
+
+        const caseEventId = cleanRequestId
+          ? `cevt_mref_${createHash('sha256')
+              .update(`manual_refund_status:${verifiedUid}:${cleanRequestId}`)
+              .digest('hex')
+              .slice(0, 32)}`
+          : `cevt_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+        const baseTimelineDetails = `${effectiveRefundMethod || 'Transfer'} - Rp ${(
+          effectiveRefundAmount || 0
+        ).toLocaleString('id-ID')} | Ref: ${effectiveRefundReference || '-'} | Catatan: ${
+          sanitizedNote || '-'
+        }`;
+        const timelineDetails =
+          newStatus === 'COMPLETED_MANUAL' && reviewRequired
+            ? `${baseTimelineDetails} | [TINJAUAN LINKAGE DIPERLUKAN: ${linkageReviewReason}]`
+            : newStatus === 'COMPLETED_MANUAL' && linkedPayment
+            ? `${baseTimelineDetails} | [Konfirmasi Refund Manual Manager - Payment ID: ${linkedPayment.id}]`
+            : baseTimelineDetails;
+
+        const caseEventRecord = {
+          id: caseEventId,
+          caseId,
+          caseCode: persistedCaseCode,
+          eventType: 'refund.status_updated',
+          actorId: managerCheck.actorStaffId,
+          actorUid: managerCheck.actorUid,
+          actorName: managerCheck.actorName,
+          actorRole: managerCheck.actorRoleLabel,
+          summary: `Status Refund Manual diperbarui: ${newStatus}`,
+          details: timelineDetails,
+          ...(currentRefundStatus ? { oldValue: currentRefundStatus } : {}),
+          newValue: newStatus,
+          paymentHistoryLinked,
+          reviewRequired,
+          timestamp: nowIso,
+        };
+
+        const auditId = cleanRequestId
+          ? `audit_mref_${createHash('sha256')
+              .update(`manual_refund_status:${verifiedUid}:${cleanRequestId}`)
+              .digest('hex')
+              .slice(0, 32)}`
+          : `audit_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+        const baseAuditNote = `Refund manual kasus ${persistedCaseCode} diubah menjadi ${newStatus} (Rp ${(
+          effectiveRefundAmount || 0
+        ).toLocaleString('id-ID')})`;
+        const auditNote =
+          newStatus === 'COMPLETED_MANUAL' && reviewRequired
+            ? `${baseAuditNote} [Review diperlukan: ${linkageReviewReason}]`
+            : baseAuditNote;
+
+        const auditRecord = {
+          id: auditId,
+          bookingId: persistedBookingId || '',
+          bookingCode: canonicalBookingCode || '',
+          ...(textId(caseData.customerId) ? { customerId: textId(caseData.customerId) } : {}),
+          caseId,
+          caseCode: persistedCaseCode,
+          action: 'refund_status_updated',
+          actorId: managerCheck.actorStaffId,
+          actorUid: managerCheck.actorUid,
+          actorRole: managerCheck.actorRole,
+          actorName: managerCheck.actorName,
+          ...(currentRefundStatus ? { oldValue: currentRefundStatus } : {}),
+          newValue: newStatus,
+          note: auditNote,
+          paymentHistoryLinked,
+          reviewRequired,
+          timestamp: nowIso,
+          createdAt: nowIso,
+          formattedWIB,
+        };
+
+        // Execute atomic writes
+        transaction.update(caseRef, {
+          recovery: updatedRec,
+          updatedAt: nowIso,
+        });
+        transaction.set(adminDb.collection('case_events').doc(caseEventId), caseEventRecord);
+        transaction.set(
+          adminDb.collection('operational_audit_logs').doc(auditId),
+          auditRecord
+        );
+
+        if (paymentHistoryLinked && linkedPayment && actualManualRefundHistRef) {
+          const histAmount =
+            effectiveRefundAmount !== undefined
+              ? effectiveRefundAmount
+              : typeof linkedPayment.data.amount === 'number'
+              ? linkedPayment.data.amount
+              : 0;
+          const reasonText = `Konfirmasi Refund Manual Kasus ${persistedCaseCode} oleh ${
+            managerCheck.actorRoleLabel
+          } (${managerCheck.actorName}): ${
+            sanitizedNote || 'Pengembalian dana manual dikonfirmasi Manager'
+          }`;
+          const paymentHistoryEntry = {
+            id: actualManualRefundHistId,
+            paymentId: linkedPayment.id,
+            bookingId: persistedBookingId,
+            bookingCode:
+              canonicalBookingCode || textId(linkedPayment.data.bookingCode).toUpperCase(),
+            caseId,
+            caseCode: persistedCaseCode,
+            amount: histAmount,
+            oldStatus: textId(linkedPayment.data.status) || 'paid',
+            newStatus: 'refunded',
+            source: managerCheck.actorRole,
+            userId: managerCheck.actorStaffId,
+            actorUid: managerCheck.actorUid,
+            userName: managerCheck.actorName,
+            userRole: managerCheck.actorRole,
+            updatedBy: managerCheck.actorName,
+            updatedByRole: managerCheck.actorRoleLabel,
+            eventType: 'refund_processed',
+            confirmationType: 'MANUAL_MANAGER_CONFIRMATION',
+            evidenceBasis: `Konfirmasi refund manual oleh ${managerCheck.actorRoleLabel} terverifikasi (${managerCheck.actorName}) — bukan bukti penyelesaian payment gateway`,
+            reason: reasonText,
+            note: reasonText,
+            serverAuthoritative: true,
+            createdAt: nowIso,
+            timestamp: nowIso,
+          };
+          transaction.set(actualManualRefundHistRef, paymentHistoryEntry);
+        }
+
+        if (newStatus === 'COMPLETED_MANUAL' && effectiveRefundAmount !== undefined) {
+          transaction.set(completionGuardRef, {
+            id: completionGuardId,
+            action: 'manual_refund_completion_guard',
+            caseId,
+            caseCode: persistedCaseCode,
+            bookingId: persistedBookingId || '',
+            bookingCode: canonicalBookingCode || '',
+            newStatus: 'COMPLETED_MANUAL',
+            actorUid: verifiedUid,
+            actorStaffId: managerCheck.actorStaffId,
+            actorRole: managerCheck.actorRole,
+            actorName: managerCheck.actorName,
+            requestId: cleanRequestId || '',
+            refundAmount: effectiveRefundAmount,
+            paymentHistoryLinked,
+            reviewRequired,
+            ...(paymentHistoryLinked && linkedPayment
+              ? {
+                  paymentId: linkedPayment.id,
+                  paymentHistoryId: actualManualRefundHistId,
+                }
+              : {}),
+            ...(reviewRequired && linkageReviewReason
+              ? { linkageReviewReason }
+              : {}),
+            committedAt: nowIso,
+          });
+        }
+
+        const responsePayload = {
+          caseId,
+          caseCode: persistedCaseCode,
+          bookingId: persistedBookingId || '',
+          bookingCode: canonicalBookingCode || '',
+          oldStatus: currentRefundStatus || null,
+          newStatus,
+          recovery: updatedRec,
+          paymentHistoryLinked,
+          reviewRequired,
+          ...(paymentHistoryLinked && linkedPayment
+            ? {
+                paymentId: linkedPayment.id,
+                paymentHistoryId: actualManualRefundHistId,
+              }
+            : {}),
+          ...(reviewRequired && linkageReviewReason
+            ? { linkageReviewReason }
+            : {}),
+          caseEventId,
+          auditId,
+        };
+
+        if (receiptRef) {
+          transaction.set(receiptRef, {
+            id: receiptId,
+            action: 'manual_refund_status',
+            actorUid: verifiedUid,
+            actorStaffId: managerCheck.actorStaffId,
+            actorRole: managerCheck.actorRole,
+            actorName: managerCheck.actorName,
+            requestId: cleanRequestId,
+            caseId,
+            newStatus,
+            refundAmount: validatedRefundAmount,
+            refundMethod: sanitizedMethod,
+            refundDate: sanitizedDate,
+            refundReference: sanitizedReference,
+            refundProofUrl: sanitizedProofUrl,
+            note: sanitizedNote,
+            fingerprint: requestFingerprint,
+            committedAt: nowIso,
+            responseFingerprint: computeStage7dResponseFingerprint(responsePayload),
+            responsePayload,
+          });
+        }
+
+        return {
+          ...responsePayload,
+          status: 200,
+          isIdempotent: false,
+        };
+      });
+
+      if (txResult.status !== 200) {
+        return res.status(txResult.status).json({
+          success: false,
+          code: txResult.code || 'MANUAL_REFUND_STATUS_REJECTED',
+          error: txResult.message || 'Gagal memperbarui status refund manual.',
+          message: txResult.message || 'Gagal memperbarui status refund manual.',
+          ...(txResult.reviewRequired !== undefined
+            ? { reviewRequired: txResult.reviewRequired }
+            : txResult.status === 409
+            ? { reviewRequired: true }
+            : {}),
+        });
+      }
+
+      const { status: _st, ...payloadOut } = txResult;
+      return res.status(200).json({
+        ...payloadOut,
+        success: true,
+      });
+    } catch (err: any) {
+      const errCode = String(err?.code || '');
+      const errMsg = String(err?.message || '');
+      const isInfra =
+        errCode === 'unavailable' ||
+        errCode === 'deadline-exceeded' ||
+        err?.status === 503 ||
+        /unavailable|network|econnrefused|enotfound|etimedout|deadline/i.test(
+          `${errCode} ${errMsg}`
+        );
+      return res.status(isInfra ? 503 : 500).json({
+        success: false,
+        code: isInfra ? 'SERVICE_UNAVAILABLE' : 'INTERNAL_ERROR',
+        error: isInfra
+          ? 'Layanan database sedang tidak tersedia.'
+          : 'Terjadi kesalahan saat memperbarui status refund manual.',
+        message: isInfra
+          ? 'Layanan database sedang tidak tersedia.'
+          : 'Terjadi kesalahan saat memperbarui status refund manual.',
+      });
+    }
+  });
+
+  // =============================================================
   // AUTHORITATIVE CUSTOMER BOOKINGS & RECONCILIATION API
   // Prompt Bug Fix 01: Customer Booking History / Riwayat Pemesanan
   // =============================================================
@@ -2753,467 +6043,5657 @@ async function startServer() {
     return { normalizedPhone: '+' + digits, cleanDigits: digits };
   }
 
-  // Authoritative historical sync: ensures any booking that ever used a voucher is indexed in /voucher_redemptions
-  async function syncHistoricalVoucherRedemptions() {
-    if (!db) return;
-    try {
-      await ensureServerAuthenticated();
-      const bookingsSnap = await getDocs(collection(db, 'bookings'));
-      let synced = 0;
-      for (const bDoc of bookingsSnap.docs) {
-        const b = bDoc.data() as any;
-        const promo = (b.promoCode || b.voucherCode || '').trim().toUpperCase();
-        if (!promo) continue;
-        const status = (b.status || '').toLowerCase();
-        if (status === 'cancelled' || status === 'batal') continue;
-
-        const voucherId = b.promoId || b.voucherId || (promo === 'SENZUWELCOME' ? 'vch_senzuwelcome' : `vch_${promo.toLowerCase()}`);
-        const authUid = b.authUserId || '';
-        const phone = b.customerWhatsApp || '';
-        const { cleanDigits } = normalizeIndonesianPhoneServer(phone);
-        const custId = b.customerId || (cleanDigits ? `cust_${cleanDigits}` : '');
-
-        const redDocId = `vred_${promo}_${bDoc.id}`;
-        await setDoc(doc(db, 'voucher_redemptions', redDocId), {
-          id: redDocId,
-          voucherId,
-          voucherCode: promo,
-          customerId: custId,
-          customerAuthUid: authUid || null,
-          customerPhone: phone || null,
-          normalizedPhone: cleanDigits ? `+${cleanDigits}` : null,
-          bookingId: bDoc.id,
-          bookingCode: b.bookingCode || '',
-          discountAmount: b.discountAmount || b.voucherDiscount || 20000,
-          redeemedAt: b.createdAt || new Date().toISOString(),
-          status: 'active',
-          source: 'historical_booking',
-          updatedAt: new Date().toISOString()
-        }, { merge: true }).catch(() => {});
-
-        // Set authoritative lock documents for single-use vouchers
-        if (authUid) {
-          await setDoc(doc(db, 'voucher_redemptions', `vlock_${promo}_uid_${authUid}`), {
-            voucherCode: promo,
-            voucherId,
-            customerAuthUid: authUid,
-            bookingId: bDoc.id,
-            bookingCode: b.bookingCode || '',
-            redeemedAt: b.createdAt || new Date().toISOString(),
-            status: 'active'
-          }, { merge: true }).catch(() => {});
-        }
-        if (cleanDigits) {
-          await setDoc(doc(db, 'voucher_redemptions', `vlock_${promo}_phone_${cleanDigits}`), {
-            voucherCode: promo,
-            voucherId,
-            customerPhone: cleanDigits,
-            bookingId: bDoc.id,
-            bookingCode: b.bookingCode || '',
-            redeemedAt: b.createdAt || new Date().toISOString(),
-            status: 'active'
-          }, { merge: true }).catch(() => {});
-        }
-        if (custId) {
-          await setDoc(doc(db, 'voucher_redemptions', `vlock_${promo}_cust_${custId}`), {
-            voucherCode: promo,
-            voucherId,
-            customerId: custId,
-            bookingId: bDoc.id,
-            bookingCode: b.bookingCode || '',
-            redeemedAt: b.createdAt || new Date().toISOString(),
-            status: 'active'
-          }, { merge: true }).catch(() => {});
-        }
-        synced++;
-      }
-      if (synced > 0) {
-        console.log(`[Voucher Ledger] Backfilled ${synced} historical voucher redemptions.`);
-      }
-    } catch (err: any) {
-      console.warn('[Voucher Ledger] Historical sync notice:', err.message);
-    }
-  }
-
-  // POST /api/vouchers/validate - Authoritative Voucher Eligibility Check
+  // POST /api/vouchers/validate - Authenticated, Read-Only Server Voucher Eligibility & Discount Preview (Stage 5B)
   app.post('/api/vouchers/validate', async (req, res) => {
+    const isValidDocId = (val: unknown, maxBytes = 256): val is string => {
+      if (typeof val !== 'string') return false;
+      const trimmed = val.trim();
+      if (!trimmed || trimmed !== val) return false;
+      if (trimmed === '.' || trimmed === '..') return false;
+      if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) return false;
+      if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+      return true;
+    };
+
+    const isFiniteNonNegativeInt = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && Number.isInteger(val) && val >= 0;
+
+    const isFiniteNonNegativeNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val >= 0;
+
+    const isFinitePositiveNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val > 0;
+
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const calculateStraightDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c * 10) / 10;
+    };
+
+    const calculateBookingPrice = (input: any) => {
+      const warnings: string[] = [];
+      const servicePrice = Math.max(0, input.servicePrice || 0);
+      const homeServiceFee = Math.max(0, input.homeServiceFee || 0);
+      const grossAmount = servicePrice + homeServiceFee;
+
+      let tierDiscountAmount = 0;
+      if (input.customerTier && input.customerTier.discountPercentage > 0) {
+        tierDiscountAmount = Math.floor((servicePrice * input.customerTier.discountPercentage) / 100);
+      }
+
+      const priceAfterTier = Math.max(0, servicePrice - tierDiscountAmount);
+
+      let promoDiscountAmount = 0;
+      let voucherDiscountAmount = 0;
+
+      if (input.promoVoucher && input.promoVoucher.enabled) {
+        const promo = input.promoVoucher;
+        if (priceAfterTier >= (promo.minimumSpend || 0)) {
+          if (promo.voucherType === 'fixed_discount' || (promo.voucherType as any) === 'FIXED_AMOUNT') {
+            promoDiscountAmount = promo.value;
+          } else if (
+            promo.voucherType === 'percentage_discount' ||
+            promo.voucherType === 'percentage' ||
+            (promo.voucherType as any) === 'PERCENTAGE'
+          ) {
+            let disc = Math.floor((priceAfterTier * promo.value) / 100);
+            if (promo.maximumDiscount && promo.maximumDiscount > 0) {
+              disc = Math.min(disc, promo.maximumDiscount);
+            }
+            promoDiscountAmount = disc;
+          } else if (promo.voucherType === 'free_home_service_fee') {
+            promoDiscountAmount = homeServiceFee;
+          }
+        } else {
+          warnings.push(`Kode promo memerlukan minimal transaksi Rp ${(promo.minimumSpend || 0).toLocaleString('id-ID')}`);
+        }
+      }
+
+      if (input.customerVoucher && input.customerVoucher.status === 'available') {
+        const cv = input.customerVoucher;
+        if (priceAfterTier >= (cv.minimumSpend || 0)) {
+          if (cv.voucherType === 'fixed_discount') {
+            voucherDiscountAmount = cv.value;
+          } else if (cv.voucherType === 'percentage_discount') {
+            let disc = Math.floor((priceAfterTier * cv.value) / 100);
+            if (cv.maximumDiscount && cv.maximumDiscount > 0) {
+              disc = Math.min(disc, cv.maximumDiscount);
+            }
+            voucherDiscountAmount = disc;
+          } else if (cv.voucherType === 'free_home_service_fee') {
+            voucherDiscountAmount = homeServiceFee;
+          }
+        } else {
+          warnings.push(`Voucher memerlukan minimal transaksi Rp ${(cv.minimumSpend || 0).toLocaleString('id-ID')}`);
+        }
+      }
+
+      const allowStacking = input.settings?.allowStacking ?? false;
+      let totalPromoAndVoucherDiscount = 0;
+      if (!allowStacking && promoDiscountAmount > 0 && voucherDiscountAmount > 0) {
+        if (voucherDiscountAmount >= promoDiscountAmount) {
+          promoDiscountAmount = 0;
+          totalPromoAndVoucherDiscount = voucherDiscountAmount;
+        } else {
+          voucherDiscountAmount = 0;
+          totalPromoAndVoucherDiscount = promoDiscountAmount;
+        }
+      } else {
+        totalPromoAndVoucherDiscount = promoDiscountAmount + voucherDiscountAmount;
+      }
+
+      totalPromoAndVoucherDiscount = Math.min(totalPromoAndVoucherDiscount, priceAfterTier + homeServiceFee);
+
+      const amountAfterVouchers = Math.max(0, priceAfterTier + homeServiceFee - totalPromoAndVoucherDiscount);
+
+      const pointsPerCurrencyUnit = input.settings?.pointsPerCurrencyUnit || 10;
+      const valuePerPoint = 1000 / pointsPerCurrencyUnit;
+      const minPointsToRedeem = input.settings?.minimumPointsToRedeem || 50;
+      const maxRedemptionPercentage = input.settings?.maximumRedemptionPercentage || 30;
+
+      const requestedPoints = Math.max(0, Math.floor(input.pointsToRedeem || 0));
+      let pointsRedeemed = 0;
+      let pointsDiscountAmount = 0;
+
+      if (requestedPoints > 0) {
+        if (requestedPoints < minPointsToRedeem) {
+          warnings.push(`Minimal penukaran poin adalah ${minPointsToRedeem} Poin.`);
+        } else {
+          const maxAllowedDiscountRp = Math.floor((grossAmount * maxRedemptionPercentage) / 100);
+          const maxAllowedPoints = Math.floor(maxAllowedDiscountRp / valuePerPoint);
+
+          pointsRedeemed = Math.min(requestedPoints, maxAllowedPoints);
+          pointsDiscountAmount = pointsRedeemed * valuePerPoint;
+
+          if (pointsDiscountAmount > amountAfterVouchers) {
+            pointsDiscountAmount = amountAfterVouchers;
+            pointsRedeemed = Math.floor(pointsDiscountAmount / valuePerPoint);
+          }
+        }
+      }
+
+      const totalDiscount = tierDiscountAmount + totalPromoAndVoucherDiscount + pointsDiscountAmount;
+      const finalAmount = Math.max(0, grossAmount - totalDiscount);
+
+      const includeHomeServiceFee = input.settings?.includeHomeServiceFeeForPoints ?? false;
+      const spendPerPoint = input.settings?.spendPerPoint || 10000;
+      const multiplier = input.customerTier?.earningMultiplier || 1.0;
+
+      let qualifiedSpendForPoints = servicePrice - tierDiscountAmount - totalPromoAndVoucherDiscount - pointsDiscountAmount;
+      if (includeHomeServiceFee) {
+        qualifiedSpendForPoints += homeServiceFee;
+      }
+      qualifiedSpendForPoints = Math.max(0, qualifiedSpendForPoints);
+
+      const basePointsEarned = Math.floor(qualifiedSpendForPoints / spendPerPoint);
+      const estimatedPointsEarned = Math.floor(basePointsEarned * multiplier);
+
+      return {
+        servicePrice,
+        homeServiceFee,
+        grossAmount,
+        tierDiscountAmount,
+        promoDiscountAmount,
+        voucherDiscountAmount,
+        totalPromoAndVoucherDiscount,
+        pointsRedeemed,
+        pointsDiscountAmount,
+        totalDiscount,
+        finalAmount,
+        qualifiedSpendForPoints,
+        estimatedPointsEarned,
+        warnings,
+      };
+    };
+
     try {
-      const rawCode = (req.body.promoCode || req.body.code || '').trim().toUpperCase();
-      if (!rawCode) {
-        return res.json({ valid: false, errorMessage: 'Harap masukkan kode promo.' });
-      }
-
-      await ensureServerAuthenticated();
-
-      // 1. Fetch voucher from Master Catalog
-      let voucher: any = null;
-      try {
-        const qVoucher = query(collection(db, 'vouchers'), where('code', '==', rawCode), limit(1));
-        const snap = await getDocs(qVoucher);
-        if (!snap.empty) {
-          voucher = snap.docs[0].data();
-        } else if (rawCode === 'SENZUWELCOME') {
-          const senzuRef = doc(db, 'vouchers', 'vch_senzuwelcome');
-          const senzuSnap = await getDoc(senzuRef);
-          if (senzuSnap.exists()) {
-            voucher = senzuSnap.data();
-          } else {
-            // Default master voucher seed
-            voucher = {
-              id: 'vch_senzuwelcome',
-              code: 'SENZUWELCOME',
-              name: 'Diskon Pengguna Baru',
-              description: 'Potongan Rp 20.000 untuk treatment pertama Anda di Kota Palembang.',
-              voucherType: 'fixed_discount',
-              value: 20000,
-              minimumSpend: 0,
-              maximumDiscount: 20000,
-              firstOrderOnly: true,
-              newCustomerOnly: true,
-              usageLimitPerCustomer: 1,
-              usageLimitTotal: 1000,
-              currentUsageCount: 0,
-              validFrom: '2025-01-01T00:00:00.000Z',
-              validUntil: '2030-12-31T23:59:59.999Z',
-              enabled: true,
-              stackable: false,
-              createdAt: '2025-01-01T00:00:00.000Z',
-              updatedAt: '2025-01-01T00:00:00.000Z',
-            };
-            await setDoc(senzuRef, voucher).catch(() => {});
-          }
-        }
-      } catch (e: any) {
-        console.warn('Server error querying voucher:', e.message);
-      }
-
-      if (!voucher) {
-        return res.json({ valid: false, errorMessage: 'Kode promo tidak ditemukan.' });
-      }
-
-      // 2. Enabled check
-      if (voucher.enabled === false) {
-        return res.json({ valid: false, errorMessage: 'Voucher sedang tidak aktif.' });
-      }
-
-      // 3. Expiration / Validity period check
-      const now = new Date().toISOString();
-      if (voucher.validFrom && voucher.validFrom > now) {
-        return res.json({ valid: false, errorMessage: 'Promo ini belum dapat digunakan (periode belum dimulai).' });
-      }
-      if (voucher.validUntil && voucher.validUntil < now) {
-        return res.json({ valid: false, errorMessage: 'Voucher sudah tidak berlaku.' });
-      }
-
-      // 4. Quota check
-      if (voucher.usageLimitTotal && voucher.usageLimitTotal > 0) {
-        if ((voucher.currentUsageCount || 0) >= voucher.usageLimitTotal) {
-          return res.json({ valid: false, errorMessage: 'Kuota promo sudah habis.' });
-        }
-      }
-
-      // 5. Minimum spend check
-      const servicePrice = Number(req.body.servicePrice) || 0;
-      const minSpend = voucher.minimumSpend || voucher.minimumTreatmentPrice || 0;
-      if (servicePrice < minSpend) {
-        return res.json({
+      // 1. Strict Single Bearer Token Verification BEFORE any DB reads
+      const rawAuthHeader = req.headers?.authorization;
+      if (typeof rawAuthHeader !== 'string') {
+        return res.status(401).json({
           valid: false,
-          errorMessage: `Minimum transaksi untuk promo ini adalah Rp ${minSpend.toLocaleString('id-ID')}.`
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.',
+          errorMessage: 'Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.',
+        });
+      }
+      const tokenMatch = /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim());
+      if (!tokenMatch || !tokenMatch[1]) {
+        return res.status(401).json({
+          valid: false,
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Format token otentikasi tidak valid.',
+          errorMessage: 'Format token otentikasi tidak valid.',
         });
       }
 
-      // 6. Service / category / duration restrictions
-      if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
-        if (req.body.serviceId && !voucher.applicableServiceIds.includes(req.body.serviceId)) {
-          return res.json({ valid: false, errorMessage: 'Promo tidak berlaku untuk layanan yang dipilih.' });
-        }
-      }
-      if (voucher.applicableCategoryIds && voucher.applicableCategoryIds.length > 0) {
-        if (req.body.serviceCategory && !voucher.applicableCategoryIds.includes(req.body.serviceCategory)) {
-          return res.json({ valid: false, errorMessage: 'Promo tidak berlaku untuk kategori layanan ini.' });
-        }
-      }
-      if (voucher.minimumTreatmentDuration && req.body.serviceDuration && req.body.serviceDuration < voucher.minimumTreatmentDuration) {
-        return res.json({
+      if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+        return res.status(503).json({
           valid: false,
-          errorMessage: `Promo memerlukan durasi treatment minimal ${voucher.minimumTreatmentDuration} menit.`
+          success: false,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+          errorMessage: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
         });
       }
 
-      // Customer identity normalization
-      const authUid = (req.body.customerAuthUid || '').trim();
-      const phoneInput = (req.body.customerWhatsApp || req.body.customerPhone || '').trim();
-      const { cleanDigits } = normalizeIndonesianPhoneServer(phoneInput);
-      const custId = (req.body.customerId || '').trim();
+      const authResult = await verifyCustomerFirebaseIdToken(tokenMatch[1]);
+      if (authResult.success === false) {
+        return res.status(authResult.statusCode).json({
+          valid: false,
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          errorMessage: authResult.message,
+        });
+      }
 
-      // 7. Authoritative Usage Limit Per Customer Check
-      const usageLimitPerCustomer = voucher.usageLimitPerCustomer ?? (rawCode === 'SENZUWELCOME' ? 1 : 0);
-      if (usageLimitPerCustomer > 0) {
-        // Check fast deterministic lock documents first
-        let lockFound = false;
-        if (authUid) {
-          const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${rawCode}_uid_${authUid}`));
-          if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-            lockFound = true;
-          }
-        }
-        if (!lockFound && cleanDigits) {
-          const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${rawCode}_phone_${cleanDigits}`));
-          if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-            lockFound = true;
-          }
-        }
-        if (!lockFound && custId) {
-          const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${rawCode}_cust_${custId}`));
-          if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-            lockFound = true;
-          }
-        }
+      const verifiedUid = typeof authResult.uid === 'string' ? authResult.uid.trim() : '';
+      if (!isValidDocId(verifiedUid, 128) || verifiedUid !== authResult.uid) {
+        return res.status(401).json({
+          valid: false,
+          success: false,
+          code: 'AUTH_TOKEN_INVALID',
+          error: 'Identitas pengguna tidak valid.',
+          errorMessage: 'Identitas pengguna tidak valid.',
+        });
+      }
 
-        if (lockFound) {
-          return res.json({
+      // Reject conflicting caller-supplied UID fields in body before any DB reads
+      for (const uidField of ['customerAuthUid', 'authUserId'] as const) {
+        const val = req.body?.[uidField];
+        if (val !== undefined && val !== null && val !== '') {
+          if (typeof val !== 'string' || val.trim() !== verifiedUid) {
+            return res.status(403).json({
+              valid: false,
+              success: false,
+              code: 'FOREIGN_CUSTOMER',
+              error: 'Akses ditolak. Identitas sesi tidak sesuai dengan akun pelanggan.',
+              errorMessage: 'Akses ditolak. Identitas sesi tidak sesuai dengan akun pelanggan.',
+            });
+          }
+        }
+      }
+
+      // 2. Bounded Input Selectors Validation BEFORE any DB reads
+      const rawPromoInput = req.body?.promoCode ?? req.body?.code ?? req.body?.voucherCode;
+      const code = typeof rawPromoInput === 'string' ? rawPromoInput.trim().toUpperCase() : '';
+      if (!code) {
+        return res.status(400).json({
+          valid: false,
+          success: false,
+          code: 'INVALID_VOUCHER_CODE',
+          error: 'Harap masukkan kode promo.',
+          errorMessage: 'Harap masukkan kode promo.',
+        });
+      }
+      if (!/^[A-Z0-9_-]{1,64}$/.test(code)) {
+        return res.status(400).json({
+          valid: false,
+          success: false,
+          code: 'INVALID_VOUCHER_CODE',
+          error: 'Format kode promo tidak valid.',
+          errorMessage: 'Format kode promo tidak valid.',
+        });
+      }
+
+      const rawServiceId = req.body?.serviceId;
+      const serviceId = typeof rawServiceId === 'string' ? rawServiceId.trim() : '';
+      if (!serviceId || !isValidDocId(serviceId, 128)) {
+        return res.status(400).json({
+          valid: false,
+          success: false,
+          code: 'INVALID_SERVICE_ID',
+          error: 'ID layanan tidak valid.',
+          errorMessage: 'Pilih layanan treatment yang valid terlebih dahulu.',
+        });
+      }
+
+      const rawCustomerVoucherId = req.body?.customerVoucherId;
+      let personalCvId = '';
+      if (rawCustomerVoucherId !== undefined && rawCustomerVoucherId !== null && rawCustomerVoucherId !== '') {
+        if (
+          typeof rawCustomerVoucherId !== 'string' ||
+          !isValidDocId(rawCustomerVoucherId.trim(), 128) ||
+          !rawCustomerVoucherId.trim().startsWith('cv_')
+        ) {
+          return res.status(400).json({
             valid: false,
-            errorMessage: `Voucher ${voucher.code || rawCode} sudah pernah digunakan pada akun ini.`
+            success: false,
+            code: 'INVALID_VOUCHER_ID',
+            error: 'ID voucher pelanggan tidak valid.',
+            errorMessage: 'ID voucher pelanggan tidak valid.',
           });
         }
-
-        // Check voucher_redemptions collection
-        try {
-          const qRedemptions = query(collection(db, 'voucher_redemptions'), where('voucherCode', '==', rawCode));
-          const redSnap = await getDocs(qRedemptions);
-          let timesUsed = 0;
-          for (const docSnap of redSnap.docs) {
-            const r = docSnap.data() as any;
-            if (r.status === 'cancelled' || r.status === 'batal') continue;
-            let matches = false;
-            if (authUid && r.customerAuthUid === authUid) matches = true;
-            if (cleanDigits) {
-              const rPhoneDigits = (r.customerPhone || '').replace(/[^0-9]/g, '');
-              const rNormDigits = (r.normalizedPhone || '').replace(/[^0-9]/g, '');
-              if (rPhoneDigits && (rPhoneDigits.includes(cleanDigits) || cleanDigits.includes(rPhoneDigits))) matches = true;
-              if (rNormDigits && (rNormDigits.includes(cleanDigits) || cleanDigits.includes(rNormDigits))) matches = true;
-            }
-            if (custId && r.customerId === custId) matches = true;
-            if (matches) timesUsed++;
-          }
-          if (timesUsed >= usageLimitPerCustomer) {
-            return res.json({
-              valid: false,
-              errorMessage: `Voucher ${voucher.code || rawCode} sudah pernah digunakan pada akun ini.`
-            });
-          }
-        } catch (err: any) {
-          console.warn('Error querying redemptions:', err.message);
-        }
-
-        // Check historical bookings in bookings collection
-        try {
-          const bookingsSnap = await getDocs(collection(db, 'bookings'));
-          let bookingsUsed = 0;
-          for (const bDoc of bookingsSnap.docs) {
-            const b = bDoc.data() as any;
-            const bPromo = (b.promoCode || b.voucherCode || '').trim().toUpperCase();
-            if (bPromo !== rawCode && b.voucherId !== voucher.id && b.promoId !== voucher.id) continue;
-            const bStatus = (b.status || '').toLowerCase();
-            if (bStatus === 'cancelled' || bStatus === 'batal') continue;
-
-            let matches = false;
-            if (authUid && b.authUserId === authUid) matches = true;
-            if (cleanDigits) {
-              const bPhoneDigits = (b.customerWhatsApp || '').replace(/[^0-9]/g, '');
-              if (bPhoneDigits && (bPhoneDigits.includes(cleanDigits) || cleanDigits.includes(bPhoneDigits))) matches = true;
-            }
-            if (custId && b.customerId === custId) matches = true;
-            if (matches) bookingsUsed++;
-          }
-          if (bookingsUsed >= usageLimitPerCustomer) {
-            return res.json({
-              valid: false,
-              errorMessage: `Voucher ${voucher.code || rawCode} sudah pernah digunakan pada akun ini.`
-            });
-          }
-        } catch (err: any) {
-          console.warn('Error checking bookings collection:', err.message);
-        }
+        personalCvId = rawCustomerVoucherId.trim();
       }
 
-      // 8. First Order Only / New Customer Condition
-      if (voucher.firstOrderOnly || voucher.newCustomerOnly) {
-        let hasPreviousBookings = false;
-        try {
-          const bookingsSnap = await getDocs(collection(db, 'bookings'));
-          for (const bDoc of bookingsSnap.docs) {
-            const b = bDoc.data() as any;
-            const bStatus = (b.status || '').toLowerCase();
-            if (bStatus === 'cancelled' || bStatus === 'batal' || bStatus === 'menunggu pembayaran') continue;
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          valid: false,
+          success: false,
+          code: 'VOUCHER_VALIDATION_UNAVAILABLE',
+          error: 'Layanan validasi voucher sedang tidak tersedia.',
+          errorMessage: 'Layanan validasi voucher sedang tidak tersedia.',
+        });
+      }
 
-            let matches = false;
-            if (authUid && b.authUserId === authUid) matches = true;
-            if (cleanDigits) {
-              const bPhoneDigits = (b.customerWhatsApp || '').replace(/[^0-9]/g, '');
-              if (bPhoneDigits && (bPhoneDigits.includes(cleanDigits) || cleanDigits.includes(bPhoneDigits))) matches = true;
-            }
-            if (custId && b.customerId === custId) matches = true;
-            if (matches) {
-              hasPreviousBookings = true;
-              break;
-            }
-          }
-        } catch (err: any) {
-          console.warn('Error checking first order:', err.message);
+      // 3. Read-Only Authoritative Snapshot via adminDb.runTransaction (ZERO writes)
+      const previewOutcome = await adminDb.runTransaction(async (transaction: any) => {
+        const nowIso = new Date().toISOString();
+
+        const vouchersByCodeSnap = await transaction.get(
+          adminDb.collection('vouchers').where('code', '==', code)
+        );
+        const serviceSnap = await transaction.get(
+          adminDb.collection('services').doc(serviceId)
+        );
+        const personalCvSnap = personalCvId
+          ? await transaction.get(adminDb.collection('customer_vouchers').doc(personalCvId))
+          : null;
+        const cvDataRaw = personalCvSnap && snapExists(personalCvSnap) ? personalCvSnap.data() || {} : null;
+        const cvMasterId =
+          cvDataRaw && typeof cvDataRaw.voucherId === 'string' && isValidDocId(cvDataRaw.voucherId.trim(), 128)
+            ? cvDataRaw.voucherId.trim()
+            : '';
+        const cvMasterDocSnap = cvMasterId
+          ? await transaction.get(adminDb.collection('vouchers').doc(cvMasterId))
+          : null;
+
+        const custByAuthUserSnap = await transaction.get(
+          adminDb.collection('customers').where('authUserId', '==', verifiedUid)
+        );
+        const custByCanonicalSnap = await transaction.get(
+          adminDb.collection('customers').where('customerAuthUid', '==', verifiedUid)
+        );
+
+        const reqCustomerId =
+          typeof req.body?.customerId === 'string' && isValidDocId(req.body.customerId.trim(), 128)
+            ? req.body.customerId.trim()
+            : '';
+        const reqCustomerDocSnap = reqCustomerId
+          ? await transaction.get(adminDb.collection('customers').doc(reqCustomerId))
+          : null;
+
+        const previewPhoneRaw =
+          typeof req.body?.customerWhatsApp === 'string'
+            ? req.body.customerWhatsApp.trim()
+            : typeof req.body?.customerPhone === 'string'
+              ? req.body.customerPhone.trim()
+              : '';
+        const { cleanDigits: previewPhoneDigits } = normalizeIndonesianPhoneServer(previewPhoneRaw);
+        const phoneDerivedCustId =
+          previewPhoneDigits && isValidDocId(`cust_${previewPhoneDigits}`, 128)
+            ? `cust_${previewPhoneDigits}`
+            : '';
+
+        const ownedCustomerDocsMap = new Map<string, any>();
+        for (const d of [...(custByAuthUserSnap?.docs || []), ...(custByCanonicalSnap?.docs || [])]) {
+          if (snapExists(d)) ownedCustomerDocsMap.set(d.id, d);
         }
 
-        if (!hasPreviousBookings && custId) {
-          try {
-            const custDoc = await getDoc(doc(db, 'customers', custId));
-            if (custDoc.exists()) {
-              const cData = custDoc.data() as any;
-              if ((cData.completedBookings || 0) > 0 || (cData.totalBookings || 0) > 0) {
-                hasPreviousBookings = true;
+        const candidateLoyaltyCustomerIds = new Set<string>([verifiedUid]);
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) candidateLoyaltyCustomerIds.add(cid);
+        }
+
+        const loyaltyAccountSnaps = new Map<string, any>();
+        for (const cid of candidateLoyaltyCustomerIds) {
+          const laSnap = await transaction.get(adminDb.collection('loyalty_accounts').doc(cid));
+          if (snapExists(laSnap)) {
+            loyaltyAccountSnaps.set(cid, laSnap);
+          }
+        }
+
+        const loyaltySettingsSnap = await transaction.get(
+          adminDb.collection('loyalty_settings').doc('general')
+        );
+
+        const candidateTierIds = new Set<string>(['member']);
+        for (const laSnap of loyaltyAccountSnaps.values()) {
+          const tId = laSnap.data()?.currentTierId;
+          if (typeof tId === 'string' && isValidDocId(tId.trim().toLowerCase(), 64)) {
+            candidateTierIds.add(tId.trim().toLowerCase());
+          }
+        }
+        if (typeof req.body?.membershipTierAtBooking === 'string') {
+          const bt = req.body.membershipTierAtBooking.trim().toLowerCase();
+          if (isValidDocId(bt, 64)) candidateTierIds.add(bt);
+        }
+        const membershipTierSnaps = new Map<string, any>();
+        for (const tId of candidateTierIds) {
+          const tSnap = await transaction.get(adminDb.collection('membership_tiers').doc(tId));
+          if (snapExists(tSnap)) {
+            membershipTierSnaps.set(tId, tSnap);
+          }
+        }
+
+        const uidLockSnap = await transaction.get(
+          adminDb.collection('voucher_redemptions').doc(`vlock_${code}_uid_${verifiedUid}`)
+        );
+        const custLockSnaps = new Map<string, any>();
+        for (const cid of candidateLoyaltyCustomerIds) {
+          const ref = adminDb.collection('voucher_redemptions').doc(`vlock_${code}_cust_${cid}`);
+          custLockSnaps.set(cid, await transaction.get(ref));
+        }
+        const phoneLockSnap =
+          previewPhoneDigits && isValidDocId(previewPhoneDigits, 64)
+            ? await transaction.get(
+                adminDb.collection('voucher_redemptions').doc(`vlock_${code}_phone_${previewPhoneDigits}`)
+              )
+            : null;
+
+        const redemptionsByCodeSnap = await transaction.get(
+          adminDb.collection('voucher_redemptions').where('voucherCode', '==', code)
+        );
+        const singleCodeMasterId =
+          vouchersByCodeSnap?.docs?.length === 1 ? vouchersByCodeSnap.docs[0].id : '';
+        const redemptionsByMasterIdSnap =
+          singleCodeMasterId && isValidDocId(singleCodeMasterId, 128)
+            ? await transaction.get(
+                adminDb.collection('voucher_redemptions').where('voucherId', '==', singleCodeMasterId)
+              )
+            : null;
+
+        const bookingsByCanonicalSnap = await transaction.get(
+          adminDb.collection('bookings').where('customerAuthUid', '==', verifiedUid)
+        );
+        const bookingsByLegacySnap = await transaction.get(
+          adminDb.collection('bookings').where('authUserId', '==', verifiedUid)
+        );
+        const bookingsByCustIdSnaps = new Map<string, any>();
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) {
+            bookingsByCustIdSnaps.set(
+              cid,
+              await transaction.get(adminDb.collection('bookings').where('customerId', '==', cid))
+            );
+          }
+        }
+
+        // --- PURE VALIDATION (ZERO READS / ZERO WRITES) ---
+        if (ownedCustomerDocsMap.size > 1) {
+          return {
+            status: 409,
+            code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+            error: 'Kepemilikan profil pelanggan ambigu dan memerlukan peninjauan.',
+          };
+        }
+
+        let verifiedCustomerId = '';
+        let verifiedCustomerData: any = null;
+        if (ownedCustomerDocsMap.size === 1) {
+          const [cid, cSnap] = [...ownedCustomerDocsMap.entries()][0];
+          const cData = cSnap.data() || {};
+          if (
+            (cData.authUserId !== undefined && cData.authUserId !== null && cData.authUserId !== '' && cData.authUserId !== verifiedUid) ||
+            (cData.customerAuthUid !== undefined && cData.customerAuthUid !== null && cData.customerAuthUid !== '' && cData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              error: 'Akses ditolak. Kepemilikan akun pelanggan tidak konsisten.',
+            };
+          }
+          if (reqCustomerId && reqCustomerId !== cid && reqCustomerId !== cData.id) {
+            if (reqCustomerDocSnap && snapExists(reqCustomerDocSnap)) {
+              const rcData = reqCustomerDocSnap.data() || {};
+              if (
+                (rcData.authUserId && rcData.authUserId !== verifiedUid) ||
+                (rcData.customerAuthUid && rcData.customerAuthUid !== verifiedUid)
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_OWNERSHIP_DENIED',
+                  error: 'Akses ditolak. Profil pelanggan dimiliki oleh akun lain.',
+                };
               }
             }
-          } catch {}
+            if (reqCustomerId !== phoneDerivedCustId) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                error: 'Akses ditolak. Identitas pelanggan pesanan tidak sesuai dengan profil akun.',
+              };
+            }
+          }
+          verifiedCustomerId = cid;
+          verifiedCustomerData = cData;
+        } else if (reqCustomerDocSnap && snapExists(reqCustomerDocSnap)) {
+          const bcData = reqCustomerDocSnap.data() || {};
+          const bcAuthUid = bcData.authUserId;
+          const bcCustAuthUid = bcData.customerAuthUid;
+          if (
+            (bcAuthUid !== undefined && bcAuthUid !== null && bcAuthUid !== '' && bcAuthUid !== verifiedUid) ||
+            (bcCustAuthUid !== undefined && bcCustAuthUid !== null && bcCustAuthUid !== '' && bcCustAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_DENIED',
+              error: 'Akses ditolak. Profil pelanggan pesanan dimiliki oleh akun lain.',
+            };
+          }
+          if (bcAuthUid === verifiedUid || bcCustAuthUid === verifiedUid) {
+            verifiedCustomerId = reqCustomerDocSnap.id;
+            verifiedCustomerData = bcData;
+          }
         }
 
-        if (hasPreviousBookings) {
-          return res.json({
-            valid: false,
-            errorMessage: 'Voucher ini khusus untuk pesanan pertama.'
-          });
-        }
-      }
 
-      // 9. Calculate discount
-      let discountAmount = 0;
-      if (voucher.voucherType === 'fixed_discount' || (voucher.voucherType as any) === 'FIXED_AMOUNT') {
-        discountAmount = Math.min(voucher.value, servicePrice);
-      } else if (
-        voucher.voucherType === 'percentage_discount' ||
-        voucher.voucherType === 'percentage' ||
-        (voucher.voucherType as any) === 'PERCENTAGE'
-      ) {
-        let disc = Math.floor((servicePrice * voucher.value) / 100);
-        if (voucher.maximumDiscount && voucher.maximumDiscount > 0) {
-          disc = Math.min(disc, voucher.maximumDiscount);
+        const matchingMasterDocs = vouchersByCodeSnap?.docs || [];
+        if (matchingMasterDocs.length > 1) {
+          return {
+            status: 409,
+            code: 'AMBIGUOUS_VOUCHER_CODE',
+            error: 'Kode voucher duplikat ditemukan di katalog master.',
+          };
         }
-        discountAmount = Math.min(disc, servicePrice);
-      } else if (voucher.voucherType === 'free_home_service_fee') {
-        discountAmount = Number(req.body.homeServiceFee) || 0;
+        if (matchingMasterDocs.length === 0) {
+          return {
+            status: 404,
+            code: 'VOUCHER_NOT_FOUND',
+            error: 'Kode promo tidak ditemukan.',
+          };
+        }
+
+        const targetMasterSnap = matchingMasterDocs[0];
+        const targetMasterId = targetMasterSnap.id;
+        const targetMasterData = targetMasterSnap.data() || {};
+        if (
+          !isValidDocId(targetMasterId, 128) ||
+          (targetMasterData.id !== undefined && targetMasterData.id !== targetMasterId) ||
+          typeof targetMasterData.code !== 'string' ||
+          targetMasterData.code.trim().toUpperCase() !== code
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'Data master voucher tidak konsisten dengan kode promo.',
+          };
+        }
+
+        if (!serviceSnap || !snapExists(serviceSnap)) {
+          return {
+            status: 404,
+            code: 'SERVICE_NOT_FOUND',
+            error: 'Layanan pesanan tidak ditemukan dalam katalog resmi.',
+          };
+        }
+        const serviceData = serviceSnap.data() || {};
+        const authoritativeServicePrice = serviceData.price;
+        if (!isFinitePositiveNumber(authoritativeServicePrice)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Harga layanan resmi tidak dapat diverifikasi.',
+          };
+        }
+
+        const rawLoyaltySettings =
+          loyaltySettingsSnap && snapExists(loyaltySettingsSnap) ? loyaltySettingsSnap.data() || {} : {};
+        if (
+          rawLoyaltySettings.allowStacking !== undefined &&
+          typeof rawLoyaltySettings.allowStacking !== 'boolean'
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Konfigurasi penggabungan voucher tidak valid.',
+          };
+        }
+        const loyaltySettings = {
+          ...DEFAULT_LOYALTY_SETTINGS,
+          ...rawLoyaltySettings,
+        };
+        if (loyaltySettings.voucherEnabled === false) {
+          return {
+            status: 409,
+            code: 'VOUCHER_DISABLED',
+            error: 'Fitur penukaran voucher sedang dinonaktifkan.',
+          };
+        }
+
+        const resolvePreviewOwnedLoyaltySnap = () => {
+          const matches: any[] = [];
+          for (const cid of new Set([verifiedCustomerId, verifiedUid].filter(Boolean))) {
+            const snap = loyaltyAccountSnaps.get(cid);
+            if (!snap || !snapExists(snap)) continue;
+            const account = snap.data() || {};
+            const owners = [account.customerAuthUid, account.authUserId];
+            const consistent = owners.every(value => value === undefined || value === null || value === '' || value === verifiedUid);
+            const linkedProfile = Boolean(verifiedCustomerId && cid === verifiedCustomerId
+              && (!account.customerId || account.customerId === verifiedCustomerId));
+            const directUid = cid === verifiedUid && account.customerId === verifiedUid;
+            if (!consistent || (!linkedProfile && !directUid)) {
+              throw Object.assign(new Error('Kepemilikan akun loyalitas memerlukan peninjauan.'), { code: 'LOYALTY_OWNERSHIP_CONFLICT' });
+            }
+            matches.push(snap);
+          }
+          if (matches.length > 1) {
+            throw Object.assign(new Error('Terdapat beberapa akun loyalitas untuk identitas yang sama.'), { code: 'LOYALTY_OWNERSHIP_CONFLICT' });
+          }
+          return matches[0] || null;
+        };
+
+        const verifiedLoyaltySnap = resolvePreviewOwnedLoyaltySnap();
+        const verifiedLoyaltyData = verifiedLoyaltySnap ? verifiedLoyaltySnap.data() || {} : null;
+
+        let resolvedTierId = 'member';
+        if (verifiedLoyaltyData) {
+          if (verifiedLoyaltyData.status === 'suspended' || verifiedLoyaltyData.status === 'closed') {
+            return {
+              status: 403,
+              code: 'LOYALTY_ACCOUNT_INACTIVE',
+              error: 'Akun loyalitas pelanggan sedang tidak aktif.',
+            };
+          }
+          if (typeof verifiedLoyaltyData.currentTierId === 'string' && verifiedLoyaltyData.currentTierId.trim()) {
+            resolvedTierId = verifiedLoyaltyData.currentTierId.trim().toLowerCase();
+          }
+        }
+
+        const tierSnapFromDb = membershipTierSnaps.get(resolvedTierId);
+        const resolvedTier: any = tierSnapFromDb
+          ? tierSnapFromDb.data()
+          : DEFAULT_MEMBERSHIP_TIERS.find((t) => t.id.toLowerCase() === resolvedTierId) || null;
+
+        if (
+          !resolvedTier ||
+          !isFiniteNonNegativeNumber(resolvedTier.discountPercentage) ||
+          resolvedTier.discountPercentage > 100
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Data tier keanggotaan pelanggan tidak dapat diverifikasi.',
+          };
+        }
+
+        const previewRequestedPoints =
+          req.body?.pointsToRedeem !== undefined && req.body?.pointsToRedeem !== null && isFiniteNonNegativeNumber(req.body.pointsToRedeem)
+            ? Math.floor(req.body.pointsToRedeem)
+            : req.body?.pointsRedeemed !== undefined && req.body?.pointsRedeemed !== null && isFiniteNonNegativeNumber(req.body.pointsRedeemed)
+              ? Math.floor(req.body.pointsRedeemed)
+              : 0;
+
+        if (previewRequestedPoints > 0) {
+          if (loyaltySettings.loyaltyEnabled === false) {
+            return {
+              status: 409,
+              code: 'POINTS_REDEMPTION_DISABLED',
+              error: 'Fitur penukaran poin sedang dinonaktifkan.',
+            };
+          }
+          const minPts = loyaltySettings.minimumPointsToRedeem || 50;
+          if (previewRequestedPoints < minPts) {
+            return {
+              status: 409,
+              code: 'INSUFFICIENT_POINTS',
+              error: `Minimal penukaran poin adalah ${minPts} Poin.`,
+            };
+          }
+          const currentPtsBalance = verifiedLoyaltyData?.pointsBalance ?? verifiedLoyaltyData?.currentPointsBalance ?? 0;
+          if (!isFiniteNonNegativeInt(currentPtsBalance) || currentPtsBalance < previewRequestedPoints) {
+            return {
+              status: 409,
+              code: 'INSUFFICIENT_POINTS_BALANCE',
+              error: 'Saldo Senzu Points Anda tidak mencukupi untuk jumlah penukaran ini.',
+            };
+          }
+        }
+
+        const normalizeSupportedVoucherType = (
+          vType: unknown
+        ): 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee' | null => {
+          if (vType === 'fixed_discount' || vType === 'FIXED_AMOUNT') return 'fixed_discount';
+          if (vType === 'percentage_discount' || vType === 'percentage' || vType === 'PERCENTAGE')
+            return 'percentage_discount';
+          if (vType === 'free_home_service_fee') return 'free_home_service_fee';
+          return null;
+        };
+
+        const validateVoucherNumbers = (vObj: any): {
+          ok: boolean;
+          normalizedType?: 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee';
+          code?: string;
+          error?: string;
+        } => {
+          const normType = normalizeSupportedVoucherType(vObj?.voucherType);
+          if (!normType) {
+            return {
+              ok: false,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Tipe voucher tidak mendukung perhitungan potongan otomatis.',
+            };
+          }
+          if (normType === 'fixed_discount') {
+            if (!isFinitePositiveNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'percentage_discount') {
+            if (!isFinitePositiveNumber(vObj.value) || vObj.value > 100) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Persentase potongan voucher tidak valid.' };
+            }
+            if (vObj.maximumDiscount !== undefined && vObj.maximumDiscount !== null && !isFinitePositiveNumber(vObj.maximumDiscount)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas maksimum potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'free_home_service_fee') {
+            if (vObj.value !== undefined && vObj.value !== null && !isFiniteNonNegativeNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai voucher ongkir tidak valid.' };
+            }
+          }
+
+          if (vObj.minimumSpend !== undefined && vObj.minimumSpend !== null && !isFiniteNonNegativeNumber(vObj.minimumSpend)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas minimum transaksi voucher tidak valid.' };
+          }
+          if (vObj.minimumTreatmentPrice !== undefined && vObj.minimumTreatmentPrice !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentPrice)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas harga minimum layanan tidak valid.' };
+          }
+          if (vObj.minimumTreatmentDuration !== undefined && vObj.minimumTreatmentDuration !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentDuration)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas durasi minimum layanan tidak valid.' };
+          }
+          return { ok: true, normalizedType: normType };
+        };
+
+        const targetCheck = validateVoucherNumbers(targetMasterData);
+        if (!targetCheck.ok) {
+          return { status: 409, code: targetCheck.code, error: targetCheck.error };
+        }
+
+        let resolvedPersonalCv: any = null;
+        let resolvedPersonalCvMaster: any = null;
+        if (personalCvId) {
+          if (!personalCvSnap || !snapExists(personalCvSnap)) {
+            return {
+              status: 404,
+              code: 'CUSTOMER_VOUCHER_NOT_FOUND',
+              error: 'Voucher personal pelanggan tidak ditemukan.',
+            };
+          }
+          const cvData = personalCvSnap.data() || {};
+          if (
+            (cvData.authUserId !== undefined && cvData.authUserId !== null && cvData.authUserId !== '' && cvData.authUserId !== verifiedUid) ||
+            (cvData.customerAuthUid !== undefined && cvData.customerAuthUid !== null && cvData.customerAuthUid !== '' && cvData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Voucher personal ini bukan milik akun Anda.',
+            };
+          }
+          const cvOwnerCustomerId = typeof cvData.customerId === 'string' ? cvData.customerId.trim() : '';
+          const cvHasVerifiedUidBinding =
+            cvData.customerAuthUid === verifiedUid || cvData.authUserId === verifiedUid;
+          const cvOwnerAllowed = Boolean(cvOwnerCustomerId) && (
+            cvOwnerCustomerId === verifiedUid ||
+            (verifiedCustomerId && cvOwnerCustomerId === verifiedCustomerId) ||
+            cvHasVerifiedUidBinding
+          );
+          if (!cvOwnerAllowed) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Kepemilikan voucher personal tidak sesuai dengan akun Anda.',
+            };
+          }
+          if (!cvMasterId || !cvMasterDocSnap || !snapExists(cvMasterDocSnap)) {
+            return {
+              status: 404,
+              code: 'VOUCHER_NOT_FOUND',
+              error: 'Master voucher untuk voucher personal tidak ditemukan.',
+            };
+          }
+          resolvedPersonalCvMaster = cvMasterDocSnap.data() || {};
+          if (cvData.status !== 'available') {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_INELIGIBLE',
+              error: 'Voucher personal sudah tidak tersedia.',
+            };
+          }
+          const cvExpiryStr = cvData.expiredAt || cvData.expiresAt;
+          if (cvExpiryStr !== undefined && cvExpiryStr !== null && cvExpiryStr !== '') {
+            if (typeof cvExpiryStr !== 'string' || Number.isNaN(Date.parse(cvExpiryStr)) || cvExpiryStr < nowIso) {
+              return {
+                status: 409,
+                code: 'VOUCHER_EXPIRED',
+                error: 'Voucher personal sudah kedaluwarsa.',
+              };
+            }
+          }
+          const mergedCvData = {
+            ...resolvedPersonalCvMaster,
+            ...cvData,
+            voucherType: cvData.voucherType ?? resolvedPersonalCvMaster?.voucherType,
+            value: cvData.value ?? resolvedPersonalCvMaster?.value,
+          };
+          const cvCheck = validateVoucherNumbers(mergedCvData);
+          if (!cvCheck.ok) return { status: 409, code: cvCheck.code, error: cvCheck.error };
+          resolvedPersonalCv = {
+            ...mergedCvData,
+            id: personalCvSnap.id,
+            voucherId: cvMasterDocSnap.id,
+          };
+        }
+
+        if (targetMasterData.enabled !== true) {
+          return {
+            status: 409,
+            code: 'VOUCHER_INACTIVE',
+            error: 'Voucher sedang tidak aktif.',
+          };
+        }
+        if (targetMasterData.validFrom !== undefined && targetMasterData.validFrom !== null && targetMasterData.validFrom !== '') {
+          if (typeof targetMasterData.validFrom !== 'string' || Number.isNaN(Date.parse(targetMasterData.validFrom))) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode mulai voucher tidak valid.' };
+          }
+          if (targetMasterData.validFrom > nowIso) {
+            return { status: 409, code: 'VOUCHER_NOT_YET_VALID', error: 'Promo ini belum dapat digunakan (periode belum dimulai).' };
+          }
+        }
+        if (targetMasterData.validUntil !== undefined && targetMasterData.validUntil !== null && targetMasterData.validUntil !== '') {
+          if (typeof targetMasterData.validUntil !== 'string' || Number.isNaN(Date.parse(targetMasterData.validUntil))) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode berakhir voucher tidak valid.' };
+          }
+          if (targetMasterData.validUntil < nowIso) {
+            return { status: 409, code: 'VOUCHER_EXPIRED', error: 'Voucher sudah tidak berlaku.' };
+          }
+        }
+
+        const needsVerifiedHomeServiceFee =
+          targetCheck.normalizedType === 'free_home_service_fee' ||
+          normalizeSupportedVoucherType(resolvedPersonalCv?.voucherType) === 'free_home_service_fee';
+
+        let authoritativeHomeServiceFee = 0;
+        const lat = req.body?.latitude;
+        const lng = req.body?.longitude;
+        const distKm = req.body?.distanceKm;
+        const hasValidCoords =
+          typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+          typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
+
+        if (needsVerifiedHomeServiceFee) {
+          if (!hasValidCoords || typeof distKm !== 'number' || !Number.isFinite(distKm) || distKm < 0) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Pilih titik lokasi pengantaran yang valid untuk menghitung promo biaya home service.',
+            };
+          }
+          const minStraightKm = calculateStraightDistanceKm(
+            SENZU_BASE_LOCATION.lat,
+            SENZU_BASE_LOCATION.lng,
+            lat,
+            lng
+          );
+          if (distKm < minStraightKm * 0.95 || (minStraightKm > 0.2 && distKm === 0)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Jarak lokasi pesanan tidak dapat diverifikasi untuk potongan biaya home service.',
+            };
+          }
+          const feeFromDist = calculateHomeServiceFee(distKm).fee;
+          const feeFromStraight = calculateHomeServiceFee(minStraightKm).fee;
+          if (
+            !isFinitePositiveNumber(feeFromDist) ||
+            feeFromStraight !== feeFromDist ||
+            (req.body?.homeServiceFee !== undefined && req.body?.homeServiceFee !== null && Number(req.body.homeServiceFee) !== feeFromDist)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_INELIGIBLE',
+              error: 'Voucher gratis biaya home service tidak berlaku untuk jarak lokasi saat ini.',
+            };
+          }
+          authoritativeHomeServiceFee = feeFromDist;
+        } else if (hasValidCoords) {
+          const minStraightKm = calculateStraightDistanceKm(
+            SENZU_BASE_LOCATION.lat,
+            SENZU_BASE_LOCATION.lng,
+            lat,
+            lng
+          );
+          const effectiveDistKm =
+            typeof distKm === 'number' && Number.isFinite(distKm) && distKm >= minStraightKm * 0.95 && distKm > 0
+              ? distKm
+              : minStraightKm;
+          authoritativeHomeServiceFee = calculateHomeServiceFee(effectiveDistKm).fee;
+        } else if (req.body?.homeServiceFee !== undefined && req.body?.homeServiceFee !== null) {
+          if (!isFiniteNonNegativeNumber(req.body.homeServiceFee)) {
+            return {
+              status: 400,
+              code: 'INVALID_HOME_SERVICE_FEE',
+              error: 'Biaya home service tidak valid.',
+            };
+          }
+          authoritativeHomeServiceFee = req.body.homeServiceFee;
+        }
+
+        const promoForCalc = {
+          ...targetMasterData,
+          id: targetMasterId,
+          code,
+          minimumSpend: Math.max(
+            targetMasterData.minimumSpend || 0,
+            targetMasterData.minimumTreatmentPrice || 0
+          ),
+          enabled: true,
+        };
+
+        const cvForCalc =
+          resolvedPersonalCv && resolvedPersonalCv.voucherId !== targetMasterId
+            ? {
+                ...resolvedPersonalCv,
+                voucherType: normalizeSupportedVoucherType(resolvedPersonalCv.voucherType) || resolvedPersonalCv.voucherType,
+                minimumSpend: Math.max(
+                  resolvedPersonalCv.minimumSpend || 0,
+                  resolvedPersonalCvMaster?.minimumSpend || 0,
+                  resolvedPersonalCvMaster?.minimumTreatmentPrice || 0
+                ),
+                maximumDiscount: resolvedPersonalCv.maximumDiscount ?? resolvedPersonalCvMaster?.maximumDiscount,
+                status: 'available' as const,
+              }
+            : null;
+
+        const pricingBreakdown = calculateBookingPrice({
+          servicePrice: authoritativeServicePrice,
+          homeServiceFee: authoritativeHomeServiceFee,
+          promoVoucher: promoForCalc,
+          customerVoucher: cvForCalc,
+          pointsToRedeem: isFiniteNonNegativeNumber(req.body?.pointsToRedeem) ? req.body.pointsToRedeem : 0,
+          customerTier: resolvedTier,
+          settings: loyaltySettings,
+        });
+
+        const serverDerivedDiscountAmount = Math.min(
+          pricingBreakdown.promoDiscountAmount,
+          pricingBreakdown.totalPromoAndVoucherDiscount
+        );
+        const personalWins = !loyaltySettings.allowStacking && Boolean(cvForCalc)
+          && pricingBreakdown.promoDiscountAmount === 0 && pricingBreakdown.voucherDiscountAmount > 0;
+        // A zero-discount losing selection is not redeemed and must not consume its quota.
+        if (!personalWins) {
+        const minSpend = Math.max(
+          targetMasterData.minimumSpend || 0,
+          targetMasterData.minimumTreatmentPrice || 0
+        );
+        const priceAfterTier = Math.max(0, authoritativeServicePrice - pricingBreakdown.tierDiscountAmount);
+        if (priceAfterTier < minSpend || authoritativeServicePrice < minSpend) {
+          return {
+            status: 409,
+            code: 'VOUCHER_MINIMUM_SPEND_NOT_MET',
+            error: `Minimum transaksi untuk promo ini adalah Rp ${minSpend.toLocaleString('id-ID')}.`,
+          };
+        }
+
+        const checkServiceIds = (ids: unknown): boolean => {
+          if (ids === undefined || ids === null) return true;
+          if (!Array.isArray(ids)) return false;
+          if (ids.length === 0) return true;
+          return ids.includes(serviceId);
+        };
+        if (!checkServiceIds(targetMasterData.applicableServiceIds)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_SERVICE_INELIGIBLE',
+            error: 'Promo tidak berlaku untuk layanan yang dipilih.',
+          };
+        }
+
+        if (targetMasterData.applicableCategoryIds !== undefined && targetMasterData.applicableCategoryIds !== null) {
+          if (!Array.isArray(targetMasterData.applicableCategoryIds)) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Konfigurasi kategori voucher tidak valid.' };
+          }
+          if (targetMasterData.applicableCategoryIds.length > 0) {
+            const srvCatId = typeof serviceData.categoryId === 'string' ? serviceData.categoryId.trim() : '';
+            const srvCatName = typeof serviceData.category === 'string' ? serviceData.category.trim() : '';
+            if (
+              (!srvCatId || !targetMasterData.applicableCategoryIds.includes(srvCatId)) &&
+              (!srvCatName || !targetMasterData.applicableCategoryIds.includes(srvCatName))
+            ) {
+              return {
+                status: 409,
+                code: 'VOUCHER_CATEGORY_INELIGIBLE',
+                error: 'Promo tidak berlaku untuk kategori layanan ini.',
+              };
+            }
+          }
+        }
+
+        if (isFinitePositiveNumber(targetMasterData.minimumTreatmentDuration)) {
+          if (!isFinitePositiveNumber(serviceData.duration) || serviceData.duration < targetMasterData.minimumTreatmentDuration) {
+            return {
+              status: 409,
+              code: 'VOUCHER_DURATION_INELIGIBLE',
+              error: `Promo memerlukan durasi layanan minimal ${targetMasterData.minimumTreatmentDuration} menit.`,
+            };
+          }
+        }
+
+        const checkTierIds = (ids: unknown): boolean => {
+          if (ids === undefined || ids === null) return true;
+          if (!Array.isArray(ids)) return false;
+          if (ids.length === 0) return true;
+          const lowerIds = ids.map((x) => String(x).trim().toLowerCase());
+          return (
+            lowerIds.includes(String(resolvedTier.id || '').trim().toLowerCase()) ||
+            lowerIds.includes(String(resolvedTier.name || '').trim().toLowerCase())
+          );
+        };
+        if (!checkTierIds(targetMasterData.applicableTierIds)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_TIER_INELIGIBLE',
+            error: 'Promo tidak berlaku untuk tier keanggotaan Anda.',
+          };
+        }
+
+        if (
+          targetMasterData.customerSpecific === true ||
+          (targetMasterData.customerId !== undefined && targetMasterData.customerId !== null && targetMasterData.customerId !== '')
+        ) {
+          const targetCust = typeof targetMasterData.customerId === 'string' ? targetMasterData.customerId.trim() : '';
+          if (!targetCust || (targetCust !== verifiedUid && (!verifiedCustomerId || targetCust !== verifiedCustomerId))) {
+            return {
+              status: 403,
+              code: 'VOUCHER_CUSTOMER_INELIGIBLE',
+              error: 'Voucher khusus ini tidak ditujukan untuk akun Anda.',
+            };
+          }
+        }
+
+
+        if (!isFinitePositiveNumber(serverDerivedDiscountAmount)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_INELIGIBLE',
+            error: 'Voucher tidak menghasilkan potongan yang valid pada pesanan ini.',
+          };
+        }
+
+        const rawCurrentUsage = targetMasterData.currentUsageCount ?? 0;
+        const rawLimitTotal = targetMasterData.usageLimitTotal ?? 0;
+        const rawLimitPerCustomer =
+          targetMasterData.usageLimitPerCustomer !== undefined && targetMasterData.usageLimitPerCustomer !== null
+            ? targetMasterData.usageLimitPerCustomer
+            : code === 'SENZUWELCOME'
+              ? 1
+              : 0;
+        if (
+          !isFiniteNonNegativeInt(rawCurrentUsage) ||
+          !isFiniteNonNegativeInt(rawLimitTotal) ||
+          !isFiniteNonNegativeInt(rawLimitPerCustomer)
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CONFIG_INVALID',
+            error: 'Konfigurasi kuota voucher tidak valid.',
+          };
+        }
+
+        const checkLockActive = (lSnap: any): { ok: boolean; activeId?: string; code?: string; error?: string } => {
+          if (!lSnap || !snapExists(lSnap)) return { ok: true };
+          const lData = lSnap.data() || {};
+          const lStatus = typeof lData.status === 'string' ? lData.status.trim().toLowerCase() : 'active';
+          if (lStatus === 'cancelled' || lStatus === 'batal') return { ok: true };
+          const lCode = typeof lData.voucherCode === 'string' ? lData.voucherCode.trim().toUpperCase() : '';
+          if (lCode && lCode !== code) {
+            return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Data reservasi voucher tidak konsisten.' };
+          }
+          const lUid = typeof lData.customerAuthUid === 'string' ? lData.customerAuthUid.trim() : '';
+          if (lUid && lUid !== verifiedUid) {
+            return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Reservasi voucher bertentangan dengan pemilik akun.' };
+          }
+          return { ok: true, activeId: lData.bookingId || lSnap.id };
+        };
+
+        const uidLockCheck = checkLockActive(uidLockSnap);
+        if (!uidLockCheck.ok) {
+          return { status: 409, code: uidLockCheck.code, error: uidLockCheck.error };
+        }
+        const priorCustomerUseKeys = new Set<string>();
+        if (uidLockCheck.activeId) priorCustomerUseKeys.add(uidLockCheck.activeId);
+
+        if (verifiedCustomerId && custLockSnaps.has(verifiedCustomerId)) {
+          const custLockCheck = checkLockActive(custLockSnaps.get(verifiedCustomerId));
+          if (!custLockCheck.ok) {
+            return { status: 409, code: custLockCheck.code, error: custLockCheck.error };
+          }
+          if (custLockCheck.activeId) priorCustomerUseKeys.add(custLockCheck.activeId);
+        }
+        if (phoneLockSnap && snapExists(phoneLockSnap)) {
+          const pData = phoneLockSnap.data() || {};
+          const pStatus = typeof pData.status === 'string' ? pData.status.trim().toLowerCase() : 'active';
+          if (pStatus !== 'cancelled' && pStatus !== 'batal') {
+            const pCode = typeof pData.voucherCode === 'string' ? pData.voucherCode.trim().toUpperCase() : '';
+            if (pCode && pCode !== code) {
+              return { status: 409, code: 'VOUCHER_LOCK_CONFLICT', error: 'Data reservasi voucher tidak konsisten.' };
+            }
+            const pUid = typeof pData.customerAuthUid === 'string' ? pData.customerAuthUid.trim() : '';
+            if (pUid === verifiedUid && (pData.bookingId || phoneLockSnap.id)) {
+              priorCustomerUseKeys.add(pData.bookingId || phoneLockSnap.id);
+            }
+          }
+        }
+
+        const allRedemptionDocs = new Map<string, any>();
+        for (const d of [
+          ...(redemptionsByCodeSnap?.docs || []),
+          ...(redemptionsByMasterIdSnap?.docs || []),
+        ]) {
+          if (snapExists(d) && !d.id.startsWith('vlock_')) {
+            allRedemptionDocs.set(d.id, d.data() || {});
+          }
+        }
+
+        let activeGlobalRedemptionsCount = 0;
+        for (const [rId, rData] of allRedemptionDocs.entries()) {
+          const rStatus = typeof rData.status === 'string' ? rData.status.trim().toLowerCase() : 'active';
+          if (rStatus === 'cancelled' || rStatus === 'batal') continue;
+          const rCode = typeof rData.voucherCode === 'string' ? rData.voucherCode.trim().toUpperCase() : '';
+          const rVoucherId = typeof rData.voucherId === 'string' ? rData.voucherId.trim() : '';
+          if (rCode !== code && rVoucherId !== targetMasterId) continue;
+
+          activeGlobalRedemptionsCount++;
+          const rUid = typeof rData.customerAuthUid === 'string' ? rData.customerAuthUid.trim() : '';
+          const rCustId = typeof rData.customerId === 'string' ? rData.customerId.trim() : '';
+          if (rUid === verifiedUid || (verifiedCustomerId && rCustId === verifiedCustomerId)) {
+            priorCustomerUseKeys.add(rData.bookingId || rId);
+          }
+        }
+
+        if (rawLimitTotal > 0) {
+          const effectiveGlobalUsed = Math.max(rawCurrentUsage, activeGlobalRedemptionsCount);
+          if (effectiveGlobalUsed >= rawLimitTotal) {
+            return {
+              status: 409,
+              code: 'VOUCHER_QUOTA_EXHAUSTED',
+              error: 'Kuota promo sudah habis.',
+            };
+          }
+        }
+
+        const ownedBookingsMap = new Map<string, any>();
+        for (const d of [
+          ...(bookingsByCanonicalSnap?.docs || []),
+          ...(bookingsByLegacySnap?.docs || []),
+        ]) {
+          if (!snapExists(d)) continue;
+          const b = d.data() || {};
+          if (b.customerAuthUid && b.authUserId && b.customerAuthUid !== b.authUserId) continue;
+          if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+          if (!b.customerAuthUid && b.authUserId !== verifiedUid) continue;
+          ownedBookingsMap.set(d.id, b);
+        }
+        if (verifiedCustomerId && bookingsByCustIdSnaps.has(verifiedCustomerId)) {
+          for (const d of bookingsByCustIdSnaps.get(verifiedCustomerId)?.docs || []) {
+            if (!snapExists(d) || ownedBookingsMap.has(d.id)) continue;
+            const b = d.data() || {};
+            if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+            if (b.authUserId && b.authUserId !== verifiedUid) continue;
+            ownedBookingsMap.set(d.id, b);
+          }
+        }
+
+        let hasPreviousNonCancelledBooking = false;
+        for (const [bId, b] of ownedBookingsMap.entries()) {
+          const bStatus = typeof b.status === 'string' ? b.status.trim().toLowerCase() : '';
+          if (bStatus === 'cancelled' || bStatus === 'batal') continue;
+          hasPreviousNonCancelledBooking = true;
+
+          const bPromoCode = typeof b.promoCode === 'string' ? b.promoCode.trim().toUpperCase() : '';
+          const bVoucherCode = typeof b.voucherCode === 'string' ? b.voucherCode.trim().toUpperCase() : '';
+          const bPromoId = typeof b.promoId === 'string' ? b.promoId.trim() : '';
+          const bVoucherId = typeof b.voucherId === 'string' ? b.voucherId.trim() : '';
+          if (
+            bPromoCode === code ||
+            bVoucherCode === code ||
+            bPromoId === targetMasterId ||
+            bVoucherId === targetMasterId
+          ) {
+            priorCustomerUseKeys.add(bId);
+          }
+        }
+
+        if (rawLimitPerCustomer > 0 && priorCustomerUseKeys.size >= rawLimitPerCustomer) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CUSTOMER_QUOTA_EXHAUSTED',
+            error: `Voucher ${code} sudah pernah digunakan pada akun ini.`,
+          };
+        }
+
+        if (targetMasterData.firstOrderOnly === true || targetMasterData.newCustomerOnly === true) {
+          if (hasPreviousNonCancelledBooking) {
+            return {
+              status: 409,
+              code: 'VOUCHER_FIRST_ORDER_ONLY',
+              error: 'Voucher ini khusus untuk pesanan pertama.',
+            };
+          }
+          if (verifiedCustomerData) {
+            const comp = verifiedCustomerData.completedBookings ?? 0;
+            const tot = verifiedCustomerData.totalBookings ?? 0;
+            if (!isFiniteNonNegativeInt(comp) || !isFiniteNonNegativeInt(tot)) {
+              return {
+                status: 409,
+                code: 'VOUCHER_CONFIG_INVALID',
+                error: 'Data riwayat pesanan pelanggan tidak valid.',
+              };
+            }
+            if (comp > 0 || tot > 0) {
+              return {
+                status: 409,
+                code: 'VOUCHER_FIRST_ORDER_ONLY',
+                error: 'Voucher ini khusus untuk pesanan pertama.',
+              };
+            }
+          }
+        }
+
+        }
+
+        return {
+          status: 200,
+          voucher: {
+            id: targetMasterId,
+            code,
+            name: targetMasterData.name || code,
+            description: targetMasterData.description || '',
+            voucherType: targetMasterData.voucherType,
+            value: targetMasterData.value,
+            maximumDiscount: targetMasterData.maximumDiscount,
+            minimumSpend: targetMasterData.minimumSpend ?? 0,
+            minimumTreatmentPrice: targetMasterData.minimumTreatmentPrice,
+            minimumTreatmentDuration: targetMasterData.minimumTreatmentDuration,
+            applicableServiceIds: targetMasterData.applicableServiceIds,
+            applicableCategoryIds: targetMasterData.applicableCategoryIds,
+            applicableTierIds: targetMasterData.applicableTierIds,
+            firstOrderOnly: Boolean(targetMasterData.firstOrderOnly),
+            newCustomerOnly: Boolean(targetMasterData.newCustomerOnly),
+            stackable: Boolean(targetMasterData.stackable),
+            enabled: true,
+            validFrom: targetMasterData.validFrom,
+            validUntil: targetMasterData.validUntil,
+          },
+          discountAmount: serverDerivedDiscountAmount,
+          pricingBreakdown,
+        };
+      });
+
+      if (previewOutcome.status !== 200) {
+        return res.status(previewOutcome.status).json({
+          valid: false,
+          success: false,
+          code: previewOutcome.code,
+          error: previewOutcome.error,
+          errorMessage: previewOutcome.error,
+        });
       }
 
       return res.json({
         valid: true,
-        voucher,
-        discountAmount
+        success: true,
+        voucher: previewOutcome.voucher,
+        discountAmount: previewOutcome.discountAmount,
+        pricingBreakdown: previewOutcome.pricingBreakdown,
       });
     } catch (err: any) {
-      console.error('Voucher validation endpoint error:', err);
-      res.status(500).json({ valid: false, errorMessage: 'Gagal memvalidasi voucher. Silakan coba kembali.' });
+      if (err?.code === 'LOYALTY_OWNERSHIP_CONFLICT') return res.status(409).json({valid: false, success: false, code: err.code, error: err.message, errorMessage: err.message});
+      console.error('[VoucherValidate] Validation failure:', err?.code || err?.message || err);
+      return res.status(503).json({
+        valid: false,
+        success: false,
+        code: 'VOUCHER_VALIDATION_UNAVAILABLE',
+        error: 'Layanan validasi voucher sedang mengalami kendala. Silakan coba kembali.',
+        errorMessage: 'Layanan validasi voucher sedang mengalami kendala. Silakan coba kembali.',
+      });
     }
   });
 
-  // POST /api/vouchers/redeem - Server Authoritative Atomic Redemption Writer
-  app.post('/api/vouchers/redeem', async (req, res) => {
-    try {
-      const {
-        voucherCode,
-        voucherId,
-        bookingId,
-        bookingCode,
-        customerId,
-        customerAuthUid,
-        customerPhone,
-        discountAmount
-      } = req.body;
+  // POST /api/vouchers/checkout - Server Authoritative Atomic Voucher-Bearing Booking + Redemption Writer (Stage 5B)
+  app.post('/api/vouchers/checkout', async (req, res) => {
+    const isValidDocId = (val: unknown, maxBytes = 256): val is string => {
+      if (typeof val !== 'string') return false;
+      const trimmed = val.trim();
+      if (!trimmed || trimmed !== val) return false;
+      if (trimmed === '.' || trimmed === '..') return false;
+      if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) return false;
+      if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+      return true;
+    };
 
-      const code = (voucherCode || '').trim().toUpperCase();
-      if (!code || !bookingId) {
-        return res.status(400).json({ error: 'Data voucher atau booking tidak lengkap.' });
+    const isFiniteNonNegativeInt = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && Number.isInteger(val) && val >= 0;
+
+    const isFiniteNonNegativeNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val >= 0;
+
+    const isFinitePositiveNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val > 0;
+
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const calculateStraightDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c * 10) / 10;
+    };
+
+    const deriveDeterministicBookingCode = (uid: string, attemptId: string): string => {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta', year: '2-digit', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const date = ['year', 'month', 'day'].map(key => parts.find(part => part.type === key)?.value || '').join('');
+      const digest = createHash('sha256').update(JSON.stringify([uid, attemptId])).digest('hex');
+      const suffix = (Number.parseInt(digest.slice(0, 12), 16) % (36 ** 5)).toString(36).padStart(5, '0').toUpperCase();
+      // The transaction reads this document first and never overwrites a collision.
+      return `SH-${date}-${suffix}`;
+    };
+
+    const cleanBookingRecord = (obj: Record<string, any>): Record<string, any> => {
+      const cleaned: Record<string, any> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== undefined) {
+          cleaned[k] = v;
+        }
+      }
+      return cleaned;
+    };
+
+    const calculateBookingPrice = (input: any) => {
+      const warnings: string[] = [];
+      const servicePrice = Math.max(0, input.servicePrice || 0);
+      const homeServiceFee = Math.max(0, input.homeServiceFee || 0);
+      const grossAmount = servicePrice + homeServiceFee;
+
+      let tierDiscountAmount = 0;
+      if (input.customerTier && input.customerTier.discountPercentage > 0) {
+        tierDiscountAmount = Math.floor((servicePrice * input.customerTier.discountPercentage) / 100);
+      }
+
+      const priceAfterTier = Math.max(0, servicePrice - tierDiscountAmount);
+
+      let promoDiscountAmount = 0;
+      let voucherDiscountAmount = 0;
+
+      if (input.promoVoucher && input.promoVoucher.enabled) {
+        const promo = input.promoVoucher;
+        if (priceAfterTier >= (promo.minimumSpend || 0)) {
+          if (promo.voucherType === 'fixed_discount' || (promo.voucherType as any) === 'FIXED_AMOUNT') {
+            promoDiscountAmount = promo.value;
+          } else if (
+            promo.voucherType === 'percentage_discount' ||
+            promo.voucherType === 'percentage' ||
+            (promo.voucherType as any) === 'PERCENTAGE'
+          ) {
+            let disc = Math.floor((priceAfterTier * promo.value) / 100);
+            if (promo.maximumDiscount && promo.maximumDiscount > 0) {
+              disc = Math.min(disc, promo.maximumDiscount);
+            }
+            promoDiscountAmount = disc;
+          } else if (promo.voucherType === 'free_home_service_fee') {
+            promoDiscountAmount = homeServiceFee;
+          }
+        } else {
+          warnings.push(`Kode promo memerlukan minimal transaksi Rp ${(promo.minimumSpend || 0).toLocaleString('id-ID')}`);
+        }
+      }
+
+      if (input.customerVoucher && input.customerVoucher.status === 'available') {
+        const cv = input.customerVoucher;
+        if (priceAfterTier >= (cv.minimumSpend || 0)) {
+          if (cv.voucherType === 'fixed_discount') {
+            voucherDiscountAmount = cv.value;
+          } else if (cv.voucherType === 'percentage_discount') {
+            let disc = Math.floor((priceAfterTier * cv.value) / 100);
+            if (cv.maximumDiscount && cv.maximumDiscount > 0) {
+              disc = Math.min(disc, cv.maximumDiscount);
+            }
+            voucherDiscountAmount = disc;
+          } else if (cv.voucherType === 'free_home_service_fee') {
+            voucherDiscountAmount = homeServiceFee;
+          }
+        } else {
+          warnings.push(`Voucher memerlukan minimal transaksi Rp ${(cv.minimumSpend || 0).toLocaleString('id-ID')}`);
+        }
+      }
+
+      const allowStacking = input.settings?.allowStacking ?? false;
+      let totalPromoAndVoucherDiscount = 0;
+      if (!allowStacking && promoDiscountAmount > 0 && voucherDiscountAmount > 0) {
+        if (voucherDiscountAmount >= promoDiscountAmount) {
+          promoDiscountAmount = 0;
+          totalPromoAndVoucherDiscount = voucherDiscountAmount;
+        } else {
+          voucherDiscountAmount = 0;
+          totalPromoAndVoucherDiscount = promoDiscountAmount;
+        }
+      } else {
+        totalPromoAndVoucherDiscount = promoDiscountAmount + voucherDiscountAmount;
+      }
+
+      totalPromoAndVoucherDiscount = Math.min(totalPromoAndVoucherDiscount, priceAfterTier + homeServiceFee);
+
+      const amountAfterVouchers = Math.max(0, priceAfterTier + homeServiceFee - totalPromoAndVoucherDiscount);
+
+      const pointsPerCurrencyUnit = input.settings?.pointsPerCurrencyUnit || 10;
+      const valuePerPoint = 1000 / pointsPerCurrencyUnit;
+      const minPointsToRedeem = input.settings?.minimumPointsToRedeem || 50;
+      const maxRedemptionPercentage = input.settings?.maximumRedemptionPercentage || 30;
+
+      const requestedPoints = Math.max(0, Math.floor(input.pointsToRedeem || 0));
+      let pointsRedeemed = 0;
+      let pointsDiscountAmount = 0;
+
+      if (requestedPoints > 0) {
+        if (requestedPoints < minPointsToRedeem) {
+          warnings.push(`Minimal penukaran poin adalah ${minPointsToRedeem} Poin.`);
+        } else {
+          const maxAllowedDiscountRp = Math.floor((grossAmount * maxRedemptionPercentage) / 100);
+          const maxAllowedPoints = Math.floor(maxAllowedDiscountRp / valuePerPoint);
+
+          pointsRedeemed = Math.min(requestedPoints, maxAllowedPoints);
+          pointsDiscountAmount = pointsRedeemed * valuePerPoint;
+
+          if (pointsDiscountAmount > amountAfterVouchers) {
+            pointsDiscountAmount = amountAfterVouchers;
+            pointsRedeemed = Math.floor(pointsDiscountAmount / valuePerPoint);
+          }
+        }
+      }
+
+      const totalDiscount = tierDiscountAmount + totalPromoAndVoucherDiscount + pointsDiscountAmount;
+      const finalAmount = Math.max(0, grossAmount - totalDiscount);
+
+      const includeHomeServiceFee = input.settings?.includeHomeServiceFeeForPoints ?? false;
+      const spendPerPoint = input.settings?.spendPerPoint || 10000;
+      const multiplier = input.customerTier?.earningMultiplier || 1.0;
+
+      let qualifiedSpendForPoints = servicePrice - tierDiscountAmount - totalPromoAndVoucherDiscount - pointsDiscountAmount;
+      if (includeHomeServiceFee) {
+        qualifiedSpendForPoints += homeServiceFee;
+      }
+      qualifiedSpendForPoints = Math.max(0, qualifiedSpendForPoints);
+
+      const basePointsEarned = Math.floor(qualifiedSpendForPoints / spendPerPoint);
+      const estimatedPointsEarned = Math.floor(basePointsEarned * multiplier);
+
+      return {
+        servicePrice,
+        homeServiceFee,
+        grossAmount,
+        tierDiscountAmount,
+        promoDiscountAmount,
+        voucherDiscountAmount,
+        totalPromoAndVoucherDiscount,
+        pointsRedeemed,
+        pointsDiscountAmount,
+        totalDiscount,
+        finalAmount,
+        qualifiedSpendForPoints,
+        estimatedPointsEarned,
+        warnings,
+      };
+    };
+
+    try {
+      // 1. Strict Single Bearer Token Extraction BEFORE any DB reads/writes
+      const rawAuthHeader = req.headers?.authorization;
+      if (typeof rawAuthHeader !== 'string') {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Token otentikasi diperlukan untuk checkout voucher.',
+        });
+      }
+      const tokenMatch = /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim());
+      if (!tokenMatch || !tokenMatch[1]) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Format token otentikasi tidak valid.',
+        });
+      }
+
+      if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+        });
+      }
+
+      const authResult = await verifyCustomerFirebaseIdToken(tokenMatch[1]);
+      if (authResult.success === false) {
+        return res.status(authResult.statusCode).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+
+      const verifiedUid = typeof authResult.uid === 'string' ? authResult.uid.trim() : '';
+      if (!isValidDocId(verifiedUid, 128) || verifiedUid !== authResult.uid) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_TOKEN_INVALID',
+          error: 'Identitas pengguna tidak valid.',
+        });
+      }
+
+      // Reject conflicting caller-supplied UID fields in body
+      for (const uidField of ['customerAuthUid', 'authUserId'] as const) {
+        const val = req.body?.[uidField];
+        if (val !== undefined && val !== null && val !== '') {
+          if (typeof val !== 'string' || val.trim() !== verifiedUid) {
+            return res.status(403).json({
+              success: false,
+              code: 'BOOKING_OWNERSHIP_DENIED',
+              error: 'Akses ditolak. Identitas sesi tidak sesuai dengan akun pemesanan.',
+            });
+          }
+        }
+      }
+
+      // 2. Bounded Input & Attempt ID Validation BEFORE any DB reads/writes
+      const rawAttemptId = req.body?.checkoutAttemptId ?? req.body?.idempotencyKey ?? req.body?.attemptId;
+      const checkoutAttemptId = typeof rawAttemptId === 'string' ? rawAttemptId.trim() : '';
+      if (
+        !checkoutAttemptId ||
+        !isValidDocId(checkoutAttemptId, 128) ||
+        !/^[A-Za-z0-9_-]{8,128}$/.test(checkoutAttemptId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CHECKOUT_ATTEMPT_ID',
+          error: 'ID percobaan checkout voucher tidak valid.',
+        });
+      }
+
+      // Reject privileged status/operational overrides in request body
+      if (
+        req.body?.status !== undefined &&
+        req.body?.status !== null &&
+        req.body?.status !== 'Menunggu Pembayaran'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_STATUS',
+          error: 'Status pesanan awal tidak valid.',
+        });
+      }
+      if (
+        req.body?.paymentStatus !== undefined &&
+        req.body?.paymentStatus !== null &&
+        req.body?.paymentStatus !== 'UNPAID'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYMENT_STATUS',
+          error: 'Status pembayaran awal tidak valid.',
+        });
+      }
+      for (const forbiddenField of [
+        'therapistId',
+        'therapistName',
+        'paymentVerifiedAt',
+        'paymentVerifiedBy',
+        'paidAt',
+        'completedAt',
+        'cancelledAt',
+        'acceptedAt',
+        'onTheWayAt',
+        'arrivedAt',
+        'paymentDeadline',
+        'internalNotes',
+      ] as const) {
+        const fVal = req.body?.[forbiddenField];
+        if (fVal !== undefined && fVal !== null && fVal !== '') {
+          return res.status(400).json({
+            success: false,
+            code: 'FORBIDDEN_BOOKING_FIELD',
+            error: 'Permintaan mengandung atribut operasional yang tidak diizinkan.',
+          });
+        }
+      }
+
+      const paymentMethodTrimmed =
+        typeof req.body?.paymentMethod === 'string' ? req.body.paymentMethod.trim() : '';
+      const rawMethodLower = paymentMethodTrimmed.toLowerCase();
+      if (
+        !paymentMethodTrimmed ||
+        paymentMethodTrimmed.length > 64 ||
+        rawMethodLower.includes('cash') ||
+        rawMethodLower.includes('tunai') ||
+        rawMethodLower.includes('pay_on_service') ||
+        rawMethodLower.includes('pay on service') ||
+        rawMethodLower.includes('cod') ||
+        rawMethodLower.includes('bayar di tempat') ||
+        rawMethodLower.includes('bayar_di_tempat')
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYMENT_METHOD',
+          error: 'Metode pembayaran tersebut sudah tidak tersedia.',
+        });
+      }
+
+      const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
+      if (!serviceId || !isValidDocId(serviceId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SERVICE_ID',
+          error: 'ID layanan tidak valid.',
+        });
+      }
+
+      const customerNameTrimmed =
+        typeof req.body?.customerName === 'string' ? req.body.customerName.trim() : '';
+      if (!customerNameTrimmed || customerNameTrimmed.length > 200) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CUSTOMER_NAME',
+          error: 'Nama pelanggan tidak valid.',
+        });
+      }
+
+      const customerWhatsAppTrimmed =
+        typeof req.body?.customerWhatsApp === 'string'
+          ? req.body.customerWhatsApp.trim()
+          : typeof req.body?.customerPhone === 'string'
+            ? req.body.customerPhone.trim()
+            : '';
+      const { cleanDigits: bookingPhoneDigits } = normalizeIndonesianPhoneServer(customerWhatsAppTrimmed);
+      if (!bookingPhoneDigits || !/^[0-9]{9,20}$/.test(bookingPhoneDigits) || !isValidDocId(bookingPhoneDigits, 32)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CUSTOMER_PHONE',
+          error: 'Nomor WhatsApp pelanggan tidak valid.',
+        });
+      }
+
+      const customerEmailTrimmed =
+        typeof req.body?.customerEmail === 'string' ? req.body.customerEmail.trim() : '';
+      if (customerEmailTrimmed.length > 254) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CUSTOMER_EMAIL',
+          error: 'Alamat email pelanggan terlalu panjang.',
+        });
+      }
+
+      const addressTrimmed = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+      if (!addressTrimmed || addressTrimmed.length > 1000) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_ADDRESS',
+          error: 'Alamat kedatangan terapis tidak valid.',
+        });
+      }
+
+      const scheduleDate = typeof req.body?.scheduleDate === 'string' ? req.body.scheduleDate.trim() : '';
+      const scheduleTime = typeof req.body?.scheduleTime === 'string' ? req.body.scheduleTime.trim() : '';
+      if (!scheduleDate || scheduleDate.length > 32 || !scheduleTime || scheduleTime.length > 32) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SCHEDULE',
+          error: 'Jadwal layanan tidak valid.',
+        });
+      }
+
+      const latitude = req.body?.latitude;
+      const longitude = req.body?.longitude;
+      if (
+        typeof latitude !== 'number' ||
+        !Number.isFinite(latitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        typeof longitude !== 'number' ||
+        !Number.isFinite(longitude) ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_COORDINATES',
+          error: 'Titik koordinat lokasi tidak valid.',
+        });
+      }
+
+      // Validate voucher linkage fields structure
+      for (const fieldName of [
+        'promoId',
+        'promoCode',
+        'promoCodeSnapshot',
+        'voucherId',
+        'voucherCode',
+        'customerVoucherId',
+      ] as const) {
+        const val = req.body?.[fieldName];
+        if (val !== undefined && val !== null && val !== '') {
+          if (typeof val !== 'string' || /[\/\\\x00-\x1F\x7F\s]/.test(val.trim()) || Buffer.byteLength(val.trim(), 'utf8') > 128) {
+            return res.status(400).json({
+              success: false,
+              code: 'VOUCHER_LINKAGE_INVALID',
+              error: 'Data referensi voucher pada pesanan tidak valid.',
+            });
+          }
+        }
+      }
+
+      const rawReqVoucherId = typeof req.body?.voucherId === 'string' ? req.body.voucherId.trim() : '';
+      const rawReqPromoId = typeof req.body?.promoId === 'string' ? req.body.promoId.trim() : '';
+      const rawReqCustomerVoucherId =
+        typeof req.body?.customerVoucherId === 'string' ? req.body.customerVoucherId.trim() : '';
+      const rawReqVoucherCode =
+        typeof req.body?.voucherCode === 'string' ? req.body.voucherCode.trim().toUpperCase() : '';
+      const rawReqPromoCode =
+        typeof req.body?.promoCode === 'string' ? req.body.promoCode.trim().toUpperCase() : '';
+      const rawReqPromoSnapshot =
+        typeof req.body?.promoCodeSnapshot === 'string' ? req.body.promoCodeSnapshot.trim().toUpperCase() : '';
+
+      for (const codeVal of [rawReqVoucherCode, rawReqPromoCode, rawReqPromoSnapshot]) {
+        if (codeVal && !/^[A-Z0-9_-]{1,64}$/.test(codeVal)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_VOUCHER_CODE',
+            error: 'Kode voucher tidak valid.',
+          });
+        }
+      }
+
+      if (rawReqPromoCode && rawReqPromoSnapshot && rawReqPromoCode !== rawReqPromoSnapshot) {
+        return res.status(409).json({
+          success: false,
+          code: 'VOUCHER_LINKAGE_CONFLICT',
+          error: 'Konflik kode promo pada data pesanan.',
+        });
+      }
+
+      if (rawReqCustomerVoucherId && !rawReqCustomerVoucherId.startsWith('cv_')) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_VOUCHER_ID',
+          error: 'ID voucher personal tidak valid.',
+        });
+      }
+      if (
+        rawReqCustomerVoucherId &&
+        rawReqVoucherId.startsWith('cv_') &&
+        rawReqCustomerVoucherId !== rawReqVoucherId
+      ) {
+        return res.status(409).json({
+          success: false,
+          code: 'VOUCHER_LINKAGE_CONFLICT',
+          error: 'Konflik ID voucher personal pada data pesanan.',
+        });
+      }
+
+      const personalCvId = rawReqCustomerVoucherId
+        ? rawReqCustomerVoucherId
+        : rawReqVoucherId.startsWith('cv_')
+          ? rawReqVoucherId
+          : rawReqPromoId.startsWith('cv_')
+            ? rawReqPromoId
+            : '';
+
+      if (
+        rawReqPromoId &&
+        !rawReqPromoId.startsWith('cv_') &&
+        rawReqVoucherId &&
+        !rawReqVoucherId.startsWith('cv_') &&
+        rawReqPromoId !== rawReqVoucherId
+      ) {
+        return res.status(409).json({
+          success: false,
+          code: 'VOUCHER_LINKAGE_CONFLICT',
+          error: 'Konflik ID voucher pada data pesanan.',
+        });
+      }
+
+      const generalPromoId =
+        rawReqPromoId && !rawReqPromoId.startsWith('cv_')
+          ? rawReqPromoId
+          : !personalCvId && rawReqVoucherId && !rawReqVoucherId.startsWith('cv_')
+            ? rawReqVoucherId
+            : '';
+
+      if (!personalCvId) {
+        const nonEmptyCodes = new Set(
+          [rawReqPromoCode, rawReqPromoSnapshot, rawReqVoucherCode].filter(Boolean)
+        );
+        if (nonEmptyCodes.size > 1) {
+          return res.status(409).json({
+            success: false,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'Konflik kode voucher pada data pesanan.',
+          });
+        }
+      }
+
+      const effectivePromoCode =
+        rawReqPromoCode || rawReqPromoSnapshot || (!personalCvId ? rawReqVoucherCode : '');
+
+      const requestedPoints =
+        req.body?.pointsRedeemed !== undefined && req.body?.pointsRedeemed !== null
+          ? Math.floor(req.body.pointsRedeemed)
+          : req.body?.pointsToRedeem !== undefined && req.body?.pointsToRedeem !== null && isFiniteNonNegativeNumber(req.body.pointsToRedeem)
+            ? Math.floor(req.body.pointsToRedeem)
+            : 0;
+
+      const pointsOnlyCheckout = !personalCvId && !effectivePromoCode && !generalPromoId && requestedPoints > 0;
+      if (!personalCvId && !effectivePromoCode && !generalPromoId && !pointsOnlyCheckout) {
+        return res.status(400).json({
+          success: false,
+          code: 'VOUCHER_REQUIRED',
+          error: 'Pesanan checkout voucher harus menyertakan kode promo atau voucher pelanggan.',
+        });
+      }
+
+      // Validate optional numeric price/points fields in request
+      for (const numField of [
+        'servicePrice',
+        'homeServiceFee',
+        'discountAmount',
+        'promoDiscount',
+        'voucherDiscount',
+        'totalAmount',
+        'pointsRedeemed',
+        'pointsDiscount',
+      ] as const) {
+        const nVal = req.body?.[numField];
+        if (nVal !== undefined && nVal !== null && !isFiniteNonNegativeNumber(nVal)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PRICE_ASSERTION',
+            error: `Format nilai numerik ${numField} tidak valid.`,
+          });
+        }
+      }
+
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'VOUCHER_CHECKOUT_UNAVAILABLE',
+          error: 'Layanan checkout voucher sedang tidak tersedia.',
+        });
+      }
+
+      const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+      // Price assertions and membership snapshots are deliberately excluded from intent identity.
+      const checkoutIntent = {
+        customerId: text(req.body?.customerId), customerName: customerNameTrimmed,
+        customerPhoneDigits: bookingPhoneDigits, customerEmail: customerEmailTrimmed,
+        serviceId, scheduleDate, scheduleTime, paymentMethod: paymentMethodTrimmed,
+        genderPreference: text(req.body?.genderPreference) || 'Bebas', address: addressTrimmed,
+        latitude, longitude, placeId: text(req.body?.placeId), addressNotes: text(req.body?.addressNotes),
+        distanceKm: req.body?.distanceKm ?? 0, distanceMeters: req.body?.distanceMeters ?? null,
+        requiresAdminConfirmation: Boolean(req.body?.requiresAdminConfirmation),
+        area: text(req.body?.area), areaIdSnapshot: text(req.body?.areaIdSnapshot),
+        areaNameSnapshot: text(req.body?.areaNameSnapshot) || text(req.body?.area),
+        customerNotes: text(req.body?.customerNotes).slice(0, 1000),
+        referredByCustomerId: text(req.body?.referredByCustomerId), referralCodeUsed: text(req.body?.referralCodeUsed).toUpperCase(),
+        personalCvId, generalPromoId, effectivePromoCode, requestedPoints,
+      };
+      const checkoutReceiptId = `vchk_${createHash('sha256').update(JSON.stringify([verifiedUid, checkoutAttemptId])).digest('hex')}`;
+      const checkoutReceiptRef = adminDb.collection('voucher_checkout_receipts').doc(checkoutReceiptId);
+      const legacyCheckoutReceiptRef = adminDb.collection('voucher_checkout_receipts').doc(`vchk_${checkoutAttemptId}`);
+      const candidateBookingCode = deriveDeterministicBookingCode(verifiedUid, checkoutAttemptId);
+      const candidateBookingId = `bk_${candidateBookingCode}`;
+      const candidateBookingRef = adminDb.collection('bookings').doc(candidateBookingId);
+
+      // 3. Authoritative Native Admin Transaction (All reads precede all writes)
+      const txOutcome: any = await adminDb.runTransaction(async (transaction: any) => {
+        const nowIso = new Date().toISOString();
+
+        // --- PHASE 1: CHECK TRUSTED CHECKOUT RECEIPT FOR IDEMPOTENT REPLAY ---
+        let checkoutReceiptSnap = await transaction.get(checkoutReceiptRef);
+        if (!snapExists(checkoutReceiptSnap)) {
+          const legacySnap = await transaction.get(legacyCheckoutReceiptRef);
+          // A different UID's legacy attempt is never used as authority or reassigned.
+          if (snapExists(legacySnap) && legacySnap.data()?.customerAuthUid === verifiedUid) checkoutReceiptSnap = legacySnap;
+        }
+        if (snapExists(checkoutReceiptSnap)) {
+          const receipt = checkoutReceiptSnap.data() || {};
+          const conflict = (code = 'VOUCHER_RECEIPT_CONFLICT') => ({ status: 409, code,
+            error: 'Bukti checkout tidak lengkap atau detail pesanan berbeda. Hubungi Customer Service untuk peninjauan.' });
+          const pointsReceipt = receipt.schemaVersion === 2 && receipt.benefitType === 'points';
+          if (![1, 2].includes(receipt.schemaVersion) || receipt.checkoutAttemptId !== checkoutAttemptId
+            || receipt.customerAuthUid !== verifiedUid || !isValidDocId(receipt.bookingId, 256)
+            || !isValidDocId(receipt.redemptionId, 256)
+            || (pointsReceipt ? (receipt.voucherId !== null || receipt.voucherCode !== null
+              || receipt.discountAmount !== 0 || !isFinitePositiveNumber(receipt.pointsRedeemed)
+              || receipt.redemptionId !== receipt.loyaltyTransactionId)
+              : (!isValidDocId(receipt.voucherId, 128) || !isFinitePositiveNumber(receipt.discountAmount)))
+            || !isFiniteNonNegativeNumber(receipt.totalAmount)
+            || typeof receipt.committedAt !== 'string' || Number.isNaN(Date.parse(receipt.committedAt))) return conflict();
+          const bookingSnap = await transaction.get(adminDb.collection('bookings').doc(receipt.bookingId));
+          if (!snapExists(bookingSnap)) return conflict();
+          const booking = bookingSnap.data() || {};
+          const owners = [booking.customerAuthUid, booking.authUserId];
+          if (!owners.some(value => value === verifiedUid)
+            || !owners.every(value => value === undefined || value === null || value === '' || value === verifiedUid)
+            || booking.customerId !== receipt.customerId || booking.totalAmount !== receipt.totalAmount
+            || booking.bookingCode !== receipt.bookingCode) return conflict();
+          if (['cancelled', 'batal', 'completed', 'expired', 'rejected', 'refunded', 'rescheduled'].includes(text(booking.status).toLowerCase())
+            || text(booking.paymentStatus).toLowerCase() === 'expired') {
+            return {status: 409, code: 'CHECKOUT_BOOKING_CLOSED', error: 'Pesanan ini sudah ditutup. Silakan lihat statusnya di Pesanan Saya.'};
+          }
+          if (receipt.schemaVersion === 2 && (!receipt.pricingBreakdown
+            || booking.discountAmount !== receipt.totalDiscount
+            || booking.servicePrice !== receipt.pricingBreakdown.servicePrice
+            || booking.homeServiceFee !== receipt.pricingBreakdown.homeServiceFee
+            || booking.promoDiscount !== receipt.pricingBreakdown.promoDiscountAmount
+            || booking.totalAmount !== receipt.pricingBreakdown.finalAmount)) return conflict();
+          if (receipt.schemaVersion === 2) {
+            if (!receipt.intent || Object.keys(receipt.intent).length !== Object.keys(checkoutIntent).length
+              || Object.keys(checkoutIntent).some(key => receipt.intent[key] !== (checkoutIntent as any)[key])) return conflict('CHECKOUT_ATTEMPT_MISMATCH');
+          } else {
+            // Schema 1 had no full intent. Use its immutable committed booking, never public ledger fields.
+            const oldPhone = normalizeIndonesianPhoneServer(text(booking.customerWhatsApp)).cleanDigits;
+            const oldIntent = {
+              ...checkoutIntent, customerId: text(booking.customerId), customerName: text(booking.customerName),
+              customerPhoneDigits: oldPhone, customerEmail: text(booking.customerEmail),
+              serviceId: text(booking.serviceId), scheduleDate: text(booking.scheduleDate), scheduleTime: text(booking.scheduleTime),
+              paymentMethod: text(booking.paymentMethod), genderPreference: text(booking.genderPreference) || 'Bebas',
+              address: text(booking.address), latitude: booking.latitude, longitude: booking.longitude,
+              placeId: text(booking.placeId), addressNotes: text(booking.addressNotes),
+              distanceKm: booking.distanceKm ?? 0,
+              distanceMeters: req.body?.distanceMeters == null ? null : booking.distanceMeters,
+              requiresAdminConfirmation: Boolean(booking.requiresAdminConfirmation), area: text(booking.area),
+              areaIdSnapshot: text(booking.areaIdSnapshot), areaNameSnapshot: text(booking.areaNameSnapshot) || text(booking.area),
+              customerNotes: text(booking.customerNotes), referredByCustomerId: text(booking.referredByCustomerId),
+              referralCodeUsed: text(booking.referralCodeUsed).toUpperCase(),
+              personalCvId: receipt.personalCustomerVoucherId || '',
+              generalPromoId: receipt.generalPromoId || '', effectivePromoCode: receipt.generalPromoCode || '',
+              requestedPoints: receipt.requestedPoints ?? receipt.pointsRedeemed ?? 0,
+            };
+            if (JSON.stringify(oldIntent) !== JSON.stringify(checkoutIntent)) return conflict('CHECKOUT_ATTEMPT_MISMATCH');
+          }
+          let applied = receipt.appliedVouchers;
+          if (receipt.schemaVersion === 1) {
+            applied = [];
+            if (booking.promoDiscount > 0 && receipt.generalPromoId && receipt.generalPromoCode) applied.push({
+              kind: 'general', voucherId: receipt.generalPromoId, voucherCode: receipt.generalPromoCode,
+              redemptionId: `vred_${receipt.generalPromoCode}_${receipt.bookingId}`, discountAmount: booking.promoDiscount,
+            });
+            if (booking.voucherDiscount > 0 && receipt.personalCustomerVoucherId) applied.push({
+              kind: 'personal', voucherId: '', voucherCode: booking.voucherCode,
+              redemptionId: `vred_${booking.voucherCode}_${receipt.bookingId}`, discountAmount: booking.voucherDiscount,
+              customerVoucherId: receipt.personalCustomerVoucherId,
+            });
+            if (receipt.personalCustomerVoucherId && applied.some(item => item.kind === 'personal')) {
+              const legacyCvSnap = await transaction.get(adminDb.collection('customer_vouchers').doc(receipt.personalCustomerVoucherId));
+              if (!snapExists(legacyCvSnap)) return conflict();
+              const personalItem = applied.find(item => item.kind === 'personal');
+              personalItem.voucherId = legacyCvSnap.data()?.voucherId;
+            }
+            if (applied.length === 0 && !receipt.personalCustomerVoucherId) applied.push({kind: 'general',
+              voucherId: receipt.voucherId, voucherCode: receipt.voucherCode, redemptionId: receipt.redemptionId, discountAmount: receipt.discountAmount});
+          }
+          if (!Array.isArray(applied) || (pointsReceipt ? applied.length !== 0 : applied.length < 1) || applied.length > 2
+            || applied.some(item => !item || typeof item !== 'object')
+            || new Set(applied.map(item => item.redemptionId)).size !== applied.length
+            || (!pointsReceipt && !applied.some(item => item.redemptionId === receipt.redemptionId))
+            || applied.reduce((sum, item) => sum + item.discountAmount, 0) !== receipt.discountAmount) return conflict();
+          for (const item of applied) {
+            if (!['general', 'personal'].includes(item.kind) || !isValidDocId(item.voucherId, 128)
+              || typeof item.voucherCode !== 'string' || !/^[A-Z0-9_-]{1,64}$/.test(item.voucherCode)
+              || item.redemptionId !== `vred_${item.voucherCode}_${receipt.bookingId}`
+              || !isFinitePositiveNumber(item.discountAmount)) return conflict();
+            const proofSnap = await transaction.get(adminDb.collection('voucher_redemption_receipts').doc(item.redemptionId));
+            const proof = snapExists(proofSnap) ? proofSnap.data() || {} : {};
+            if (proof.schemaVersion !== 1 || proof.redemptionId !== item.redemptionId || proof.bookingId !== receipt.bookingId
+              || proof.voucherId !== item.voucherId || proof.voucherCode !== item.voucherCode || proof.customerAuthUid !== verifiedUid
+              || proof.discountAmount !== item.discountAmount || proof.committedAt !== receipt.committedAt) return conflict();
+            if (item.kind === 'general' && (booking.promoId || booking.voucherId) !== item.voucherId) return conflict();
+            if (item.kind === 'personal') {
+              const cvId = item.customerVoucherId || receipt.personalCustomerVoucherId;
+              if (!isValidDocId(cvId, 128) || (booking.customerVoucherId || booking.voucherId) !== cvId) return conflict();
+              const cvSnap = await transaction.get(adminDb.collection('customer_vouchers').doc(cvId));
+              const cv = snapExists(cvSnap) ? cvSnap.data() || {} : {};
+              const cvOwners = [cv.customerAuthUid, cv.authUserId];
+              if (!cvOwners.every(value => value === undefined || value === null || value === '' || value === verifiedUid)
+                || ![verifiedUid, receipt.customerId].includes(cv.customerId) || cv.voucherId !== item.voucherId
+                || text(cv.voucherCode).toUpperCase() !== item.voucherCode || cv.bookingId !== receipt.bookingId
+                || cv.status !== 'used') return conflict('VOUCHER_LINKAGE_CONFLICT');
+              if (cv.customerId !== verifiedUid) {
+                const profileSnap = await transaction.get(adminDb.collection('customers').doc(cv.customerId));
+                const profile = snapExists(profileSnap) ? profileSnap.data() || {} : {};
+                const profileOwners = [profile.customerAuthUid, profile.authUserId];
+                if (!profileOwners.some(value => value === verifiedUid)
+                  || !profileOwners.every(value => value === undefined || value === null || value === '' || value === verifiedUid)) return conflict('VOUCHER_LINKAGE_CONFLICT');
+              }
+            }
+          }
+          const points = receipt.pointsRedeemed || 0;
+          if ((booking.pointsRedeemed || 0) !== points || (booking.pointsDiscount || 0) !== (receipt.pointsDiscount || 0)) return conflict();
+          if (points > 0) {
+            if (receipt.schemaVersion !== 2 || !isValidDocId(receipt.loyaltyTransactionId, 256)
+              || !isValidDocId(receipt.loyaltyAccountId, 128)) return conflict('VOUCHER_REDEMPTION_REVIEW_REQUIRED');
+            const debitSnap = await transaction.get(adminDb.collection('loyalty_transactions').doc(receipt.loyaltyTransactionId));
+            const debit = snapExists(debitSnap) ? debitSnap.data() || {} : {};
+            if (debit.customerAuthUid !== verifiedUid || debit.bookingId !== receipt.bookingId || debit.referenceId !== receipt.bookingId
+              || debit.referenceType !== 'booking_checkout' || debit.transactionType !== 'redeem' || debit.points !== -points
+              || debit.balanceBefore - debit.balanceAfter !== points || debit.metadata?.discountRp !== receipt.pointsDiscount
+              || debit.customerId !== receipt.loyaltyAccountId) return conflict();
+          }
+          // No repricing, eligibility dates, financial writes, or status changes on replay.
+          return {status: 200, isIdempotent: true, booking, redemptionId: receipt.redemptionId,
+            voucherId: receipt.voucherId, voucherCode: receipt.voucherCode, discountAmount: receipt.discountAmount,
+            ...(receipt.pricingBreakdown ? {pricingBreakdown: receipt.pricingBreakdown} : {})};
+        }
+
+        if (req.body?.recoverOnly === true) {
+          return {status: 404, code: 'CHECKOUT_NOT_COMMITTED', error: 'Percobaan checkout belum tersimpan. Silakan kirim pesanan kembali.'};
+        }
+
+        // --- PHASE 2: COMPLETE ALL TRANSACTION READS BEFORE ANY WRITES ---
+        const candidateBookingSnap = await transaction.get(candidateBookingRef);
+        const serviceSnap = await transaction.get(adminDb.collection('services').doc(serviceId));
+
+        const vouchersByPromoCodeSnap = effectivePromoCode
+          ? await transaction.get(adminDb.collection('vouchers').where('code', '==', effectivePromoCode))
+          : null;
+        const generalPromoDocSnap =
+          generalPromoId && isValidDocId(generalPromoId, 128)
+            ? await transaction.get(adminDb.collection('vouchers').doc(generalPromoId))
+            : null;
+
+        const personalCvRef =
+          personalCvId && isValidDocId(personalCvId, 128)
+            ? adminDb.collection('customer_vouchers').doc(personalCvId)
+            : null;
+        const personalCvSnap = personalCvRef ? await transaction.get(personalCvRef) : null;
+        const cvDataRaw = personalCvSnap && snapExists(personalCvSnap) ? personalCvSnap.data() || {} : null;
+        const cvMasterId =
+          cvDataRaw && typeof cvDataRaw.voucherId === 'string' && isValidDocId(cvDataRaw.voucherId.trim(), 128)
+            ? cvDataRaw.voucherId.trim()
+            : '';
+        const cvMasterDocSnap = cvMasterId
+          ? await transaction.get(adminDb.collection('vouchers').doc(cvMasterId))
+          : null;
+
+        const custByAuthUserSnap = await transaction.get(
+          adminDb.collection('customers').where('authUserId', '==', verifiedUid)
+        );
+        const custByCanonicalSnap = await transaction.get(
+          adminDb.collection('customers').where('customerAuthUid', '==', verifiedUid)
+        );
+
+        const reqCustomerId =
+          typeof req.body?.customerId === 'string' && isValidDocId(req.body.customerId.trim(), 128)
+            ? req.body.customerId.trim()
+            : '';
+        const reqCustomerDocSnap = reqCustomerId
+          ? await transaction.get(adminDb.collection('customers').doc(reqCustomerId))
+          : null;
+
+        const phoneDerivedCustId = `cust_${bookingPhoneDigits}`;
+
+        const ownedCustomerDocsMap = new Map<string, any>();
+        for (const d of [...(custByAuthUserSnap?.docs || []), ...(custByCanonicalSnap?.docs || [])]) {
+          if (snapExists(d)) ownedCustomerDocsMap.set(d.id, d);
+        }
+
+        const candidateLoyaltyCustomerIds = new Set<string>([verifiedUid]);
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) candidateLoyaltyCustomerIds.add(cid);
+        }
+
+        const loyaltyAccountSnaps = new Map<string, any>();
+        for (const cid of candidateLoyaltyCustomerIds) {
+          const laSnap = await transaction.get(adminDb.collection('loyalty_accounts').doc(cid));
+          if (snapExists(laSnap)) {
+            loyaltyAccountSnaps.set(cid, laSnap);
+          }
+        }
+
+        const loyaltyTxId = `ltx_redeem_${candidateBookingId}`;
+        const loyaltyTxRef = adminDb.collection('loyalty_transactions').doc(loyaltyTxId);
+        const loyaltyTxSnap = requestedPoints > 0 ? await transaction.get(loyaltyTxRef) : null;
+
+        const loyaltySettingsSnap = await transaction.get(
+          adminDb.collection('loyalty_settings').doc('general')
+        );
+        const bookingNotificationSettingsSnap = await transaction.get(
+          adminDb.collection('notification_settings').doc('default')
+        );
+
+        const candidateTierIds = new Set<string>(['member']);
+        for (const laSnap of loyaltyAccountSnaps.values()) {
+          const tId = laSnap.data()?.currentTierId;
+          if (typeof tId === 'string' && isValidDocId(tId.trim().toLowerCase(), 64)) {
+            candidateTierIds.add(tId.trim().toLowerCase());
+          }
+        }
+        if (typeof req.body?.membershipTierAtBooking === 'string') {
+          const bt = req.body.membershipTierAtBooking.trim().toLowerCase();
+          if (isValidDocId(bt, 64)) candidateTierIds.add(bt);
+        }
+        const membershipTierSnaps = new Map<string, any>();
+        for (const tId of candidateTierIds) {
+          const tSnap = await transaction.get(adminDb.collection('membership_tiers').doc(tId));
+          if (snapExists(tSnap)) {
+            membershipTierSnaps.set(tId, tSnap);
+          }
+        }
+
+        // Collect all candidate voucher codes & master IDs that may be redeemed so we can read their locks & ledgers upfront
+        const candidateVoucherCodes = new Set<string>();
+        const candidateMasterIds = new Set<string>();
+        if (effectivePromoCode) candidateVoucherCodes.add(effectivePromoCode);
+        if (rawReqVoucherCode) candidateVoucherCodes.add(rawReqVoucherCode);
+        if (generalPromoId) candidateMasterIds.add(generalPromoId);
+        if (vouchersByPromoCodeSnap?.docs?.length === 1) {
+          candidateMasterIds.add(vouchersByPromoCodeSnap.docs[0].id);
+          const vCode = vouchersByPromoCodeSnap.docs[0].data()?.code;
+          if (typeof vCode === 'string' && vCode.trim()) candidateVoucherCodes.add(vCode.trim().toUpperCase());
+        }
+        if (generalPromoDocSnap && snapExists(generalPromoDocSnap)) {
+          candidateMasterIds.add(generalPromoDocSnap.id);
+          const gpCode = generalPromoDocSnap.data()?.code;
+          if (typeof gpCode === 'string' && gpCode.trim()) candidateVoucherCodes.add(gpCode.trim().toUpperCase());
+        }
+        if (cvDataRaw && typeof cvDataRaw.voucherCode === 'string' && cvDataRaw.voucherCode.trim()) {
+          candidateVoucherCodes.add(cvDataRaw.voucherCode.trim().toUpperCase());
+        }
+        if (cvMasterDocSnap && snapExists(cvMasterDocSnap)) {
+          candidateMasterIds.add(cvMasterDocSnap.id);
+          const cvMCode = cvMasterDocSnap.data()?.code;
+          if (typeof cvMCode === 'string' && cvMCode.trim()) candidateVoucherCodes.add(cvMCode.trim().toUpperCase());
+        }
+
+        const redemptionSnapsByCode = new Map<string, any>();
+        const redemptionReceiptSnapsByCode = new Map<string, any>();
+        const uidLockRefsByCode = new Map<string, any>();
+        const uidLockSnapsByCode = new Map<string, any>();
+        const custLockRefsByCode = new Map<string, Map<string, any>>();
+        const custLockSnapsByCode = new Map<string, Map<string, any>>();
+        const phoneLockRefsByCode = new Map<string, any>();
+        const phoneLockSnapsByCode = new Map<string, any>();
+        const redemptionsByCodeSnaps = new Map<string, any>();
+
+        for (const vCode of candidateVoucherCodes) {
+          if (!/^[A-Z0-9_-]{1,64}$/.test(vCode)) continue;
+          const redId = `vred_${vCode}_${candidateBookingId}`;
+          redemptionSnapsByCode.set(
+            vCode,
+            await transaction.get(adminDb.collection('voucher_redemptions').doc(redId))
+          );
+          redemptionReceiptSnapsByCode.set(
+            vCode,
+            await transaction.get(adminDb.collection('voucher_redemption_receipts').doc(redId))
+          );
+
+          const uRef = adminDb.collection('voucher_redemptions').doc(`vlock_${vCode}_uid_${verifiedUid}`);
+          uidLockRefsByCode.set(vCode, uRef);
+          uidLockSnapsByCode.set(vCode, await transaction.get(uRef));
+
+          const cRefs = new Map<string, any>();
+          const cSnaps = new Map<string, any>();
+          for (const cid of candidateLoyaltyCustomerIds) {
+            const cRef = adminDb.collection('voucher_redemptions').doc(`vlock_${vCode}_cust_${cid}`);
+            cRefs.set(cid, cRef);
+            cSnaps.set(cid, await transaction.get(cRef));
+          }
+          custLockRefsByCode.set(vCode, cRefs);
+          custLockSnapsByCode.set(vCode, cSnaps);
+
+          const pRef = adminDb.collection('voucher_redemptions').doc(`vlock_${vCode}_phone_${bookingPhoneDigits}`);
+          phoneLockRefsByCode.set(vCode, pRef);
+          phoneLockSnapsByCode.set(vCode, await transaction.get(pRef));
+
+          redemptionsByCodeSnaps.set(
+            vCode,
+            await transaction.get(adminDb.collection('voucher_redemptions').where('voucherCode', '==', vCode))
+          );
+        }
+
+        const redemptionsByMasterIdSnaps = new Map<string, any>();
+        for (const mId of candidateMasterIds) {
+          if (!isValidDocId(mId, 128)) continue;
+          redemptionsByMasterIdSnaps.set(
+            mId,
+            await transaction.get(adminDb.collection('voucher_redemptions').where('voucherId', '==', mId))
+          );
+        }
+
+        const bookingsByCanonicalSnap = await transaction.get(
+          adminDb.collection('bookings').where('customerAuthUid', '==', verifiedUid)
+        );
+        const bookingsByLegacySnap = await transaction.get(
+          adminDb.collection('bookings').where('authUserId', '==', verifiedUid)
+        );
+        const bookingsByCustIdSnaps = new Map<string, any>();
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) {
+            bookingsByCustIdSnaps.set(
+              cid,
+              await transaction.get(adminDb.collection('bookings').where('customerId', '==', cid))
+            );
+          }
+        }
+
+        // --- PHASE 3: PURE VALIDATION & DISCOUNT RECALCULATION (ZERO READS AFTER THIS POINT) ---
+        if (snapExists(candidateBookingSnap)) {
+          return {
+            status: 409,
+            code: 'BOOKING_ID_COLLISION',
+            error: 'ID pesanan untuk percobaan checkout ini sudah ada tanpa bukti checkout yang valid.',
+          };
+        }
+
+        // 3A. Customer Profile Ownership & Conflict Validation
+        if (ownedCustomerDocsMap.size > 1) {
+          return {
+            status: 409,
+            code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+            error: 'Kepemilikan profil pelanggan ambigu dan memerlukan peninjauan.',
+          };
+        }
+
+        let verifiedCustomerId = '';
+        let verifiedCustomerData: any = null;
+
+        if (ownedCustomerDocsMap.size === 1) {
+          const [cid, cSnap] = [...ownedCustomerDocsMap.entries()][0];
+          const cData = cSnap.data() || {};
+          if (
+            (cData.authUserId !== undefined && cData.authUserId !== null && cData.authUserId !== '' && cData.authUserId !== verifiedUid) ||
+            (cData.customerAuthUid !== undefined && cData.customerAuthUid !== null && cData.customerAuthUid !== '' && cData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              error: 'Akses ditolak. Kepemilikan akun pelanggan tidak konsisten.',
+            };
+          }
+          if (reqCustomerId && reqCustomerId !== cid && reqCustomerId !== cData.id) {
+            // If caller passed a customerId that belongs to a foreign account in customers, deny; if it's just phone-derived cust_*, use verifiedCustomerId
+            if (reqCustomerDocSnap && snapExists(reqCustomerDocSnap)) {
+              const rcData = reqCustomerDocSnap.data() || {};
+              if (
+                (rcData.authUserId && rcData.authUserId !== verifiedUid) ||
+                (rcData.customerAuthUid && rcData.customerAuthUid !== verifiedUid)
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_OWNERSHIP_DENIED',
+                  error: 'Akses ditolak. Profil pelanggan dimiliki oleh akun lain.',
+                };
+              }
+            }
+            if (reqCustomerId !== phoneDerivedCustId) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                error: 'Akses ditolak. Identitas pelanggan pesanan tidak sesuai dengan profil akun.',
+              };
+            }
+          }
+          verifiedCustomerId = cid;
+          verifiedCustomerData = cData;
+        } else if (reqCustomerDocSnap && snapExists(reqCustomerDocSnap)) {
+          const bcData = reqCustomerDocSnap.data() || {};
+          const bcAuthUid = bcData.authUserId;
+          const bcCustAuthUid = bcData.customerAuthUid;
+          if (
+            (bcAuthUid !== undefined && bcAuthUid !== null && bcAuthUid !== '' && bcAuthUid !== verifiedUid) ||
+            (bcCustAuthUid !== undefined && bcCustAuthUid !== null && bcCustAuthUid !== '' && bcCustAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_DENIED',
+              error: 'Akses ditolak. Profil pelanggan pesanan dimiliki oleh akun lain.',
+            };
+          }
+          if (bcAuthUid === verifiedUid || bcCustAuthUid === verifiedUid) {
+            verifiedCustomerId = reqCustomerDocSnap.id;
+            verifiedCustomerData = bcData;
+          }
+        }
+
+        const effectiveCustomerId = verifiedCustomerId || verifiedUid;
+
+        // 3B. Service Catalog & Price/Duration Authority
+        if (!serviceSnap || !snapExists(serviceSnap)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Layanan pesanan tidak ditemukan dalam katalog resmi.',
+          };
+        }
+        const serviceData = serviceSnap.data() || {};
+        const authoritativeServicePrice = serviceData.price;
+        if (!isFinitePositiveNumber(authoritativeServicePrice)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Harga layanan resmi tidak dapat diverifikasi.',
+          };
+        }
+        if (
+          req.body?.servicePrice !== undefined &&
+          req.body?.servicePrice !== null &&
+          req.body.servicePrice !== authoritativeServicePrice
+        ) {
+          return {
+            status: 409,
+            code: 'PRICE_MISMATCH',
+            error: 'Harga layanan pada pesanan berbeda dari katalog resmi. Total pembayaran telah diperbarui.',
+          };
+        }
+        if (
+          req.body?.serviceDuration !== undefined &&
+          req.body?.serviceDuration !== null &&
+          isFinitePositiveNumber(serviceData.duration) &&
+          req.body.serviceDuration !== serviceData.duration
+        ) {
+          return {
+            status: 409,
+            code: 'PRICE_MISMATCH',
+            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+          };
+        }
+
+        // 3C. Resolve Loyalty Settings & Customer Membership Tier
+        const rawLoyaltySettings =
+          loyaltySettingsSnap && snapExists(loyaltySettingsSnap) ? loyaltySettingsSnap.data() || {} : {};
+        if (
+          rawLoyaltySettings.allowStacking !== undefined &&
+          typeof rawLoyaltySettings.allowStacking !== 'boolean'
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Konfigurasi penggabungan voucher tidak valid.',
+          };
+        }
+        const loyaltySettings = {
+          ...DEFAULT_LOYALTY_SETTINGS,
+          ...rawLoyaltySettings,
+        };
+        if (!pointsOnlyCheckout && loyaltySettings.voucherEnabled === false) {
+          return {
+            status: 409,
+            code: 'VOUCHER_DISABLED',
+            error: 'Fitur penukaran voucher sedang dinonaktifkan.',
+          };
+        }
+
+        const resolveOwnedLoyaltySnap = () => {
+          const matches: any[] = [];
+          for (const cid of new Set([verifiedCustomerId, verifiedUid].filter(Boolean))) {
+            const snap = loyaltyAccountSnaps.get(cid);
+            if (!snap || !snapExists(snap)) continue;
+            const account = snap.data() || {};
+            const owners = [account.customerAuthUid, account.authUserId];
+            const consistent = owners.every(value => value === undefined || value === null || value === '' || value === verifiedUid);
+            const linkedProfile = Boolean(verifiedCustomerId && cid === verifiedCustomerId
+              && (!account.customerId || account.customerId === verifiedCustomerId));
+            const directUid = cid === verifiedUid && account.customerId === verifiedUid;
+            if (!consistent || (!linkedProfile && !directUid)) {
+              throw Object.assign(new Error('Kepemilikan akun loyalitas memerlukan peninjauan.'), { code: 'LOYALTY_OWNERSHIP_CONFLICT' });
+            }
+            matches.push(snap);
+          }
+          if (matches.length > 1) {
+            throw Object.assign(new Error('Terdapat beberapa akun loyalitas untuk identitas yang sama.'), { code: 'LOYALTY_OWNERSHIP_CONFLICT' });
+          }
+          return matches[0] || null;
+        };
+
+        const verifiedLoyaltySnap = resolveOwnedLoyaltySnap();
+        const verifiedLoyaltyData = verifiedLoyaltySnap ? verifiedLoyaltySnap.data() || {} : null;
+
+        let resolvedTierId = 'member';
+        if (verifiedLoyaltyData) {
+          if (verifiedLoyaltyData.status === 'suspended' || verifiedLoyaltyData.status === 'closed') {
+            return {
+              status: 403,
+              code: 'LOYALTY_ACCOUNT_INACTIVE',
+              error: 'Akun loyalitas pelanggan sedang tidak aktif.',
+            };
+          }
+          if (typeof verifiedLoyaltyData.currentTierId === 'string' && verifiedLoyaltyData.currentTierId.trim()) {
+            resolvedTierId = verifiedLoyaltyData.currentTierId.trim().toLowerCase();
+          }
+        }
+
+        const tierSnapFromDb = membershipTierSnaps.get(resolvedTierId);
+        const resolvedTier: any = tierSnapFromDb
+          ? tierSnapFromDb.data()
+          : DEFAULT_MEMBERSHIP_TIERS.find((t) => t.id.toLowerCase() === resolvedTierId) || null;
+
+        if (
+          !resolvedTier ||
+          !isFiniteNonNegativeNumber(resolvedTier.discountPercentage) ||
+          resolvedTier.discountPercentage > 100
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Data tier keanggotaan pelanggan tidak dapat diverifikasi.',
+          };
+        }
+
+        if (
+          req.body?.membershipTierAtBooking !== undefined &&
+          req.body?.membershipTierAtBooking !== null &&
+          String(req.body.membershipTierAtBooking).trim() !== ''
+        ) {
+          const bookingTierNorm = String(req.body.membershipTierAtBooking).trim().toLowerCase();
+          const tierIdNorm = String(resolvedTier.id || '').trim().toLowerCase();
+          const tierNameNorm = String(resolvedTier.name || '').trim().toLowerCase();
+          if (bookingTierNorm !== tierIdNorm && bookingTierNorm !== tierNameNorm) {
+            return {
+              status: 409,
+              code: 'PRICE_MISMATCH',
+              error: 'Tier keanggotaan pada saat pemesanan berbeda dari profil resmi.',
+            };
+          }
+        }
+
+        const currentPtsBalance = verifiedLoyaltyData?.pointsBalance ?? verifiedLoyaltyData?.currentPointsBalance ?? 0;
+        if (requestedPoints > 0) {
+          if (loyaltySettings.loyaltyEnabled === false) {
+            return {
+              status: 409,
+              code: 'POINTS_REDEMPTION_DISABLED',
+              error: 'Fitur penukaran poin sedang dinonaktifkan.',
+            };
+          }
+          const minPts = loyaltySettings.minimumPointsToRedeem || 50;
+          if (requestedPoints < minPts) {
+            return {
+              status: 409,
+              code: 'INSUFFICIENT_POINTS',
+              error: `Minimal penukaran poin adalah ${minPts} Poin.`,
+            };
+          }
+          if (!verifiedLoyaltySnap || !isFiniteNonNegativeInt(currentPtsBalance) || currentPtsBalance < requestedPoints) {
+            return {
+              status: 409,
+              code: 'INSUFFICIENT_POINTS_BALANCE',
+              error: 'Saldo Senzu Points Anda tidak mencukupi untuk jumlah penukaran ini.',
+            };
+          }
+          const lifetimeRedeemedCheck = verifiedLoyaltyData?.lifetimePointsRedeemed ?? 0;
+          if (!isFiniteNonNegativeInt(lifetimeRedeemedCheck)) {
+            return {
+              status: 409,
+              code: 'LOYALTY_ACCOUNT_INVALID',
+              error: 'Data riwayat penukaran poin pelanggan tidak valid.',
+            };
+          }
+          if (loyaltyTxSnap && snapExists(loyaltyTxSnap)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Catatan transaksi poin untuk pesanan ini sudah ada dan memerlukan peninjauan.',
+            };
+          }
+        }
+
+        // 3D. Resolve Personal CustomerVoucher (cv_) and General Promo Master Voucher
+        const normalizeSupportedVoucherType = (
+          vType: unknown
+        ): 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee' | null => {
+          if (vType === 'fixed_discount' || vType === 'FIXED_AMOUNT') return 'fixed_discount';
+          if (vType === 'percentage_discount' || vType === 'percentage' || vType === 'PERCENTAGE')
+            return 'percentage_discount';
+          if (vType === 'free_home_service_fee') return 'free_home_service_fee';
+          return null;
+        };
+
+        const validateVoucherNumbers = (vObj: any): {
+          ok: boolean;
+          normalizedType?: 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee';
+          code?: string;
+          error?: string;
+        } => {
+          const normType = normalizeSupportedVoucherType(vObj?.voucherType);
+          if (!normType) {
+            return {
+              ok: false,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Tipe voucher tidak mendukung perhitungan potongan otomatis.',
+            };
+          }
+          if (normType === 'fixed_discount') {
+            if (!isFinitePositiveNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'percentage_discount') {
+            if (!isFinitePositiveNumber(vObj.value) || vObj.value > 100) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Persentase potongan voucher tidak valid.' };
+            }
+            if (vObj.maximumDiscount !== undefined && vObj.maximumDiscount !== null && !isFinitePositiveNumber(vObj.maximumDiscount)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas maksimum potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'free_home_service_fee') {
+            if (vObj.value !== undefined && vObj.value !== null && !isFiniteNonNegativeNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai voucher ongkir tidak valid.' };
+            }
+          }
+
+          if (vObj.minimumSpend !== undefined && vObj.minimumSpend !== null && !isFiniteNonNegativeNumber(vObj.minimumSpend)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas minimum transaksi voucher tidak valid.' };
+          }
+          if (vObj.minimumTreatmentPrice !== undefined && vObj.minimumTreatmentPrice !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentPrice)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas harga minimum layanan tidak valid.' };
+          }
+          if (vObj.minimumTreatmentDuration !== undefined && vObj.minimumTreatmentDuration !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentDuration)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas durasi minimum layanan tidak valid.' };
+          }
+          return { ok: true, normalizedType: normType };
+        };
+
+        let resolvedPersonalCv: any = null;
+        let resolvedPersonalCvMaster: any = null;
+        let resolvedPersonalCvMasterRef: any = null;
+        let resolvedPersonalCvCode = '';
+
+        if (personalCvId) {
+          if (!personalCvSnap || !snapExists(personalCvSnap)) {
+            return {
+              status: 404,
+              code: 'CUSTOMER_VOUCHER_NOT_FOUND',
+              error: 'Voucher personal pelanggan tidak ditemukan.',
+            };
+          }
+          const cvData = personalCvSnap.data() || {};
+          if (
+            (cvData.authUserId !== undefined && cvData.authUserId !== null && cvData.authUserId !== '' && cvData.authUserId !== verifiedUid) ||
+            (cvData.customerAuthUid !== undefined && cvData.customerAuthUid !== null && cvData.customerAuthUid !== '' && cvData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Voucher personal ini bukan milik akun Anda.',
+            };
+          }
+
+          const cvOwnerCustomerId = typeof cvData.customerId === 'string' ? cvData.customerId.trim() : '';
+          if (
+            !cvOwnerCustomerId ||
+            (cvOwnerCustomerId !== verifiedUid && (!verifiedCustomerId || cvOwnerCustomerId !== verifiedCustomerId))
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Kepemilikan voucher personal tidak sesuai dengan akun Anda.',
+            };
+          }
+
+          if (!cvMasterId || !cvMasterDocSnap || !snapExists(cvMasterDocSnap)) {
+            return {
+              status: 404,
+              code: 'VOUCHER_NOT_FOUND',
+              error: 'Master voucher untuk voucher personal tidak ditemukan.',
+            };
+          }
+
+          resolvedPersonalCvMaster = cvMasterDocSnap.data() || {};
+          resolvedPersonalCvMasterRef = cvMasterDocSnap.ref;
+          const cvMasterCode =
+            typeof resolvedPersonalCvMaster.code === 'string'
+              ? resolvedPersonalCvMaster.code.trim().toUpperCase()
+              : '';
+          const cvDocCode =
+            typeof cvData.voucherCode === 'string' ? cvData.voucherCode.trim().toUpperCase() : '';
+
+          if (cvDocCode && cvMasterCode && cvDocCode !== cvMasterCode) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Kode voucher personal tidak sesuai dengan master voucher.',
+            };
+          }
+          resolvedPersonalCvCode = cvDocCode || cvMasterCode;
+          if (!resolvedPersonalCvCode) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Kode master voucher untuk voucher personal tidak ditemukan.',
+            };
+          }
+
+          if (
+            rawReqVoucherCode &&
+            rawReqVoucherCode !== resolvedPersonalCvCode &&
+            rawReqVoucherCode !== effectivePromoCode
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Kode voucher pada pesanan tidak sesuai dengan voucher personal.',
+            };
+          }
+
+          if (
+            (cvData.voucherType && resolvedPersonalCvMaster.voucherType && cvData.voucherType !== resolvedPersonalCvMaster.voucherType) ||
+            (cvData.value !== undefined && resolvedPersonalCvMaster.value !== undefined && cvData.value !== resolvedPersonalCvMaster.value)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Nilai voucher personal tidak konsisten dengan master voucher.',
+            };
+          }
+
+          if (cvData.bookingId !== undefined && cvData.bookingId !== null && cvData.bookingId !== '' && cvData.bookingId !== candidateBookingId) {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_ALREADY_USED',
+              error: 'Voucher personal ini sudah digunakan pada pesanan lain.',
+            };
+          }
+
+          if (cvData.status === 'used') {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_ALREADY_USED',
+              error: 'Voucher personal sudah pernah digunakan.',
+            };
+          }
+          if (cvData.status !== 'available' && cvData.status !== 'reserved') {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_INELIGIBLE',
+              error: 'Status voucher personal tidak dapat digunakan.',
+            };
+          }
+
+          const cvExpiryStr = cvData.expiredAt || cvData.expiresAt;
+          if (cvExpiryStr !== undefined && cvExpiryStr !== null && cvExpiryStr !== '') {
+            if (typeof cvExpiryStr !== 'string' || Number.isNaN(Date.parse(cvExpiryStr)) || cvExpiryStr < nowIso) {
+              return {
+                status: 409,
+                code: 'VOUCHER_EXPIRED',
+                error: 'Voucher personal sudah kedaluwarsa.',
+              };
+            }
+          }
+
+          resolvedPersonalCv = {
+            ...cvData,
+            id: personalCvSnap.id,
+            voucherId: cvMasterDocSnap.id,
+            voucherCode: resolvedPersonalCvCode,
+          };
+        }
+
+        let resolvedGeneralPromoMaster: any = null;
+        let resolvedGeneralPromoMasterRef: any = null;
+        let resolvedGeneralPromoId = '';
+        let resolvedGeneralPromoCode = '';
+
+        const hasGeneralPromoIntent =
+          Boolean(generalPromoId) ||
+          Boolean(effectivePromoCode && (!personalCvId || effectivePromoCode !== resolvedPersonalCvCode || Boolean(rawReqPromoCode)));
+
+        if (hasGeneralPromoIntent) {
+          if (vouchersByPromoCodeSnap && (vouchersByPromoCodeSnap.docs || []).length > 1) {
+            return {
+              status: 409,
+              code: 'AMBIGUOUS_VOUCHER_CODE',
+              error: 'Kode voucher duplikat ditemukan di katalog master.',
+            };
+          }
+
+          let gpSnap: any = null;
+          if (generalPromoId) {
+            if (!generalPromoDocSnap || !snapExists(generalPromoDocSnap)) {
+              return {
+                status: 404,
+                code: 'VOUCHER_NOT_FOUND',
+                error: 'Referensi promo pada pesanan tidak ditemukan di katalog master.',
+              };
+            }
+            gpSnap = generalPromoDocSnap;
+            if (
+              vouchersByPromoCodeSnap &&
+              (vouchersByPromoCodeSnap.docs || []).length === 1 &&
+              vouchersByPromoCodeSnap.docs[0].id !== gpSnap.id
+            ) {
+              return {
+                status: 409,
+                code: 'VOUCHER_LINKAGE_CONFLICT',
+                error: 'Kode promo pada pesanan tidak sesuai dengan ID promo master.',
+              };
+            }
+          } else if (vouchersByPromoCodeSnap && (vouchersByPromoCodeSnap.docs || []).length === 1) {
+            gpSnap = vouchersByPromoCodeSnap.docs[0];
+          } else {
+            return {
+              status: 404,
+              code: 'VOUCHER_NOT_FOUND',
+              error: 'Kode voucher tidak ditemukan dalam katalog resmi.',
+            };
+          }
+
+          const gpData = gpSnap.data() || {};
+          const gpCode = typeof gpData.code === 'string' ? gpData.code.trim().toUpperCase() : '';
+          if (
+            !isValidDocId(gpSnap.id, 128) ||
+            (gpData.id !== undefined && gpData.id !== gpSnap.id) ||
+            !gpCode ||
+            (effectivePromoCode && gpCode !== effectivePromoCode)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Data master voucher tidak konsisten dengan kode voucher.',
+            };
+          }
+
+          resolvedGeneralPromoMaster = { ...gpData, id: gpSnap.id, code: gpCode };
+          resolvedGeneralPromoMasterRef = gpSnap.ref;
+          resolvedGeneralPromoId = gpSnap.id;
+          resolvedGeneralPromoCode = gpCode;
+        }
+
+        if (!resolvedGeneralPromoMaster && !resolvedPersonalCv && !pointsOnlyCheckout) {
+          return {
+            status: 409,
+            code: 'VOUCHER_BOOKING_MISMATCH',
+            error: 'Pesanan ini tidak memiliki voucher valid yang dapat diproses.',
+          };
+        }
+
+        if (resolvedGeneralPromoMaster && resolvedPersonalCv) {
+          if (loyaltySettings.allowStacking && (resolvedGeneralPromoId === cvMasterId || resolvedGeneralPromoCode === resolvedPersonalCvCode)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Tidak dapat menggabungkan kode promo dan voucher personal dari kampanye yang sama.',
+            };
+          }
+        }
+
+        // Validate numeric configuration of active vouchers
+        if (resolvedGeneralPromoMaster) {
+          const gpCheck = validateVoucherNumbers(resolvedGeneralPromoMaster);
+          if (!gpCheck.ok) return { status: 409, code: gpCheck.code, error: gpCheck.error };
+          if (
+            req.body?.discountTypeSnapshot !== undefined &&
+            req.body?.discountTypeSnapshot !== null &&
+            req.body?.discountTypeSnapshot !== '' &&
+            normalizeSupportedVoucherType(req.body.discountTypeSnapshot) !== gpCheck.normalizedType
+          ) {
+            return {
+              status: 409,
+              code: 'DISCOUNT_MISMATCH',
+              error: 'Tipe diskon promo pada form tidak sesuai dengan katalog resmi.',
+            };
+          }
+          if (
+            req.body?.discountValueSnapshot !== undefined &&
+            req.body?.discountValueSnapshot !== null &&
+            Number(req.body.discountValueSnapshot) !== resolvedGeneralPromoMaster.value
+          ) {
+            return {
+              status: 409,
+              code: 'DISCOUNT_MISMATCH',
+              error: 'Nilai diskon promo pada form tidak sesuai dengan katalog resmi.',
+            };
+          }
+        }
+        if (resolvedPersonalCv) {
+          const cvCheck = validateVoucherNumbers(resolvedPersonalCv);
+          if (!cvCheck.ok) return { status: 409, code: cvCheck.code, error: cvCheck.error };
+          const cvMasterCheck = validateVoucherNumbers(resolvedPersonalCvMaster);
+          if (!cvMasterCheck.ok) return { status: 409, code: cvMasterCheck.code, error: cvMasterCheck.error };
+        }
+
+        // 3E. Establish Distance & Home Service Fee Safely
+        const needsVerifiedHomeServiceFee =
+          normalizeSupportedVoucherType(resolvedGeneralPromoMaster?.voucherType) === 'free_home_service_fee' ||
+          normalizeSupportedVoucherType(resolvedPersonalCv?.voucherType) === 'free_home_service_fee';
+
+        const minStraightKm = calculateStraightDistanceKm(
+          SENZU_BASE_LOCATION.lat,
+          SENZU_BASE_LOCATION.lng,
+          latitude,
+          longitude
+        );
+        const rawDistKm =
+          typeof req.body?.distanceKm === 'number' && Number.isFinite(req.body.distanceKm)
+            ? req.body.distanceKm
+            : 0;
+
+        if (needsVerifiedHomeServiceFee) {
+          if (
+            rawDistKm < 0 ||
+            rawDistKm < minStraightKm * 0.95 ||
+            (minStraightKm > 0.2 && rawDistKm === 0)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Jarak lokasi pesanan tidak dapat diverifikasi untuk potongan biaya home service.',
+            };
+          }
+          const feeFromDist = calculateHomeServiceFee(rawDistKm).fee;
+          const feeFromStraight = calculateHomeServiceFee(minStraightKm).fee;
+          if (!isFinitePositiveNumber(feeFromDist) || feeFromStraight !== feeFromDist) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Nominal biaya home service memerlukan peninjauan.',
+            };
+          }
+        }
+
+        const finalDistanceKm =
+          rawDistKm <= 0 || rawDistKm < minStraightKm * 0.95 ? minStraightKm : rawDistKm;
+        if (minStraightKm > 0.2 && finalDistanceKm === 0) {
+          return {
+            status: 400,
+            code: 'INVALID_DISTANCE',
+            error: 'Jarak lokasi belum dapat dihitung. Silakan periksa titik lokasi Anda.',
+          };
+        }
+        const finalDistanceMeters =
+          typeof req.body?.distanceMeters === 'number' &&
+          Number.isFinite(req.body.distanceMeters) &&
+          req.body.distanceMeters >= Math.round(minStraightKm * 950)
+            ? Math.round(req.body.distanceMeters)
+            : Math.round(finalDistanceKm * 1000);
+
+        const authoritativeFeeCalc = calculateHomeServiceFee(finalDistanceKm);
+        const authoritativeHomeServiceFee = authoritativeFeeCalc.fee;
+        const authoritativeHomeServiceTier = authoritativeFeeCalc.tier;
+
+        if (
+          req.body?.homeServiceFee !== undefined &&
+          req.body?.homeServiceFee !== null &&
+          Number(req.body.homeServiceFee) !== authoritativeHomeServiceFee
+        ) {
+          return {
+            status: 409,
+            code: 'HOME_SERVICE_FEE_MISMATCH',
+            error: 'Biaya home service pada form tidak sesuai dengan perhitungan jarak resmi.',
+          };
+        }
+
+        // 3F. Compute Authoritative Pricing Breakdown via calculateBookingPrice
+        const promoForCalc = resolvedGeneralPromoMaster
+          ? {
+              ...resolvedGeneralPromoMaster,
+              minimumSpend: Math.max(
+                resolvedGeneralPromoMaster.minimumSpend || 0,
+                resolvedGeneralPromoMaster.minimumTreatmentPrice || 0
+              ),
+              enabled: true,
+            }
+          : null;
+
+        const cvForCalc = resolvedPersonalCv
+          ? {
+              ...resolvedPersonalCv,
+              voucherType: normalizeSupportedVoucherType(resolvedPersonalCv.voucherType) || resolvedPersonalCv.voucherType,
+              minimumSpend: Math.max(
+                resolvedPersonalCv.minimumSpend || 0,
+                resolvedPersonalCvMaster?.minimumSpend || 0,
+                resolvedPersonalCvMaster?.minimumTreatmentPrice || 0
+              ),
+              maximumDiscount: resolvedPersonalCv.maximumDiscount ?? resolvedPersonalCvMaster?.maximumDiscount,
+              status: 'available' as const,
+            }
+          : null;
+
+        const pricingBreakdown = calculateBookingPrice({
+          servicePrice: authoritativeServicePrice,
+          homeServiceFee: authoritativeHomeServiceFee,
+          promoVoucher: promoForCalc,
+          customerVoucher: cvForCalc,
+          pointsToRedeem: requestedPoints,
+          customerTier: resolvedTier,
+          settings: loyaltySettings,
+        });
+
+        if (
+          promoForCalc &&
+          cvForCalc &&
+          loyaltySettings.allowStacking &&
+          pricingBreakdown.promoDiscountAmount + pricingBreakdown.voucherDiscountAmount >
+            pricingBreakdown.totalPromoAndVoucherDiscount
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Kombinasi diskon melebihi nilai pesanan dan memerlukan peninjauan.',
+          };
+        }
+
+        // Build list of voucher targets to validate & redeem in this transaction
+        const voucherTargets: Array<{
+          kind: 'general' | 'personal';
+          code: string;
+          masterId: string;
+          masterRef: any;
+          masterData: any;
+          personalCv: any | null;
+          discountAmount: number;
+          currentUsageCount: number;
+          canWritePhoneLock: boolean;
+        }> = [];
+
+        if (resolvedGeneralPromoMaster && pricingBreakdown.promoDiscountAmount > 0) {
+          const disc = resolvedPersonalCv
+            ? pricingBreakdown.promoDiscountAmount
+            : Math.min(pricingBreakdown.promoDiscountAmount, pricingBreakdown.totalPromoAndVoucherDiscount);
+          voucherTargets.push({
+            kind: 'general',
+            code: resolvedGeneralPromoCode,
+            masterId: resolvedGeneralPromoId,
+            masterRef: resolvedGeneralPromoMasterRef,
+            masterData: resolvedGeneralPromoMaster,
+            personalCv: null,
+            discountAmount: disc,
+            currentUsageCount: 0,
+            canWritePhoneLock: false,
+          });
+        }
+
+        if (resolvedPersonalCv && pricingBreakdown.voucherDiscountAmount > 0) {
+          const disc = resolvedGeneralPromoMaster
+            ? pricingBreakdown.voucherDiscountAmount
+            : Math.min(pricingBreakdown.voucherDiscountAmount, pricingBreakdown.totalPromoAndVoucherDiscount);
+          voucherTargets.push({
+            kind: 'personal',
+            code: resolvedPersonalCvCode,
+            masterId: cvMasterId,
+            masterRef: resolvedPersonalCvMasterRef,
+            masterData: resolvedPersonalCvMaster,
+            personalCv: resolvedPersonalCv,
+            discountAmount: disc,
+            currentUsageCount: 0,
+            canWritePhoneLock: false,
+          });
+        }
+
+        if (voucherTargets.length === 0 && !(pointsOnlyCheckout && pricingBreakdown.pointsRedeemed > 0)) {
+          return { status: 409, code: 'VOUCHER_INELIGIBLE', error: 'Voucher tidak menghasilkan potongan untuk pesanan ini.' };
+        }
+
+        // Combine owned bookings for per-customer quota and first-order check
+        const ownedBookingsMap = new Map<string, any>();
+        for (const d of [
+          ...(bookingsByCanonicalSnap?.docs || []),
+          ...(bookingsByLegacySnap?.docs || []),
+        ]) {
+          if (!snapExists(d) || d.id === candidateBookingId) continue;
+          const b = d.data() || {};
+          if (b.customerAuthUid && b.authUserId && b.customerAuthUid !== b.authUserId) continue;
+          if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+          if (!b.customerAuthUid && b.authUserId !== verifiedUid) continue;
+          ownedBookingsMap.set(d.id, b);
+        }
+        if (verifiedCustomerId && bookingsByCustIdSnaps.has(verifiedCustomerId)) {
+          for (const d of bookingsByCustIdSnaps.get(verifiedCustomerId)?.docs || []) {
+            if (!snapExists(d) || d.id === candidateBookingId || ownedBookingsMap.has(d.id)) continue;
+            const b = d.data() || {};
+            if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+            if (b.authUserId && b.authUserId !== verifiedUid) continue;
+            ownedBookingsMap.set(d.id, b);
+          }
+        }
+
+        const priceAfterTier = Math.max(0, authoritativeServicePrice - pricingBreakdown.tierDiscountAmount);
+
+        // 3G. Validate Eligibility, Quotas, Locks & First-Order for Each Target Voucher
+        for (const target of voucherTargets) {
+          const { code, masterId: targetMasterId, masterData: targetMasterData, personalCv } = target;
+
+          if (!isFinitePositiveNumber(target.discountAmount)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_INELIGIBLE',
+              error: 'Voucher tidak menghasilkan potongan yang valid pada pesanan ini.',
+            };
+          }
+
+          if (
+            snapExists(redemptionSnapsByCode.get(code)) ||
+            snapExists(redemptionReceiptSnapsByCode.get(code))
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Catatan penukaran untuk pesanan ini sudah ada dan memerlukan peninjauan.',
+            };
+          }
+
+          if (targetMasterData.enabled !== true) {
+            return {
+              status: 409,
+              code: 'VOUCHER_INACTIVE',
+              error: 'Voucher sedang tidak aktif.',
+            };
+          }
+
+          if (targetMasterData.validFrom !== undefined && targetMasterData.validFrom !== null && targetMasterData.validFrom !== '') {
+            if (typeof targetMasterData.validFrom !== 'string' || Number.isNaN(Date.parse(targetMasterData.validFrom))) {
+              return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode mulai voucher tidak valid.' };
+            }
+            if (targetMasterData.validFrom > nowIso) {
+              return { status: 409, code: 'VOUCHER_NOT_YET_VALID', error: 'Periode promo belum dimulai.' };
+            }
+          }
+          if (targetMasterData.validUntil !== undefined && targetMasterData.validUntil !== null && targetMasterData.validUntil !== '') {
+            if (typeof targetMasterData.validUntil !== 'string' || Number.isNaN(Date.parse(targetMasterData.validUntil))) {
+              return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode berakhir voucher tidak valid.' };
+            }
+            if (targetMasterData.validUntil < nowIso) {
+              return { status: 409, code: 'VOUCHER_EXPIRED', error: 'Voucher sudah tidak berlaku.' };
+            }
+          }
+
+          const minSpend = Math.max(
+            targetMasterData.minimumSpend || 0,
+            targetMasterData.minimumTreatmentPrice || 0,
+            personalCv?.minimumSpend || 0
+          );
+          if (priceAfterTier < minSpend || authoritativeServicePrice < minSpend) {
+            return {
+              status: 409,
+              code: 'VOUCHER_MINIMUM_SPEND_NOT_MET',
+              error: `Minimum transaksi untuk promo ini adalah Rp ${minSpend.toLocaleString('id-ID')}.`,
+            };
+          }
+
+          const checkServiceIds = (ids: unknown): boolean => {
+            if (ids === undefined || ids === null) return true;
+            if (!Array.isArray(ids)) return false;
+            if (ids.length === 0) return true;
+            return ids.includes(serviceId);
+          };
+          if (
+            !checkServiceIds(targetMasterData.applicableServiceIds) ||
+            (personalCv && !checkServiceIds(personalCv.applicableServiceIds))
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_SERVICE_INELIGIBLE',
+              error: 'Promo tidak berlaku untuk layanan yang dipilih.',
+            };
+          }
+
+          if (targetMasterData.applicableCategoryIds !== undefined && targetMasterData.applicableCategoryIds !== null) {
+            if (!Array.isArray(targetMasterData.applicableCategoryIds)) {
+              return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Konfigurasi kategori voucher tidak valid.' };
+            }
+            if (targetMasterData.applicableCategoryIds.length > 0) {
+              const srvCatId = typeof serviceData.categoryId === 'string' ? serviceData.categoryId.trim() : '';
+              const srvCatName = typeof serviceData.category === 'string' ? serviceData.category.trim() : '';
+              if (
+                (!srvCatId || !targetMasterData.applicableCategoryIds.includes(srvCatId)) &&
+                (!srvCatName || !targetMasterData.applicableCategoryIds.includes(srvCatName))
+              ) {
+                return {
+                  status: 409,
+                  code: 'VOUCHER_CATEGORY_INELIGIBLE',
+                  error: 'Promo tidak berlaku untuk kategori layanan ini.',
+                };
+              }
+            }
+          }
+
+          if (isFinitePositiveNumber(targetMasterData.minimumTreatmentDuration)) {
+            if (!isFinitePositiveNumber(serviceData.duration) || serviceData.duration < targetMasterData.minimumTreatmentDuration) {
+              return {
+                status: 409,
+                code: 'VOUCHER_DURATION_INELIGIBLE',
+                error: `Promo memerlukan durasi layanan minimal ${targetMasterData.minimumTreatmentDuration} menit.`,
+              };
+            }
+          }
+
+          const checkTierIds = (ids: unknown): boolean => {
+            if (ids === undefined || ids === null) return true;
+            if (!Array.isArray(ids)) return false;
+            if (ids.length === 0) return true;
+            const lowerIds = ids.map((x) => String(x).trim().toLowerCase());
+            return (
+              lowerIds.includes(String(resolvedTier.id || '').trim().toLowerCase()) ||
+              lowerIds.includes(String(resolvedTier.name || '').trim().toLowerCase())
+            );
+          };
+          if (
+            !checkTierIds(targetMasterData.applicableTierIds) ||
+            (personalCv && !checkTierIds(personalCv.applicableTierIds))
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_TIER_INELIGIBLE',
+              error: 'Promo tidak berlaku untuk tier keanggotaan Anda.',
+            };
+          }
+
+          if (
+            targetMasterData.customerSpecific === true ||
+            (targetMasterData.customerId !== undefined && targetMasterData.customerId !== null && targetMasterData.customerId !== '')
+          ) {
+            const targetCust = typeof targetMasterData.customerId === 'string' ? targetMasterData.customerId.trim() : '';
+            if (!targetCust || (targetCust !== verifiedUid && (!verifiedCustomerId || targetCust !== verifiedCustomerId))) {
+              return {
+                status: 403,
+                code: 'VOUCHER_CUSTOMER_INELIGIBLE',
+                error: 'Voucher khusus ini tidak ditujukan untuk akun Anda.',
+              };
+            }
+          }
+
+          const rawCurrentUsage = targetMasterData.currentUsageCount ?? 0;
+          if (!isFiniteNonNegativeInt(rawCurrentUsage)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_CONFIG_INVALID',
+              error: 'Data penggunaan voucher tidak valid.',
+            };
+          }
+          target.currentUsageCount = rawCurrentUsage;
+
+          const rawLimitTotal = targetMasterData.usageLimitTotal ?? 0;
+          if (!isFiniteNonNegativeInt(rawLimitTotal)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_CONFIG_INVALID',
+              error: 'Batas kuota total voucher tidak valid.',
+            };
+          }
+          const usageLimitTotal = rawLimitTotal;
+
+          const rawLimitPerCustomer =
+            targetMasterData.usageLimitPerCustomer !== undefined && targetMasterData.usageLimitPerCustomer !== null
+              ? targetMasterData.usageLimitPerCustomer
+              : code === 'SENZUWELCOME'
+                ? 1
+                : 0;
+          if (!isFiniteNonNegativeInt(rawLimitPerCustomer)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_CONFIG_INVALID',
+              error: 'Batas kuota per pelanggan tidak valid.',
+            };
+          }
+          const usageLimitPerCustomer = rawLimitPerCustomer;
+
+          const validateLockSnap = (
+            lSnap: any,
+            isPhoneLock = false
+          ): { ok: boolean; activeOtherBookingId?: string; isSameBooking?: boolean; code?: string; error?: string } => {
+            if (!lSnap || !snapExists(lSnap)) {
+              return { ok: true, activeOtherBookingId: '', isSameBooking: false };
+            }
+            const lData = lSnap.data() || {};
+            const lStatus = typeof lData.status === 'string' ? lData.status.trim().toLowerCase() : 'active';
+            if (lStatus === 'cancelled' || lStatus === 'batal') {
+              return { ok: true, activeOtherBookingId: '', isSameBooking: false };
+            }
+
+            const lCode = typeof lData.voucherCode === 'string' ? lData.voucherCode.trim().toUpperCase() : '';
+            if (lCode && lCode !== code) {
+              return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Data reservasi voucher tidak konsisten.' };
+            }
+
+            const lUid = typeof lData.customerAuthUid === 'string' ? lData.customerAuthUid.trim() : '';
+            const lBookingId = typeof lData.bookingId === 'string' ? lData.bookingId.trim() : '';
+
+            if (!isPhoneLock) {
+              if (lUid && lUid !== verifiedUid) {
+                return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Reservasi voucher bertentangan dengan pemilik akun.' };
+              }
+              return {
+                ok: true,
+                activeOtherBookingId: lBookingId || lSnap.id,
+                isSameBooking: false,
+              };
+            }
+
+            return {
+              ok: true,
+              activeOtherBookingId: lUid === verifiedUid ? lBookingId || lSnap.id : '',
+              isSameBooking: false,
+            };
+          };
+
+          const uidLockCheck = validateLockSnap(uidLockSnapsByCode.get(code), false);
+          if (!uidLockCheck.ok) {
+            return { status: 409, code: uidLockCheck.code, error: uidLockCheck.error };
+          }
+
+          const otherReservedBookingIds = new Set<string>();
+          if (uidLockCheck.activeOtherBookingId) {
+            otherReservedBookingIds.add(uidLockCheck.activeOtherBookingId);
+          }
+
+          const custSnapsForCode = custLockSnapsByCode.get(code);
+          if (verifiedCustomerId && custSnapsForCode?.has(verifiedCustomerId)) {
+            const custLockCheck = validateLockSnap(custSnapsForCode.get(verifiedCustomerId), false);
+            if (!custLockCheck.ok) {
+              return { status: 409, code: custLockCheck.code, error: custLockCheck.error };
+            }
+            if (custLockCheck.activeOtherBookingId) {
+              otherReservedBookingIds.add(custLockCheck.activeOtherBookingId);
+            }
+          }
+
+          const pLockSnap = phoneLockSnapsByCode.get(code);
+          if (pLockSnap) {
+            if (!snapExists(pLockSnap)) {
+              target.canWritePhoneLock = true;
+            } else {
+              const pCheck = validateLockSnap(pLockSnap, true);
+              if (!pCheck.ok) {
+                return { status: 409, code: pCheck.code, error: pCheck.error };
+              }
+              if (pCheck.isSameBooking) {
+                target.canWritePhoneLock = true;
+              }
+            }
+          }
+
+          const allRedemptionDocs = new Map<string, any>();
+          for (const d of [
+            ...(redemptionsByCodeSnaps.get(code)?.docs || []),
+            ...(redemptionsByMasterIdSnaps.get(targetMasterId)?.docs || []),
+          ]) {
+            if (snapExists(d) && !d.id.startsWith('vlock_')) {
+              allRedemptionDocs.set(d.id, d.data() || {});
+            }
+          }
+
+          let activeGlobalRedemptionsCount = 0;
+          const priorCustomerUseKeys = new Set<string>();
+
+          for (const [rId, rData] of allRedemptionDocs.entries()) {
+            const rStatus = typeof rData.status === 'string' ? rData.status.trim().toLowerCase() : 'active';
+            if (rStatus === 'cancelled' || rStatus === 'batal') continue;
+
+            const rCode = typeof rData.voucherCode === 'string' ? rData.voucherCode.trim().toUpperCase() : '';
+            const rVoucherId = typeof rData.voucherId === 'string' ? rData.voucherId.trim() : '';
+            if (rCode !== code && rVoucherId !== targetMasterId) continue;
+
+            activeGlobalRedemptionsCount++;
+
+            const rUid = typeof rData.customerAuthUid === 'string' ? rData.customerAuthUid.trim() : '';
+            const rCustId = typeof rData.customerId === 'string' ? rData.customerId.trim() : '';
+            if (rUid === verifiedUid || (verifiedCustomerId && rCustId === verifiedCustomerId)) {
+              priorCustomerUseKeys.add(rData.bookingId || rId);
+            }
+          }
+
+          if (usageLimitTotal > 0) {
+            const effectiveGlobalUsed = Math.max(rawCurrentUsage, activeGlobalRedemptionsCount);
+            if (effectiveGlobalUsed >= usageLimitTotal) {
+              return {
+                status: 409,
+                code: 'VOUCHER_QUOTA_EXHAUSTED',
+                error: 'Kuota promo sudah habis.',
+              };
+            }
+          }
+
+          let hasPreviousNonCancelledBooking = false;
+          for (const [bId, b] of ownedBookingsMap.entries()) {
+            const bStatus = typeof b.status === 'string' ? b.status.trim().toLowerCase() : '';
+            if (bStatus === 'cancelled' || bStatus === 'batal') continue;
+
+            hasPreviousNonCancelledBooking = true;
+
+            const bPromoCode = typeof b.promoCode === 'string' ? b.promoCode.trim().toUpperCase() : '';
+            const bVoucherCode = typeof b.voucherCode === 'string' ? b.voucherCode.trim().toUpperCase() : '';
+            const bPromoId = typeof b.promoId === 'string' ? b.promoId.trim() : '';
+            const bVoucherId = typeof b.voucherId === 'string' ? b.voucherId.trim() : '';
+
+            if (
+              bPromoCode === code ||
+              bVoucherCode === code ||
+              bPromoId === targetMasterId ||
+              bVoucherId === targetMasterId
+            ) {
+              priorCustomerUseKeys.add(bId);
+            }
+          }
+
+          for (const reservedBookingId of otherReservedBookingIds) {
+            priorCustomerUseKeys.add(reservedBookingId);
+          }
+
+          if (usageLimitPerCustomer > 0 && priorCustomerUseKeys.size >= usageLimitPerCustomer) {
+            return {
+              status: 409,
+              code: 'VOUCHER_CUSTOMER_QUOTA_EXHAUSTED',
+              error: `Voucher ${code} sudah pernah digunakan pada akun ini.`,
+            };
+          }
+
+          if (targetMasterData.firstOrderOnly === true || targetMasterData.newCustomerOnly === true) {
+            if (hasPreviousNonCancelledBooking) {
+              return {
+                status: 409,
+                code: 'VOUCHER_FIRST_ORDER_ONLY',
+                error: 'Voucher ini khusus untuk pesanan pertama.',
+              };
+            }
+            if (verifiedCustomerData) {
+              const comp = verifiedCustomerData.completedBookings ?? 0;
+              const tot = verifiedCustomerData.totalBookings ?? 0;
+              if (!isFiniteNonNegativeInt(comp) || !isFiniteNonNegativeInt(tot)) {
+                return {
+                  status: 409,
+                  code: 'VOUCHER_CONFIG_INVALID',
+                  error: 'Data riwayat pesanan pelanggan tidak valid.',
+                };
+              }
+              if (comp > 0 || tot > 0) {
+                return {
+                  status: 409,
+                  code: 'VOUCHER_FIRST_ORDER_ONLY',
+                  error: 'Voucher ini khusus untuk pesanan pertama.',
+                };
+              }
+            }
+          }
+        }
+
+        // 3H. Verify Client Price/Discount Expectations Against Server-Derived Breakdown
+        const isVoucherOnlyGeneralRequest =
+          !personalCvId && !rawReqPromoCode && !rawReqPromoId && Boolean(rawReqVoucherCode || rawReqVoucherId);
+        if (
+          req.body?.promoDiscount !== undefined &&
+          req.body?.promoDiscount !== null &&
+          Number(req.body.promoDiscount) !== pricingBreakdown.promoDiscountAmount &&
+          !(isVoucherOnlyGeneralRequest && Number(req.body.promoDiscount) === 0 && Number(req.body?.voucherDiscount) === pricingBreakdown.promoDiscountAmount)
+        ) {
+          return {
+            status: 409,
+            code: 'DISCOUNT_MISMATCH',
+            error: 'Nominal diskon promo pada form tidak sesuai dengan perhitungan resmi server.',
+            pricingBreakdown,
+          };
+        }
+        if (
+          req.body?.voucherDiscount !== undefined &&
+          req.body?.voucherDiscount !== null &&
+          Number(req.body.voucherDiscount) !== pricingBreakdown.voucherDiscountAmount &&
+          !(isVoucherOnlyGeneralRequest && Number(req.body.voucherDiscount) === pricingBreakdown.promoDiscountAmount && (req.body?.promoDiscount === undefined || req.body?.promoDiscount === null || Number(req.body.promoDiscount) === 0))
+        ) {
+          return {
+            status: 409,
+            code: 'DISCOUNT_MISMATCH',
+            error: 'Nominal diskon voucher pada form tidak sesuai dengan perhitungan resmi server.',
+            pricingBreakdown,
+          };
+        }
+        if (
+          req.body?.pointsDiscount !== undefined &&
+          req.body?.pointsDiscount !== null &&
+          Number(req.body.pointsDiscount) !== pricingBreakdown.pointsDiscountAmount
+        ) {
+          return {
+            status: 409,
+            code: 'DISCOUNT_MISMATCH',
+            error: 'Nominal diskon poin pada form tidak sesuai dengan perhitungan resmi server.',
+            pricingBreakdown,
+          };
+        }
+        if (
+          req.body?.discountAmount !== undefined &&
+          req.body?.discountAmount !== null &&
+          Number(req.body.discountAmount) !== pricingBreakdown.totalDiscount
+        ) {
+          return {
+            status: 409,
+            code: 'DISCOUNT_MISMATCH',
+            error: 'Total diskon pada form tidak sesuai dengan perhitungan resmi server.',
+            pricingBreakdown,
+          };
+        }
+        if (
+          req.body?.totalAmount !== undefined &&
+          req.body?.totalAmount !== null &&
+          Number(req.body.totalAmount) !== pricingBreakdown.finalAmount
+        ) {
+          return {
+            status: 409,
+            code: 'PRICE_MISMATCH',
+            error: 'Total pembayaran pada form tidak sesuai dengan perhitungan resmi server.',
+            pricingBreakdown,
+          };
+        }
+
+        // --- PHASE 4: ATOMIC TRANSACTION WRITES ---
+        const primaryTarget = voucherTargets[0];
+        const appliedGeneral = voucherTargets.find(target => target.kind === 'general');
+        const appliedPersonal = voucherTargets.find(target => target.kind === 'personal');
+        const primaryRedemptionId = primaryTarget ? `vred_${primaryTarget.code}_${candidateBookingId}` : loyaltyTxId;
+
+        const newBookingData = cleanBookingRecord({
+          id: candidateBookingId,
+          bookingCode: candidateBookingCode,
+          customerId: effectiveCustomerId,
+          customerAuthUid: verifiedUid,
+          authUserId: verifiedUid,
+          customerName: customerNameTrimmed,
+          customerWhatsApp: customerWhatsAppTrimmed,
+          customerEmail: customerEmailTrimmed,
+          serviceId,
+          serviceName: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
+          serviceDuration: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          scheduleDate,
+          scheduleTime,
+          scheduleAt: `${scheduleDate} ${scheduleTime}`,
+          genderPreference: typeof req.body?.genderPreference === 'string' && req.body.genderPreference.trim() ? req.body.genderPreference.trim() : 'Bebas',
+          address: addressTrimmed,
+          latitude,
+          longitude,
+          placeId: typeof req.body?.placeId === 'string' ? req.body.placeId.trim() : '',
+          addressNotes: typeof req.body?.addressNotes === 'string' ? req.body.addressNotes.trim() : '',
+          distanceKm: finalDistanceKm,
+          distanceMeters: finalDistanceMeters,
+          requiresAdminConfirmation: Boolean(req.body?.requiresAdminConfirmation),
+          area: typeof req.body?.area === 'string' ? req.body.area.trim() : '',
+          servicePrice: authoritativeServicePrice,
+          homeServiceFee: authoritativeHomeServiceFee,
+          servicePriceSnapshot: authoritativeServicePrice,
+          serviceNameSnapshot: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
+          durationMinutesSnapshot: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          homeServiceFeeSnapshot: authoritativeHomeServiceFee,
+          homeServiceFeeTier: authoritativeHomeServiceTier,
+          baseLocationId: SENZU_BASE_LOCATION.id,
+          baseLocationName: SENZU_BASE_LOCATION.name,
+          baseLatitude: SENZU_BASE_LOCATION.lat,
+          baseLongitude: SENZU_BASE_LOCATION.lng,
+          customerLat: latitude,
+          customerLng: longitude,
+          areaIdSnapshot: typeof req.body?.areaIdSnapshot === 'string' && req.body.areaIdSnapshot.trim() ? req.body.areaIdSnapshot.trim() : undefined,
+          areaNameSnapshot: typeof req.body?.areaNameSnapshot === 'string' && req.body.areaNameSnapshot.trim() ? req.body.areaNameSnapshot.trim() : (typeof req.body?.area === 'string' ? req.body.area.trim() : ''),
+          discountAmount: pricingBreakdown.totalDiscount,
+          customerVoucherId: appliedPersonal ? personalCvId : undefined,
+          voucherId: appliedPersonal ? personalCvId : (appliedGeneral?.masterId || undefined),
+          voucherCode: appliedPersonal ? resolvedPersonalCvCode : (appliedGeneral?.code || undefined),
+          voucherDiscount: personalCvId ? pricingBreakdown.voucherDiscountAmount : (isVoucherOnlyGeneralRequest ? pricingBreakdown.promoDiscountAmount : pricingBreakdown.voucherDiscountAmount),
+          promoId: appliedGeneral?.masterId,
+          promoCode: appliedGeneral?.code,
+          promoCodeSnapshot: appliedGeneral?.code,
+          promoNameSnapshot: appliedGeneral?.masterData.name,
+          discountTypeSnapshot: appliedGeneral?.masterData.voucherType,
+          discountValueSnapshot: appliedGeneral?.masterData.value,
+          promoDiscount: pricingBreakdown.promoDiscountAmount,
+          pointsRedeemed: pricingBreakdown.pointsRedeemed,
+          pointsDiscount: pricingBreakdown.pointsDiscountAmount,
+          pointsEarned: pricingBreakdown.estimatedPointsEarned,
+          referredByCustomerId: typeof req.body?.referredByCustomerId === 'string' && req.body.referredByCustomerId.trim() ? req.body.referredByCustomerId.trim() : undefined,
+          referralCodeUsed: typeof req.body?.referralCodeUsed === 'string' && req.body.referralCodeUsed.trim() ? req.body.referralCodeUsed.trim().toUpperCase() : undefined,
+          membershipTierAtBooking: resolvedTier.name || 'Member',
+          totalAmount: pricingBreakdown.finalAmount,
+          paymentMethod: paymentMethodTrimmed,
+          customerNotes: typeof req.body?.customerNotes === 'string' ? req.body.customerNotes.trim().slice(0, 1000) : '',
+          status: 'Menunggu Pembayaran',
+          paymentStatus: 'UNPAID',
+          paymentPolicyVersion: 2,
+          paymentDeadline: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(candidateBookingRef, newBookingData);
+
+        // These existing handoff records commit with the booking. A lost HTTP response cannot skip or duplicate them.
+        const initialHistoryId = `hist_checkout_${candidateBookingId}`;
+        transaction.set(adminDb.collection('booking_status_history').doc(initialHistoryId), {
+          id: initialHistoryId, bookingId: candidateBookingId, bookingCode: candidateBookingCode,
+          status: 'Menunggu Pembayaran', updatedByRole: 'customer', updatedByName: customerNameTrimmed,
+          note: `Booking diajukan oleh customer melalui portal Senzu Home. Metode bayar: ${paymentMethodTrimmed}`,
+          timestamp: nowIso, formattedWIB: new Intl.DateTimeFormat('id-ID', {
+            timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short',
+          }).format(new Date(nowIso)),
+        });
+        if (verifiedCustomerId && verifiedCustomerData) {
+          const previousCount = Number.isSafeInteger(verifiedCustomerData.totalBookings) && verifiedCustomerData.totalBookings >= 0
+            ? verifiedCustomerData.totalBookings : 0;
+          transaction.update(adminDb.collection('customers').doc(verifiedCustomerId), cleanBookingRecord({
+            totalBookings: Math.max(previousCount, ownedBookingsMap.size) + 1,
+            totalBooking: Math.max(previousCount, ownedBookingsMap.size) + 1,
+            firstBookingAt: verifiedCustomerData.firstBookingAt || nowIso, lastBookingAt: nowIso, updatedAt: nowIso,
+            ...(!verifiedCustomerData.defaultAddress ? {
+              defaultAddress: addressTrimmed, defaultArea: newBookingData.area, defaultLatitude: latitude,
+              defaultLongitude: longitude, defaultPlaceId: newBookingData.placeId, addressNotes: newBookingData.addressNotes,
+            } : {}),
+          }));
+        }
+        const bookingEventId = `evt_checkout_${candidateBookingId}`;
+        const eventPayload = cleanBookingRecord({
+          bookingId: candidateBookingId, bookingCode: candidateBookingCode, customerId: effectiveCustomerId,
+          customerName: customerNameTrimmed, customerWhatsApp: customerWhatsAppTrimmed, customerEmail: customerEmailTrimmed,
+          serviceName: newBookingData.serviceName, scheduleAt: newBookingData.scheduleAt,
+          totalAmount: newBookingData.totalAmount, paymentMethod: paymentMethodTrimmed, area: newBookingData.area,
+        });
+        const bookingAlertsEnabled = !snapExists(bookingNotificationSettingsSnap)
+          || bookingNotificationSettingsSnap.data()?.bookingCreatedAlert !== false;
+        transaction.set(adminDb.collection('notification_events').doc(bookingEventId), {
+          id: bookingEventId, eventType: 'booking.created', bookingId: candidateBookingId,
+          actorId: effectiveCustomerId, actorRole: 'customer', payload: eventPayload,
+          createdAt: nowIso, status: 'processed', processedAt: nowIso,
+        });
+        if (bookingAlertsEnabled) {
+          // Same recipient roles, titles and routes as the existing booking.created event.
+          const targets = [
+            {recipientRole: 'css', title: 'Booking Baru Diterima', priority: 'HIGH',
+              message: `Order #${candidateBookingCode} dari ${customerNameTrimmed} (${newBookingData.serviceName}) menunggu verifikasi pembayaran.`,
+              actionUrl: `/css?booking=${candidateBookingCode}`},
+            {recipientRole: 'manager', title: 'Booking Baru Diterima', priority: 'HIGH',
+              message: `Order #${candidateBookingCode} dari ${customerNameTrimmed} (${newBookingData.serviceName}) masuk ke sistem. Menunggu verifikasi pembayaran.`,
+              actionUrl: `/reconciliation?booking=${candidateBookingCode}`},
+            {recipientRole: 'customer', recipientUserId: effectiveCustomerId, title: 'Reservasi Senzu Home Diterima', priority: 'NORMAL',
+              message: `Pesanan #${candidateBookingCode} (${newBookingData.serviceName}) berhasil dibuat. Silakan lakukan pembayaran agar dapat diproses.`,
+              actionUrl: `/track/${candidateBookingCode}`},
+          ];
+          for (const target of targets) {
+            const notificationId = `notif_checkout_${candidateBookingId}_${target.recipientRole}`;
+            transaction.set(adminDb.collection('notifications').doc(notificationId), cleanBookingRecord({
+              ...target, id: notificationId, eventId: bookingEventId, eventType: 'booking.created',
+              bookingId: candidateBookingId, bookingCode: candidateBookingCode, customerId: effectiveCustomerId,
+              channel: 'in_app', read: false, readAt: null,
+              metadata: {...eventPayload, actorId: effectiveCustomerId, actorRole: 'customer'}, createdAt: nowIso,
+            }));
+          }
+        }
+
+        for (const target of voucherTargets) {
+          const redId = `vred_${target.code}_${candidateBookingId}`;
+          const redRef = adminDb.collection('voucher_redemptions').doc(redId);
+          const recRef = adminDb.collection('voucher_redemption_receipts').doc(redId);
+          const uLockRef = uidLockRefsByCode.get(target.code);
+          const cLockRefs = custLockRefsByCode.get(target.code);
+          const pLockRef = phoneLockRefsByCode.get(target.code);
+
+          transaction.set(
+            redRef,
+            {
+              id: redId,
+              voucherId: target.masterId,
+              voucherCode: target.code,
+              customerId: effectiveCustomerId,
+              customerAuthUid: verifiedUid,
+              customerPhone: customerWhatsAppTrimmed || null,
+              normalizedPhone: bookingPhoneDigits ? `+${bookingPhoneDigits}` : null,
+              bookingId: candidateBookingId,
+              bookingCode: candidateBookingCode,
+              discountAmount: target.discountAmount,
+              redeemedAt: nowIso,
+              status: 'active',
+              source: 'booking_checkout',
+              updatedAt: nowIso,
+            },
+            { merge: true }
+          );
+
+          if (uLockRef) {
+            transaction.set(
+              uLockRef,
+              {
+                voucherCode: target.code,
+                voucherId: target.masterId,
+                customerAuthUid: verifiedUid,
+                bookingId: candidateBookingId,
+                bookingCode: candidateBookingCode,
+                redeemedAt: nowIso,
+                status: 'active',
+                updatedAt: nowIso,
+              },
+              { merge: true }
+            );
+          }
+
+          if (verifiedCustomerId && cLockRefs?.has(verifiedCustomerId)) {
+            transaction.set(
+              cLockRefs.get(verifiedCustomerId),
+              {
+                voucherCode: target.code,
+                voucherId: target.masterId,
+                customerId: verifiedCustomerId,
+                customerAuthUid: verifiedUid,
+                bookingId: candidateBookingId,
+                bookingCode: candidateBookingCode,
+                redeemedAt: nowIso,
+                status: 'active',
+                updatedAt: nowIso,
+              },
+              { merge: true }
+            );
+          }
+
+          if (pLockRef && target.canWritePhoneLock) {
+            transaction.set(
+              pLockRef,
+              {
+                voucherCode: target.code,
+                voucherId: target.masterId,
+                customerPhone: bookingPhoneDigits,
+                customerAuthUid: verifiedUid,
+                bookingId: candidateBookingId,
+                bookingCode: candidateBookingCode,
+                redeemedAt: nowIso,
+                status: 'active',
+                updatedAt: nowIso,
+              },
+              { merge: true }
+            );
+          }
+
+          transaction.update(target.masterRef, {
+            currentUsageCount: target.currentUsageCount + 1,
+            updatedAt: nowIso,
+          });
+
+          transaction.set(recRef, {
+            schemaVersion: 1,
+            redemptionId: redId,
+            bookingId: candidateBookingId,
+            voucherId: target.masterId,
+            voucherCode: target.code,
+            customerAuthUid: verifiedUid,
+            discountAmount: target.discountAmount,
+            committedAt: nowIso,
+          });
+        }
+
+        if (personalCvRef && voucherTargets.some(target => target.kind === 'personal')) {
+          transaction.update(personalCvRef, {
+            status: 'used',
+            usedAt: nowIso,
+            bookingId: candidateBookingId,
+            bookingCode: candidateBookingCode,
+          });
+        }
+
+        if (pricingBreakdown.pointsRedeemed > 0 && verifiedLoyaltySnap) {
+          const newPointsBalance = currentPtsBalance - pricingBreakdown.pointsRedeemed;
+          const prevLifetimeRedeemed = isFiniteNonNegativeInt(verifiedLoyaltyData?.lifetimePointsRedeemed)
+            ? verifiedLoyaltyData.lifetimePointsRedeemed
+            : 0;
+          const loyaltyAccountUpdate: Record<string, any> = {
+            pointsBalance: newPointsBalance,
+            lifetimePointsRedeemed: prevLifetimeRedeemed + pricingBreakdown.pointsRedeemed,
+            updatedAt: nowIso,
+          };
+          if (verifiedLoyaltyData && 'currentPointsBalance' in verifiedLoyaltyData) {
+            loyaltyAccountUpdate.currentPointsBalance = newPointsBalance;
+          }
+          transaction.update(verifiedLoyaltySnap.ref, loyaltyAccountUpdate);
+
+          transaction.set(loyaltyTxRef, {
+            id: loyaltyTxId,
+            customerId:
+              typeof verifiedLoyaltyData?.customerId === 'string' && verifiedLoyaltyData.customerId.trim()
+                ? verifiedLoyaltyData.customerId.trim()
+                : verifiedLoyaltySnap.id,
+            customerName: customerNameTrimmed || verifiedLoyaltyData?.customerName || '',
+            customerAuthUid: verifiedUid,
+            bookingId: candidateBookingId,
+            bookingCode: candidateBookingCode,
+            transactionType: 'redeem',
+            points: -pricingBreakdown.pointsRedeemed,
+            balanceBefore: currentPtsBalance,
+            balanceAfter: newPointsBalance,
+            referenceType: 'booking_checkout',
+            referenceId: candidateBookingId,
+            reason: `Penukaran poin untuk reservasi ${candidateBookingCode} (-Rp${pricingBreakdown.pointsDiscountAmount.toLocaleString('id-ID')})`,
+            createdBy: 'customer',
+            createdAt: nowIso,
+            metadata: {
+              discountRp: pricingBreakdown.pointsDiscountAmount,
+              redemptionDiscount: pricingBreakdown.pointsDiscountAmount,
+            },
+          });
+        }
+
+        transaction.set(checkoutReceiptRef, {
+          schemaVersion: 2,
+          benefitType: pointsOnlyCheckout ? 'points' : 'voucher',
+          initialHistoryId, bookingEventId, crmRecorded: Boolean(verifiedCustomerId),
+          intent: checkoutIntent,
+          appliedVouchers: voucherTargets.map(target => cleanBookingRecord({
+            kind: target.kind, voucherId: target.masterId, voucherCode: target.code,
+            redemptionId: `vred_${target.code}_${candidateBookingId}`, discountAmount: target.discountAmount,
+            customerVoucherId: target.kind === 'personal' ? personalCvId : undefined,
+          })),
+          loyaltyTransactionId: pricingBreakdown.pointsRedeemed > 0 ? loyaltyTxId : null,
+          loyaltyAccountId: pricingBreakdown.pointsRedeemed > 0 ? verifiedLoyaltySnap.id : null,
+          checkoutAttemptId,
+          bookingId: candidateBookingId,
+          bookingCode: candidateBookingCode,
+          redemptionId: primaryRedemptionId,
+          voucherId: primaryTarget?.masterId || null,
+          voucherCode: primaryTarget?.code || null,
+          generalPromoId: resolvedGeneralPromoId || null,
+          generalPromoCode: resolvedGeneralPromoCode || null,
+          personalCustomerVoucherId: personalCvId || null,
+          customerAuthUid: verifiedUid,
+          customerId: effectiveCustomerId,
+          serviceId,
+          scheduleDate,
+          scheduleTime,
+          customerPhoneDigits: bookingPhoneDigits,
+          paymentMethod: paymentMethodTrimmed,
+          requestedPoints,
+          pointsRedeemed: pricingBreakdown.pointsRedeemed,
+          pointsDiscount: pricingBreakdown.pointsDiscountAmount,
+          discountAmount: pricingBreakdown.totalPromoAndVoucherDiscount,
+          totalDiscount: pricingBreakdown.totalDiscount,
+          totalAmount: pricingBreakdown.finalAmount,
+          pricingBreakdown,
+          committedAt: nowIso,
+        });
+
+        return {
+          status: 200,
+          isIdempotent: false,
+          booking: newBookingData,
+          redemptionId: primaryRedemptionId,
+          voucherId: primaryTarget?.masterId || null,
+          voucherCode: primaryTarget?.code || null,
+          discountAmount: pricingBreakdown.totalPromoAndVoucherDiscount,
+          pricingBreakdown,
+        };
+      });
+
+      if (txOutcome.status !== 200) {
+        return res.status(txOutcome.status).json({
+          success: false,
+          code: txOutcome.code,
+          error: txOutcome.error,
+          message: txOutcome.error,
+          ...(txOutcome.pricingBreakdown ? { pricingBreakdown: txOutcome.pricingBreakdown } : {}),
+        });
+      }
+
+      if (!txOutcome.isIdempotent) {
+        emitStructuredLog({
+          severity: 'INFO',
+          event: 'voucher_checkout_atomic',
+          checkoutAttemptId,
+          redemptionId: txOutcome.redemptionId,
+          bookingId: txOutcome.booking.id,
+          bookingCode: txOutcome.booking.bookingCode,
+          voucherId: txOutcome.voucherId,
+          voucherCode: txOutcome.voucherCode,
+          customerAuthUid: verifiedUid,
+          discountAmount: txOutcome.discountAmount,
+          totalAmount: txOutcome.booking.totalAmount,
+          message: `Voucher checkout atomically committed for booking ${txOutcome.booking.id}`,
+        });
+      }
+
+      return res.json({
+        success: true,
+        isIdempotent: Boolean(txOutcome.isIdempotent),
+        booking: txOutcome.booking,
+        redemptionId: txOutcome.redemptionId,
+        discountAmount: txOutcome.discountAmount,
+        ...(txOutcome.pricingBreakdown ? { pricingBreakdown: txOutcome.pricingBreakdown } : {}),
+      });
+    } catch (err: any) {
+      if (err?.code === 'LOYALTY_OWNERSHIP_CONFLICT') return res.status(409).json({success: false, code: err.code, error: err.message, errorMessage: err.message});
+      console.error('[VoucherCheckout] Transaction or infrastructure failure:', err?.code || err?.message || err);
+      return res.status(503).json({
+        success: false,
+        code: 'VOUCHER_CHECKOUT_UNAVAILABLE',
+        error: 'Layanan checkout voucher sedang mengalami kendala. Silakan coba kembali.',
+      });
+    }
+  });
+
+  // POST /api/vouchers/redeem - Server Authoritative Atomic Redemption Writer (Stage 5A)
+  app.post('/api/vouchers/redeem', async (req, res) => {
+    const isValidDocId = (val: unknown, maxBytes = 256): val is string => {
+      if (typeof val !== 'string') return false;
+      const trimmed = val.trim();
+      if (!trimmed || trimmed !== val) return false;
+      if (trimmed === '.' || trimmed === '..') return false;
+      if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) return false;
+      if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+      return true;
+    };
+
+    const isFiniteNonNegativeInt = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && Number.isInteger(val) && val >= 0;
+
+    const isFiniteNonNegativeNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val >= 0;
+
+    const isFinitePositiveNumber = (val: unknown): val is number =>
+      typeof val === 'number' && Number.isFinite(val) && val > 0;
+
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const calculateStraightDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c * 10) / 10;
+    };
+
+    const calculateBookingPrice = (input: any) => {
+  const warnings: string[] = [];
+  const servicePrice = Math.max(0, input.servicePrice || 0);
+  const homeServiceFee = Math.max(0, input.homeServiceFee || 0);
+  const grossAmount = servicePrice + homeServiceFee;
+
+  // 1. Tier percentage discount (applied directly to service price if configured)
+  let tierDiscountAmount = 0;
+  if (input.customerTier && input.customerTier.discountPercentage > 0) {
+    tierDiscountAmount = Math.floor((servicePrice * input.customerTier.discountPercentage) / 100);
+  }
+
+  const priceAfterTier = Math.max(0, servicePrice - tierDiscountAmount);
+
+  // 2. Voucher / Promo Discount
+  let promoDiscountAmount = 0;
+  let voucherDiscountAmount = 0;
+
+  // Check general promo voucher
+  if (input.promoVoucher && input.promoVoucher.enabled) {
+    const promo = input.promoVoucher;
+    if (priceAfterTier >= (promo.minimumSpend || 0)) {
+      if (promo.voucherType === 'fixed_discount' || (promo.voucherType as any) === 'FIXED_AMOUNT') {
+        promoDiscountAmount = promo.value;
+      } else if (
+        promo.voucherType === 'percentage_discount' ||
+        promo.voucherType === 'percentage' ||
+        (promo.voucherType as any) === 'PERCENTAGE'
+      ) {
+        let disc = Math.floor((priceAfterTier * promo.value) / 100);
+        if (promo.maximumDiscount && promo.maximumDiscount > 0) {
+          disc = Math.min(disc, promo.maximumDiscount);
+        }
+        promoDiscountAmount = disc;
+      } else if (promo.voucherType === 'free_home_service_fee') {
+        promoDiscountAmount = homeServiceFee;
+      }
+    } else {
+      warnings.push(`Kode promo memerlukan minimal transaksi Rp ${(promo.minimumSpend || 0).toLocaleString('id-ID')}`);
+    }
+  }
+
+  // Check customer personal voucher (if not stacking or stacking permitted)
+  if (input.customerVoucher && input.customerVoucher.status === 'available') {
+    const cv = input.customerVoucher;
+    if (priceAfterTier >= (cv.minimumSpend || 0)) {
+      if (cv.voucherType === 'fixed_discount') {
+        voucherDiscountAmount = cv.value;
+      } else if (cv.voucherType === 'percentage_discount') {
+        let disc = Math.floor((priceAfterTier * cv.value) / 100);
+        if (cv.maximumDiscount && cv.maximumDiscount > 0) {
+          disc = Math.min(disc, cv.maximumDiscount);
+        }
+        voucherDiscountAmount = disc;
+      } else if (cv.voucherType === 'free_home_service_fee') {
+        voucherDiscountAmount = homeServiceFee;
+      }
+    } else {
+      warnings.push(`Voucher memerlukan minimal transaksi Rp ${(cv.minimumSpend || 0).toLocaleString('id-ID')}`);
+    }
+  }
+
+  // If stacking not allowed and both provided, take the best one
+  const allowStacking = input.settings?.allowStacking ?? false;
+  let totalPromoAndVoucherDiscount = 0;
+  if (!allowStacking && promoDiscountAmount > 0 && voucherDiscountAmount > 0) {
+    if (voucherDiscountAmount >= promoDiscountAmount) {
+      promoDiscountAmount = 0;
+      totalPromoAndVoucherDiscount = voucherDiscountAmount;
+    } else {
+      voucherDiscountAmount = 0;
+      totalPromoAndVoucherDiscount = promoDiscountAmount;
+    }
+  } else {
+    totalPromoAndVoucherDiscount = promoDiscountAmount + voucherDiscountAmount;
+  }
+
+  // Cap voucher discount to not exceed the servicePrice + fee
+  totalPromoAndVoucherDiscount = Math.min(totalPromoAndVoucherDiscount, priceAfterTier + homeServiceFee);
+
+  const amountAfterVouchers = Math.max(0, priceAfterTier + homeServiceFee - totalPromoAndVoucherDiscount);
+
+  // 3. Points Redemption
+  // Conversion: pointsPerCurrencyUnit (e.g. 10 Points = Rp 1.000 -> 1 pt = Rp 100)
+  const pointsPerCurrencyUnit = input.settings?.pointsPerCurrencyUnit || 10;
+  const valuePerPoint = 1000 / pointsPerCurrencyUnit; // e.g. 100 Rp per point
+  const minPointsToRedeem = input.settings?.minimumPointsToRedeem || 50;
+  const maxRedemptionPercentage = input.settings?.maximumRedemptionPercentage || 30; // max 30% of booking value
+
+  let requestedPoints = Math.max(0, Math.floor(input.pointsToRedeem || 0));
+  let pointsRedeemed = 0;
+  let pointsDiscountAmount = 0;
+
+  if (requestedPoints > 0) {
+    if (requestedPoints < minPointsToRedeem) {
+      warnings.push(`Minimal penukaran poin adalah ${minPointsToRedeem} Poin.`);
+    } else {
+      // Maximum rupiah allowed from points = (grossAmount * maxRedemptionPercentage) / 100
+      const maxAllowedDiscountRp = Math.floor((grossAmount * maxRedemptionPercentage) / 100);
+      const maxAllowedPoints = Math.floor(maxAllowedDiscountRp / valuePerPoint);
+
+      pointsRedeemed = Math.min(requestedPoints, maxAllowedPoints);
+      pointsDiscountAmount = pointsRedeemed * valuePerPoint;
+
+      // Ensure points discount does not exceed remaining amount
+      if (pointsDiscountAmount > amountAfterVouchers) {
+        pointsDiscountAmount = amountAfterVouchers;
+        pointsRedeemed = Math.floor(pointsDiscountAmount / valuePerPoint);
+      }
+    }
+  }
+
+  // 4. Final Amount
+  const totalDiscount = tierDiscountAmount + totalPromoAndVoucherDiscount + pointsDiscountAmount;
+  const finalAmount = Math.max(0, grossAmount - totalDiscount);
+
+  // 5. Estimated Points Earning Calculation
+  // Net qualified spend: Net treatment price after discounts
+  const includeHomeServiceFee = input.settings?.includeHomeServiceFeeForPoints ?? false;
+  const spendPerPoint = input.settings?.spendPerPoint || 10000;
+  const multiplier = input.customerTier?.earningMultiplier || 1.0;
+
+  // Qualified spend = servicePrice - discounts (+ homeServiceFee if allowed)
+  let qualifiedSpendForPoints = servicePrice - tierDiscountAmount - totalPromoAndVoucherDiscount - pointsDiscountAmount;
+  if (includeHomeServiceFee) {
+    qualifiedSpendForPoints += homeServiceFee;
+  }
+  qualifiedSpendForPoints = Math.max(0, qualifiedSpendForPoints);
+
+  const basePointsEarned = Math.floor(qualifiedSpendForPoints / spendPerPoint);
+  const estimatedPointsEarned = Math.floor(basePointsEarned * multiplier);
+
+  return {
+    servicePrice,
+    homeServiceFee,
+    grossAmount,
+    tierDiscountAmount,
+    promoDiscountAmount,
+    voucherDiscountAmount,
+    totalPromoAndVoucherDiscount,
+    pointsRedeemed,
+    pointsDiscountAmount,
+    totalDiscount,
+    finalAmount,
+    qualifiedSpendForPoints,
+    estimatedPointsEarned,
+    warnings,
+  };
+};
+
+    try {
+      // 1. Strict Single Bearer Token Extraction BEFORE any DB reads/writes
+      const rawAuthHeader = req.headers?.authorization;
+      if (typeof rawAuthHeader !== 'string') {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Token otentikasi diperlukan untuk menukarkan voucher.',
+        });
+      }
+      const tokenMatch = /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim());
+      if (!tokenMatch || !tokenMatch[1]) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Format token otentikasi tidak valid.',
+        });
+      }
+
+      if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+        });
+      }
+
+      const authResult = await verifyCustomerFirebaseIdToken(tokenMatch[1]);
+      if (authResult.success === false) {
+        return res.status(authResult.statusCode).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+
+      const verifiedUid = typeof authResult.uid === 'string' ? authResult.uid.trim() : '';
+      if (!isValidDocId(verifiedUid, 128) || verifiedUid !== authResult.uid) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_TOKEN_INVALID',
+          error: 'Identitas pengguna tidak valid.',
+        });
+      }
+
+      // 2. Bounded Input Selectors Validation BEFORE any DB reads/writes
+      const rawBookingId = req.body?.bookingId;
+      const bookingId = typeof rawBookingId === 'string' ? rawBookingId.trim() : '';
+      if (!bookingId || !isValidDocId(bookingId, 256)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_ID',
+          error: 'ID pesanan tidak valid.',
+        });
+      }
+
+      const rawVoucherCode = req.body?.voucherCode;
+      const code = typeof rawVoucherCode === 'string' ? rawVoucherCode.trim().toUpperCase() : '';
+      if (!code || !/^[A-Z0-9_-]{1,64}$/.test(code)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_VOUCHER_CODE',
+          error: 'Kode voucher tidak valid.',
+        });
+      }
+
+      const rawSuppliedVoucherId = req.body?.voucherId;
+      let suppliedVoucherId = '';
+      if (rawSuppliedVoucherId !== undefined && rawSuppliedVoucherId !== null && rawSuppliedVoucherId !== '') {
+        if (typeof rawSuppliedVoucherId !== 'string' || !isValidDocId(rawSuppliedVoucherId.trim(), 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_VOUCHER_ID',
+            error: 'ID voucher tidak valid.',
+          });
+        }
+        suppliedVoucherId = rawSuppliedVoucherId.trim();
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'VOUCHER_REDEMPTION_UNAVAILABLE',
+          error: 'Layanan penukaran voucher sedang tidak tersedia.',
+        });
       }
 
       await ensureServerAuthenticated();
 
-      const { cleanDigits } = normalizeIndonesianPhoneServer(customerPhone || '');
-      const authUid = (customerAuthUid || '').trim();
-      const custId = (customerId || '').trim() || (cleanDigits ? `cust_${cleanDigits}` : '');
-      const targetVoucherId = voucherId || (code === 'SENZUWELCOME' ? 'vch_senzuwelcome' : `vch_${code.toLowerCase()}`);
+      const redemptionId = `vred_${code}_${bookingId}`;
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const receiptRef = adminDb.collection('voucher_redemption_receipts').doc(redemptionId);
+      const redemptionRef = adminDb.collection('voucher_redemptions').doc(redemptionId);
 
-      const redDocId = `vred_${code}_${bookingId}`;
-      const now = new Date().toISOString();
+      // 3. Authoritative Native Admin Transaction (All reads precede writes)
+      const txOutcome = await adminDb.runTransaction(async (transaction: any) => {
+        const nowIso = new Date().toISOString();
 
-      // Write redemption record
-      await setDoc(doc(db, 'voucher_redemptions', redDocId), {
-        id: redDocId,
-        voucherId: targetVoucherId,
-        voucherCode: code,
-        customerId: custId,
-        customerAuthUid: authUid || null,
-        customerPhone: customerPhone || null,
-        normalizedPhone: cleanDigits ? `+${cleanDigits}` : null,
-        bookingId,
-        bookingCode: bookingCode || '',
-        discountAmount: Number(discountAmount) || 0,
-        redeemedAt: now,
-        status: 'active',
-        source: 'booking_submission',
-        updatedAt: now
-      }, { merge: true });
-
-      // Write deterministic lock documents
-      if (authUid) {
-        await setDoc(doc(db, 'voucher_redemptions', `vlock_${code}_uid_${authUid}`), {
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerAuthUid: authUid,
-          bookingId,
-          bookingCode: bookingCode || '',
-          redeemedAt: now,
-          status: 'active'
-        }, { merge: true });
-      }
-      if (cleanDigits) {
-        await setDoc(doc(db, 'voucher_redemptions', `vlock_${code}_phone_${cleanDigits}`), {
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerPhone: cleanDigits,
-          bookingId,
-          bookingCode: bookingCode || '',
-          redeemedAt: now,
-          status: 'active'
-        }, { merge: true });
-      }
-      if (custId) {
-        await setDoc(doc(db, 'voucher_redemptions', `vlock_${code}_cust_${custId}`), {
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerId: custId,
-          bookingId,
-          bookingCode: bookingCode || '',
-          redeemedAt: now,
-          status: 'active'
-        }, { merge: true });
-      }
-
-      // Increment voucher usage count
-      if (targetVoucherId) {
-        try {
-          const vRef = doc(db, 'vouchers', targetVoucherId);
-          await runTransaction(db, async (t) => {
-            const vSnap = await t.get(vRef);
-            if (vSnap.exists()) {
-              const cur = vSnap.data()?.currentUsageCount || 0;
-              t.update(vRef, { currentUsageCount: cur + 1, updatedAt: now });
-            }
-          });
-        } catch (vErr) {
-          console.warn('Notice updating voucher usage count:', vErr);
+        // --- PHASE 1: READ BOOKING & VALIDATE OWNERSHIP FIRST ---
+        const bookingSnap = await transaction.get(bookingRef);
+        if (!snapExists(bookingSnap)) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_UNVERIFIED',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
         }
+
+        const bookingData = bookingSnap.data() || {};
+        const rawCanonicalUid = bookingData.customerAuthUid;
+        const rawLegacyUid = bookingData.authUserId;
+        const hasCanonicalUid = rawCanonicalUid !== undefined && rawCanonicalUid !== null && rawCanonicalUid !== '';
+        const hasLegacyUid = rawLegacyUid !== undefined && rawLegacyUid !== null && rawLegacyUid !== '';
+
+        if (hasCanonicalUid && !isValidDocId(rawCanonicalUid, 128)) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_INVALID',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
+        }
+        if (hasLegacyUid && !isValidDocId(rawLegacyUid, 128)) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_INVALID',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
+        }
+        if (!hasCanonicalUid && !hasLegacyUid) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_UNVERIFIED',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
+        }
+        if (hasCanonicalUid && hasLegacyUid && rawCanonicalUid !== rawLegacyUid) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_CONFLICT',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
+        }
+
+        const effectiveOwnerUid = hasCanonicalUid ? rawCanonicalUid : rawLegacyUid;
+        if (effectiveOwnerUid !== verifiedUid) {
+          return {
+            status: 403,
+            code: 'BOOKING_OWNERSHIP_DENIED',
+            error: 'Akses ditolak. Kepemilikan pesanan tidak dapat diverifikasi.',
+          };
+        }
+
+        const bookingStatusLower = typeof bookingData.status === 'string' ? bookingData.status.trim().toLowerCase() : '';
+        if (bookingStatusLower === 'cancelled' || bookingStatusLower === 'batal') {
+          return {
+            status: 409,
+            code: 'BOOKING_CANCELLED',
+            error: 'Pesanan yang telah dibatalkan tidak dapat menukarkan voucher.',
+          };
+        }
+
+        // Validate booking voucher linkage fields structure
+        for (const fieldName of ['promoId', 'promoCode', 'promoCodeSnapshot', 'voucherId', 'voucherCode'] as const) {
+          const val = bookingData[fieldName];
+          if (val !== undefined && val !== null && val !== '') {
+            if (typeof val !== 'string' || /[\/\\\x00-\x1F\x7F]/.test(val) || Buffer.byteLength(val, 'utf8') > 256) {
+              return {
+                status: 409,
+                code: 'VOUCHER_LINKAGE_INVALID',
+                error: 'Data referensi voucher pada pesanan tidak valid.',
+              };
+            }
+          }
+        }
+
+        const rawBookingVoucherId = typeof bookingData.voucherId === 'string' ? bookingData.voucherId.trim() : '';
+        const rawBookingPromoId = typeof bookingData.promoId === 'string' ? bookingData.promoId.trim() : '';
+        const rawBookingVoucherCode = typeof bookingData.voucherCode === 'string' ? bookingData.voucherCode.trim().toUpperCase() : '';
+        const rawBookingPromoCode = typeof bookingData.promoCode === 'string' ? bookingData.promoCode.trim().toUpperCase() : '';
+        const rawBookingPromoSnapshot = typeof bookingData.promoCodeSnapshot === 'string' ? bookingData.promoCodeSnapshot.trim().toUpperCase() : '';
+
+        if (rawBookingPromoCode && rawBookingPromoSnapshot && rawBookingPromoCode !== rawBookingPromoSnapshot) {
+          return {
+            status: 409,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'Konflik kode promo pada data pesanan.',
+          };
+        }
+
+        const rawBookingCustomerVoucherId =
+          typeof bookingData.customerVoucherId === 'string' ? bookingData.customerVoucherId.trim() : '';
+        const personalCvId = rawBookingCustomerVoucherId.startsWith('cv_')
+          ? rawBookingCustomerVoucherId
+          : rawBookingVoucherId.startsWith('cv_')
+            ? rawBookingVoucherId
+            : rawBookingPromoId.startsWith('cv_')
+              ? rawBookingPromoId
+              : suppliedVoucherId.startsWith('cv_') && (!rawBookingVoucherId || rawBookingVoucherId === suppliedVoucherId)
+                ? suppliedVoucherId
+                : '';
+
+        if (
+          rawBookingPromoId &&
+          !rawBookingPromoId.startsWith('cv_') &&
+          rawBookingVoucherId &&
+          !rawBookingVoucherId.startsWith('cv_') &&
+          rawBookingPromoId !== rawBookingVoucherId
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'Konflik ID voucher pada data pesanan.',
+          };
+        }
+
+        const generalPromoId =
+          rawBookingPromoId && !rawBookingPromoId.startsWith('cv_')
+            ? rawBookingPromoId
+            : !personalCvId && rawBookingVoucherId && !rawBookingVoucherId.startsWith('cv_')
+              ? rawBookingVoucherId
+              : '';
+
+        if (!personalCvId) {
+          const nonEmptyCodes = new Set(
+            [rawBookingPromoCode, rawBookingPromoSnapshot, rawBookingVoucherCode].filter(Boolean)
+          );
+          if (nonEmptyCodes.size > 1) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Konflik kode voucher pada data pesanan.',
+            };
+          }
+          const singleBookingCode = [...nonEmptyCodes][0] || '';
+          if (!singleBookingCode && !generalPromoId) {
+            return {
+              status: 409,
+              code: 'VOUCHER_BOOKING_MISMATCH',
+              error: 'Pesanan ini tidak memiliki voucher yang diterapkan.',
+            };
+          }
+          if (singleBookingCode && singleBookingCode !== code) {
+            return {
+              status: 409,
+              code: 'VOUCHER_BOOKING_MISMATCH',
+              error: 'Kode voucher tidak sesuai dengan pesanan.',
+            };
+          }
+        } else {
+          const candidateCodes = [rawBookingPromoCode, rawBookingPromoSnapshot, rawBookingVoucherCode].filter(Boolean);
+          if (candidateCodes.length > 0 && !candidateCodes.includes(code) && !personalCvId) {
+            return {
+              status: 409,
+              code: 'VOUCHER_BOOKING_MISMATCH',
+              error: 'Kode voucher tidak sesuai dengan pesanan.',
+            };
+          }
+        }
+
+        // Trusted receipt replay depends on current owned booking linkage, not current prices or public ledger.
+        const replayReceiptSnap = await transaction.get(receiptRef);
+        if (snapExists(replayReceiptSnap)) {
+          const receipt = replayReceiptSnap.data() || {};
+          const receiptValid = receipt.schemaVersion === 1
+            && receipt.redemptionId === redemptionId
+            && receipt.bookingId === bookingId
+            && receipt.voucherCode === code
+            && receipt.customerAuthUid === verifiedUid
+            && isValidDocId(receipt.voucherId, 128)
+            && isFinitePositiveNumber(receipt.discountAmount)
+            && typeof receipt.committedAt === 'string'
+            && receipt.committedAt.trim().length > 0
+            && !Number.isNaN(Date.parse(receipt.committedAt));
+          if (!receiptValid) return { status: 409, code: 'VOUCHER_RECEIPT_CONFLICT', error: 'Bukti penukaran voucher bertentangan atau rusak.' };
+
+          const expectedGeneralCode = rawBookingPromoCode || rawBookingPromoSnapshot || (!personalCvId ? rawBookingVoucherCode : '');
+          const replayGeneral = generalPromoId
+            ? generalPromoId === receipt.voucherId && (!expectedGeneralCode || expectedGeneralCode === code)
+            : !personalCvId && expectedGeneralCode === code;
+          let replayPersonal = false;
+          if (personalCvId && (!replayGeneral || rawBookingVoucherCode === code || suppliedVoucherId === personalCvId)) {
+            const cvSnap = await transaction.get(adminDb.collection('customer_vouchers').doc(personalCvId));
+            if (!snapExists(cvSnap)) return { status: 409, code: 'VOUCHER_LINKAGE_CONFLICT', error: 'Referensi voucher personal tidak dapat diverifikasi.' };
+            const cv = cvSnap.data() || {};
+            const cvCode = typeof cv.voucherCode === 'string' ? cv.voucherCode.trim().toUpperCase() : rawBookingVoucherCode;
+            const cvUidFields = [cv.customerAuthUid, cv.authUserId];
+            const cvUidConsistent = cvUidFields.every(value => value === undefined || value === null || value === '' || value === verifiedUid);
+            const cvHasDirectUid = cv.customerAuthUid === verifiedUid || cv.authUserId === verifiedUid;
+            const cvOwner = typeof cv.customerId === 'string' ? cv.customerId.trim() : '';
+            let cvOwned = Boolean(cvOwner) && (cvOwner === verifiedUid || (cvHasDirectUid && cvUidConsistent));
+            const parentCustomerId = typeof bookingData.customerId === 'string' ? bookingData.customerId.trim() : '';
+            if (!cvOwned && cvOwner && cvOwner === parentCustomerId && isValidDocId(parentCustomerId, 128)) {
+              const profileSnap = await transaction.get(adminDb.collection('customers').doc(parentCustomerId));
+              if (snapExists(profileSnap)) {
+                const profile = profileSnap.data() || {};
+                const owners = [profile.customerAuthUid, profile.authUserId];
+                cvOwned = owners.some(value => value === verifiedUid)
+                  && owners.every(value => value === undefined || value === null || value === '' || value === verifiedUid);
+
+              }
+            }
+            replayPersonal = cvUidConsistent && cvOwned && cv.voucherId === receipt.voucherId && cvCode === code
+              && (cv.bookingId === undefined || cv.bookingId === null || cv.bookingId === '' || cv.bookingId === bookingId);
+            if (!replayPersonal) return { status: 409, code: 'VOUCHER_LINKAGE_CONFLICT', error: 'Voucher personal bertentangan dengan bukti penukaran server.' };
+          }
+          if ((!replayGeneral && !replayPersonal)
+            || (suppliedVoucherId && suppliedVoucherId !== receipt.voucherId && !(replayPersonal && suppliedVoucherId === personalCvId))) {
+            return { status: 409, code: 'VOUCHER_LINKAGE_CONFLICT', error: 'Bukti penukaran tidak sesuai dengan referensi voucher pesanan.' };
+          }
+          return { status: 200, isIdempotent: true, redemptionId, discountAmount: receipt.discountAmount };
+        }
+
+        // --- PHASE 2: COMPLETE ALL REMAINING TRANSACTION READS BEFORE ANY WRITES ---
+        const redemptionSnap = await transaction.get(redemptionRef);
+        const vouchersByCodeSnap = await transaction.get(
+          adminDb.collection('vouchers').where('code', '==', code)
+        );
+
+        const generalPromoDocSnap =
+          generalPromoId && isValidDocId(generalPromoId, 128)
+            ? await transaction.get(adminDb.collection('vouchers').doc(generalPromoId))
+            : null;
+
+        const personalCvRef =
+          personalCvId && isValidDocId(personalCvId, 128)
+            ? adminDb.collection('customer_vouchers').doc(personalCvId)
+            : null;
+        const personalCvSnap = personalCvRef ? await transaction.get(personalCvRef) : null;
+
+        const cvDataRaw = personalCvSnap && snapExists(personalCvSnap) ? personalCvSnap.data() || {} : null;
+        const cvMasterId =
+          cvDataRaw && typeof cvDataRaw.voucherId === 'string' && isValidDocId(cvDataRaw.voucherId.trim(), 128)
+            ? cvDataRaw.voucherId.trim()
+            : '';
+        const cvMasterDocSnap = cvMasterId
+          ? await transaction.get(adminDb.collection('vouchers').doc(cvMasterId))
+          : null;
+
+        // If booking has both personal voucher and a separate general promo code, also read the other promo by code if needed
+        const effectiveBookingPromoCode = rawBookingPromoCode || rawBookingPromoSnapshot;
+        const otherPromoCodeToLookup =
+          personalCvId && effectiveBookingPromoCode && effectiveBookingPromoCode !== code
+            ? effectiveBookingPromoCode
+            : '';
+        const otherPromoByCodeSnap = otherPromoCodeToLookup
+          ? await transaction.get(adminDb.collection('vouchers').where('code', '==', otherPromoCodeToLookup))
+          : null;
+
+        const serviceId = typeof bookingData.serviceId === 'string' ? bookingData.serviceId.trim() : '';
+        const serviceSnap =
+          serviceId && isValidDocId(serviceId, 128)
+            ? await transaction.get(adminDb.collection('services').doc(serviceId))
+            : null;
+
+        // Read customer profiles bound to verifiedUid
+        const custByAuthUserSnap = await transaction.get(
+          adminDb.collection('customers').where('authUserId', '==', verifiedUid)
+        );
+        const custByCanonicalSnap = await transaction.get(
+          adminDb.collection('customers').where('customerAuthUid', '==', verifiedUid)
+        );
+
+        const bookingCustomerId =
+          typeof bookingData.customerId === 'string' && isValidDocId(bookingData.customerId.trim(), 128)
+            ? bookingData.customerId.trim()
+            : '';
+        const bookingCustomerDocSnap = bookingCustomerId
+          ? await transaction.get(adminDb.collection('customers').doc(bookingCustomerId))
+          : null;
+
+        // Collect candidate customer IDs for loyalty account lookup
+        const ownedCustomerDocsMap = new Map<string, any>();
+        for (const d of [...(custByAuthUserSnap?.docs || []), ...(custByCanonicalSnap?.docs || [])]) {
+          if (snapExists(d)) ownedCustomerDocsMap.set(d.id, d);
+        }
+
+        const candidateLoyaltyCustomerIds = new Set<string>([verifiedUid]);
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) candidateLoyaltyCustomerIds.add(cid);
+        }
+        if (bookingCustomerId) candidateLoyaltyCustomerIds.add(bookingCustomerId);
+
+        const loyaltyAccountSnaps = new Map<string, any>();
+        for (const cid of candidateLoyaltyCustomerIds) {
+          const laSnap = await transaction.get(adminDb.collection('loyalty_accounts').doc(cid));
+          if (snapExists(laSnap)) {
+            loyaltyAccountSnaps.set(cid, laSnap);
+          }
+        }
+
+        const loyaltySettingsSnap = await transaction.get(
+          adminDb.collection('loyalty_settings').doc('general')
+        );
+
+        // Read candidate membership tier documents
+        const candidateTierIds = new Set<string>(['member']);
+        for (const laSnap of loyaltyAccountSnaps.values()) {
+          const tId = laSnap.data()?.currentTierId;
+          if (typeof tId === 'string' && isValidDocId(tId.trim().toLowerCase(), 64)) {
+            candidateTierIds.add(tId.trim().toLowerCase());
+          }
+        }
+        if (typeof bookingData.membershipTierAtBooking === 'string') {
+          const bt = bookingData.membershipTierAtBooking.trim().toLowerCase();
+          if (isValidDocId(bt, 64)) candidateTierIds.add(bt);
+        }
+        const membershipTierSnaps = new Map<string, any>();
+        for (const tId of candidateTierIds) {
+          const tSnap = await transaction.get(adminDb.collection('membership_tiers').doc(tId));
+          if (snapExists(tSnap)) {
+            membershipTierSnaps.set(tId, tSnap);
+          }
+        }
+
+        // Read lock documents & redemption/booking history for quota and first-order validation
+        const uidLockRef = adminDb.collection('voucher_redemptions').doc(`vlock_${code}_uid_${verifiedUid}`);
+        const uidLockSnap = await transaction.get(uidLockRef);
+
+        const custLockRefs = new Map<string, any>();
+        const custLockSnaps = new Map<string, any>();
+        for (const cid of candidateLoyaltyCustomerIds) {
+          const ref = adminDb.collection('voucher_redemptions').doc(`vlock_${code}_cust_${cid}`);
+          custLockRefs.set(cid, ref);
+          custLockSnaps.set(cid, await transaction.get(ref));
+        }
+
+        const bookingPhoneRaw = typeof bookingData.customerWhatsApp === 'string'
+          ? bookingData.customerWhatsApp.trim()
+          : typeof bookingData.customerPhone === 'string'
+            ? bookingData.customerPhone.trim()
+            : '';
+        const { cleanDigits: bookingPhoneDigits } = normalizeIndonesianPhoneServer(bookingPhoneRaw);
+        const phoneLockRef =
+          bookingPhoneDigits && isValidDocId(bookingPhoneDigits, 64)
+            ? adminDb.collection('voucher_redemptions').doc(`vlock_${code}_phone_${bookingPhoneDigits}`)
+            : null;
+        const phoneLockSnap = phoneLockRef ? await transaction.get(phoneLockRef) : null;
+
+        const redemptionsByCodeSnap = await transaction.get(
+          adminDb.collection('voucher_redemptions').where('voucherCode', '==', code)
+        );
+
+        const singleCodeMasterId =
+          vouchersByCodeSnap?.docs?.length === 1 ? vouchersByCodeSnap.docs[0].id : '';
+        const redemptionsByMasterIdSnap =
+          singleCodeMasterId && isValidDocId(singleCodeMasterId, 128)
+            ? await transaction.get(
+                adminDb.collection('voucher_redemptions').where('voucherId', '==', singleCodeMasterId)
+              )
+            : null;
+
+        const bookingsByCanonicalSnap = await transaction.get(
+          adminDb.collection('bookings').where('customerAuthUid', '==', verifiedUid)
+        );
+        const bookingsByLegacySnap = await transaction.get(
+          adminDb.collection('bookings').where('authUserId', '==', verifiedUid)
+        );
+        const bookingsByCustIdSnaps = new Map<string, any>();
+        for (const cid of ownedCustomerDocsMap.keys()) {
+          if (isValidDocId(cid, 128)) {
+            bookingsByCustIdSnaps.set(
+              cid,
+              await transaction.get(adminDb.collection('bookings').where('customerId', '==', cid))
+            );
+          }
+        }
+
+        // --- PHASE 3: PURE VALIDATION & DISCOUNT RECALCULATION (ZERO READS AFTER THIS POINT) ---
+
+        // 3A. Customer Profile Ownership & Conflict Validation
+        if (ownedCustomerDocsMap.size > 1) {
+          return {
+            status: 409,
+            code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+            error: 'Kepemilikan profil pelanggan ambigu dan memerlukan peninjauan.',
+          };
+        }
+
+        let verifiedCustomerId = '';
+        let verifiedCustomerData: any = null;
+
+        if (ownedCustomerDocsMap.size === 1) {
+          const [cid, cSnap] = [...ownedCustomerDocsMap.entries()][0];
+          const cData = cSnap.data() || {};
+          if (
+            (cData.authUserId !== undefined && cData.authUserId !== null && cData.authUserId !== '' && cData.authUserId !== verifiedUid) ||
+            (cData.customerAuthUid !== undefined && cData.customerAuthUid !== null && cData.customerAuthUid !== '' && cData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              error: 'Akses ditolak. Kepemilikan akun pelanggan tidak konsisten.',
+            };
+          }
+          if (bookingCustomerId && bookingCustomerId !== cid && bookingCustomerId !== cData.id) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              error: 'Akses ditolak. Identitas pelanggan pesanan tidak sesuai dengan profil akun.',
+            };
+          }
+          verifiedCustomerId = cid;
+          verifiedCustomerData = cData;
+        } else if (bookingCustomerDocSnap && snapExists(bookingCustomerDocSnap)) {
+          const bcData = bookingCustomerDocSnap.data() || {};
+          const bcAuthUid = bcData.authUserId;
+          const bcCustAuthUid = bcData.customerAuthUid;
+          if (
+            (bcAuthUid !== undefined && bcAuthUid !== null && bcAuthUid !== '' && bcAuthUid !== verifiedUid) ||
+            (bcCustAuthUid !== undefined && bcCustAuthUid !== null && bcCustAuthUid !== '' && bcCustAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_DENIED',
+              error: 'Akses ditolak. Profil pelanggan pesanan dimiliki oleh akun lain.',
+            };
+          }
+          if (bcAuthUid === verifiedUid || bcCustAuthUid === verifiedUid) {
+            verifiedCustomerId = bookingCustomerDocSnap.id;
+            verifiedCustomerData = bcData;
+          }
+        }
+
+        // 3B. Authoritative Master Catalog Lookup for Requested Code
+        const matchingMasterDocs = vouchersByCodeSnap?.docs || [];
+        if (matchingMasterDocs.length > 1) {
+          return {
+            status: 409,
+            code: 'AMBIGUOUS_VOUCHER_CODE',
+            error: 'Kode voucher duplikat ditemukan di katalog master.',
+          };
+        }
+        if (matchingMasterDocs.length === 0) {
+          return {
+            status: 404,
+            code: 'VOUCHER_NOT_FOUND',
+            error: 'Kode voucher tidak ditemukan dalam katalog resmi.',
+          };
+        }
+
+        const targetMasterSnap = matchingMasterDocs[0];
+        const targetMasterRef = targetMasterSnap.ref;
+        const targetMasterId = targetMasterSnap.id;
+        const targetMasterData = targetMasterSnap.data() || {};
+
+        if (
+          !isValidDocId(targetMasterId, 128) ||
+          (targetMasterData.id !== undefined && targetMasterData.id !== targetMasterId) ||
+          typeof targetMasterData.code !== 'string' ||
+          targetMasterData.code.trim().toUpperCase() !== code
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'Data master voucher tidak konsisten dengan kode voucher.',
+          };
+        }
+
+        // 3C. Personal Voucher (cv_) & General Promo Linkage Validation
+        let resolvedPersonalCv: any = null;
+        let resolvedPersonalCvMaster: any = null;
+        let resolvedPersonalCvCode = '';
+
+        if (personalCvId) {
+          if (!personalCvSnap || !snapExists(personalCvSnap)) {
+            return {
+              status: 404,
+              code: 'CUSTOMER_VOUCHER_NOT_FOUND',
+              error: 'Voucher personal pelanggan tidak ditemukan.',
+            };
+          }
+          const cvData = personalCvSnap.data() || {};
+          if (
+            (cvData.authUserId !== undefined && cvData.authUserId !== null && cvData.authUserId !== '' && cvData.authUserId !== verifiedUid) ||
+            (cvData.customerAuthUid !== undefined && cvData.customerAuthUid !== null && cvData.customerAuthUid !== '' && cvData.customerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Voucher personal ini bukan milik akun Anda.',
+            };
+          }
+
+          const cvOwnerCustomerId = typeof cvData.customerId === 'string' ? cvData.customerId.trim() : '';
+          const cvHasVerifiedUidBinding =
+            cvData.customerAuthUid === verifiedUid || cvData.authUserId === verifiedUid;
+          const cvOwnerAllowed = Boolean(cvOwnerCustomerId) && (
+            cvOwnerCustomerId === verifiedUid ||
+            (verifiedCustomerId && cvOwnerCustomerId === verifiedCustomerId) ||
+            cvHasVerifiedUidBinding
+          );
+          if (!cvOwnerAllowed) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_VOUCHER_OWNERSHIP_DENIED',
+              error: 'Kepemilikan voucher personal tidak sesuai dengan akun Anda.',
+            };
+          }
+
+          if (!cvMasterId || !cvMasterDocSnap || !snapExists(cvMasterDocSnap)) {
+            return {
+              status: 404,
+              code: 'VOUCHER_NOT_FOUND',
+              error: 'Master voucher untuk voucher personal tidak ditemukan.',
+            };
+          }
+
+          resolvedPersonalCvMaster = cvMasterDocSnap.data() || {};
+          const cvMasterCode =
+            typeof resolvedPersonalCvMaster.code === 'string'
+              ? resolvedPersonalCvMaster.code.trim().toUpperCase()
+              : '';
+          const cvDocCode =
+            typeof cvData.voucherCode === 'string' ? cvData.voucherCode.trim().toUpperCase() : '';
+
+          if (cvDocCode && cvMasterCode && cvDocCode !== cvMasterCode) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Kode voucher personal tidak sesuai dengan master voucher.',
+            };
+          }
+          resolvedPersonalCvCode = cvDocCode || cvMasterCode;
+
+          if (
+            rawBookingVoucherCode &&
+            rawBookingVoucherCode !== resolvedPersonalCvCode &&
+            rawBookingVoucherCode !== effectiveBookingPromoCode
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Kode voucher pada pesanan tidak sesuai dengan voucher personal.',
+            };
+          }
+
+          if (
+            (cvData.voucherType && resolvedPersonalCvMaster.voucherType && cvData.voucherType !== resolvedPersonalCvMaster.voucherType) ||
+            (cvData.value !== undefined && resolvedPersonalCvMaster.value !== undefined && cvData.value !== resolvedPersonalCvMaster.value)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_LINKAGE_CONFLICT',
+              error: 'Nilai voucher personal tidak konsisten dengan master voucher.',
+            };
+          }
+
+          if (cvData.bookingId !== undefined && cvData.bookingId !== null && cvData.bookingId !== '' && cvData.bookingId !== bookingId) {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_ALREADY_USED',
+              error: 'Voucher personal ini sudah digunakan pada pesanan lain.',
+            };
+          }
+          if (
+            cvData.bookingCode !== undefined &&
+            cvData.bookingCode !== null &&
+            cvData.bookingCode !== '' &&
+            bookingData.bookingCode &&
+            cvData.bookingCode !== bookingData.bookingCode
+          ) {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_ALREADY_USED',
+              error: 'Kode pesanan pada voucher personal tidak sesuai.',
+            };
+          }
+
+          if (cvData.status === 'used') {
+            if (cvData.bookingId !== bookingId) {
+              return {
+                status: 409,
+                code: 'CUSTOMER_VOUCHER_ALREADY_USED',
+                error: 'Voucher personal sudah pernah digunakan.',
+              };
+            }
+          } else if (cvData.status !== 'available' && cvData.status !== 'reserved') {
+            return {
+              status: 409,
+              code: 'CUSTOMER_VOUCHER_INELIGIBLE',
+              error: 'Status voucher personal tidak dapat digunakan.',
+            };
+          }
+
+          const cvExpiryStr = cvData.expiredAt || cvData.expiresAt;
+          if (cvExpiryStr !== undefined && cvExpiryStr !== null && cvExpiryStr !== '') {
+            if (typeof cvExpiryStr !== 'string' || Number.isNaN(Date.parse(cvExpiryStr)) || cvExpiryStr < nowIso) {
+              return {
+                status: 409,
+                code: 'VOUCHER_EXPIRED',
+                error: 'Voucher personal sudah kedaluwarsa.',
+              };
+            }
+          }
+
+          resolvedPersonalCv = {
+            ...resolvedPersonalCvMaster,
+            ...cvData,
+            id: personalCvSnap.id,
+            voucherId: cvMasterDocSnap.id,
+            voucherCode: resolvedPersonalCvCode,
+            voucherType: cvData.voucherType ?? resolvedPersonalCvMaster?.voucherType,
+            value: cvData.value ?? resolvedPersonalCvMaster?.value,
+          };
+        }
+
+        // Resolve general promo master voucher if applied on the booking
+        let resolvedGeneralPromoMaster: any = null;
+        let resolvedGeneralPromoId = '';
+        let resolvedGeneralPromoCode = '';
+
+        const hasSeparateGeneralPromo =
+          Boolean(generalPromoId) ||
+          (!personalCvId && Boolean(effectiveBookingPromoCode || rawBookingVoucherCode)) ||
+          (Boolean(personalCvId) && Boolean(effectiveBookingPromoCode) && effectiveBookingPromoCode !== resolvedPersonalCvCode);
+
+        if (hasSeparateGeneralPromo) {
+          const expectedPromoCode =
+            effectiveBookingPromoCode || (!personalCvId ? rawBookingVoucherCode || code : '');
+
+          if (generalPromoId) {
+            if (!generalPromoDocSnap || !snapExists(generalPromoDocSnap)) {
+              return {
+                status: 409,
+                code: 'VOUCHER_LINKAGE_CONFLICT',
+                error: 'Referensi promo pada pesanan tidak ditemukan di katalog master.',
+              };
+            }
+            const gpData = generalPromoDocSnap.data() || {};
+            const gpCode = typeof gpData.code === 'string' ? gpData.code.trim().toUpperCase() : '';
+            if (!gpCode || (expectedPromoCode && gpCode !== expectedPromoCode)) {
+              return {
+                status: 409,
+                code: 'VOUCHER_LINKAGE_CONFLICT',
+                error: 'Kode promo pada pesanan tidak sesuai dengan ID promo master.',
+              };
+            }
+            resolvedGeneralPromoMaster = { ...gpData, id: generalPromoDocSnap.id, code: gpCode };
+            resolvedGeneralPromoId = generalPromoDocSnap.id;
+            resolvedGeneralPromoCode = gpCode;
+          } else if (expectedPromoCode === code) {
+            resolvedGeneralPromoMaster = { ...targetMasterData, id: targetMasterId, code };
+            resolvedGeneralPromoId = targetMasterId;
+            resolvedGeneralPromoCode = code;
+          } else if (otherPromoByCodeSnap) {
+            if ((otherPromoByCodeSnap.docs || []).length !== 1) {
+              return {
+                status: 409,
+                code: 'VOUCHER_LINKAGE_CONFLICT',
+                error: 'Kode promo pendamping pada pesanan tidak valid atau ambigu.',
+              };
+            }
+            const opSnap = otherPromoByCodeSnap.docs[0];
+            const opData = opSnap.data() || {};
+            resolvedGeneralPromoMaster = {
+              ...opData,
+              id: opSnap.id,
+              code: expectedPromoCode,
+            };
+            resolvedGeneralPromoId = opSnap.id;
+            resolvedGeneralPromoCode = expectedPromoCode;
+          }
+        }
+
+        const isRedeemingGeneralPromo =
+          Boolean(resolvedGeneralPromoMaster) &&
+          resolvedGeneralPromoCode === code &&
+          resolvedGeneralPromoId === targetMasterId;
+
+        const isRedeemingPersonalCv =
+          Boolean(resolvedPersonalCv) &&
+          resolvedPersonalCvCode === code &&
+          cvMasterId === targetMasterId;
+
+        if (!isRedeemingGeneralPromo && !isRedeemingPersonalCv) {
+          return {
+            status: 409,
+            code: 'VOUCHER_BOOKING_MISMATCH',
+            error: 'Voucher yang diminta tidak sesuai dengan referensi voucher pada pesanan.',
+          };
+        }
+
+        if (
+          suppliedVoucherId &&
+          suppliedVoucherId !== targetMasterId &&
+          !(isRedeemingPersonalCv && suppliedVoucherId === personalCvId)
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_LINKAGE_CONFLICT',
+            error: 'ID voucher pada permintaan bertentangan dengan pesanan.',
+          };
+        }
+
+        // 3D. Authoritative Price, Fee, Tier & Settings Resolution (Server-Derived Discount)
+        if (!serviceSnap || !snapExists(serviceSnap)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Layanan pesanan tidak ditemukan dalam katalog resmi. Penukaran memerlukan peninjauan.',
+          };
+        }
+        const serviceData = serviceSnap.data() || {};
+        const authoritativeServicePrice = serviceData.price;
+        if (!isFinitePositiveNumber(authoritativeServicePrice)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Harga layanan resmi tidak dapat diverifikasi.',
+          };
+        }
+
+        if (
+          bookingData.servicePrice !== undefined &&
+          bookingData.servicePrice !== null &&
+          bookingData.servicePrice !== authoritativeServicePrice
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Harga layanan pada pesanan berbeda dari katalog resmi dan memerlukan peninjauan.',
+          };
+        }
+        if (
+          bookingData.servicePriceSnapshot !== undefined &&
+          bookingData.servicePriceSnapshot !== null &&
+          bookingData.servicePriceSnapshot !== authoritativeServicePrice
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Snapshot harga layanan tidak dapat diverifikasi secara otomatis.',
+          };
+        }
+        if (
+          bookingData.serviceDuration !== undefined &&
+          bookingData.serviceDuration !== null &&
+          isFinitePositiveNumber(serviceData.duration) &&
+          bookingData.serviceDuration !== serviceData.duration
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+          };
+        }
+
+        // Resolve Loyalty Settings
+        const rawLoyaltySettings =
+          loyaltySettingsSnap && snapExists(loyaltySettingsSnap) ? loyaltySettingsSnap.data() || {} : {};
+        if (
+          rawLoyaltySettings.allowStacking !== undefined &&
+          typeof rawLoyaltySettings.allowStacking !== 'boolean'
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Konfigurasi penggabungan voucher tidak valid.',
+          };
+        }
+        const loyaltySettings = {
+          ...DEFAULT_LOYALTY_SETTINGS,
+          ...rawLoyaltySettings,
+        };
+        if (loyaltySettings.voucherEnabled === false) {
+          return {
+            status: 409,
+            code: 'VOUCHER_DISABLED',
+            error: 'Fitur penukaran voucher sedang dinonaktifkan.',
+          };
+        }
+
+        // Resolve Customer Membership Tier
+        const verifiedLoyaltySnap =
+          (verifiedCustomerId && loyaltyAccountSnaps.get(verifiedCustomerId)) ||
+          loyaltyAccountSnaps.get(verifiedUid) ||
+          null;
+        const verifiedLoyaltyData = verifiedLoyaltySnap ? verifiedLoyaltySnap.data() || {} : null;
+
+        let resolvedTierId = 'member';
+        if (verifiedLoyaltyData) {
+          if (verifiedLoyaltyData.status === 'suspended' || verifiedLoyaltyData.status === 'closed') {
+            return {
+              status: 403,
+              code: 'LOYALTY_ACCOUNT_INACTIVE',
+              error: 'Akun loyalitas pelanggan sedang tidak aktif.',
+            };
+          }
+          if (typeof verifiedLoyaltyData.currentTierId === 'string' && verifiedLoyaltyData.currentTierId.trim()) {
+            resolvedTierId = verifiedLoyaltyData.currentTierId.trim().toLowerCase();
+          }
+        }
+
+        const tierSnapFromDb = membershipTierSnaps.get(resolvedTierId);
+        const resolvedTier: any = tierSnapFromDb
+          ? tierSnapFromDb.data()
+          : DEFAULT_MEMBERSHIP_TIERS.find((t) => t.id.toLowerCase() === resolvedTierId) || null;
+
+        if (
+          !resolvedTier ||
+          !isFiniteNonNegativeNumber(resolvedTier.discountPercentage) ||
+          resolvedTier.discountPercentage > 100
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Data tier keanggotaan pelanggan tidak dapat diverifikasi.',
+          };
+        }
+
+        if (
+          bookingData.membershipTierAtBooking !== undefined &&
+          bookingData.membershipTierAtBooking !== null &&
+          String(bookingData.membershipTierAtBooking).trim() !== ''
+        ) {
+          const bookingTierNorm = String(bookingData.membershipTierAtBooking).trim().toLowerCase();
+          const tierIdNorm = String(resolvedTier.id || '').trim().toLowerCase();
+          const tierNameNorm = String(resolvedTier.name || '').trim().toLowerCase();
+          if (bookingTierNorm !== tierIdNorm && bookingTierNorm !== tierNameNorm) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Tier keanggotaan pada saat pemesanan berbeda dan memerlukan peninjauan.',
+            };
+          }
+        }
+
+        // Validate Voucher Type & Numeric Configuration Before Pricing
+        const normalizeSupportedVoucherType = (vType: unknown): 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee' | null => {
+          if (vType === 'fixed_discount' || vType === 'FIXED_AMOUNT') return 'fixed_discount';
+          if (vType === 'percentage_discount' || vType === 'percentage' || vType === 'PERCENTAGE') return 'percentage_discount';
+          if (vType === 'free_home_service_fee') return 'free_home_service_fee';
+          return null;
+        };
+
+        const validateVoucherNumbers = (vObj: any): {
+          ok: boolean;
+          normalizedType?: 'fixed_discount' | 'percentage_discount' | 'free_home_service_fee';
+          code?: string;
+          error?: string;
+        } => {
+          const normType = normalizeSupportedVoucherType(vObj?.voucherType);
+          if (!normType) {
+            return {
+              ok: false,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Tipe voucher tidak mendukung perhitungan potongan otomatis.',
+            };
+          }
+          if (normType === 'fixed_discount') {
+            if (!isFinitePositiveNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'percentage_discount') {
+            if (!isFinitePositiveNumber(vObj.value) || vObj.value > 100) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Persentase potongan voucher tidak valid.' };
+            }
+            if (vObj.maximumDiscount !== undefined && vObj.maximumDiscount !== null && !isFinitePositiveNumber(vObj.maximumDiscount)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas maksimum potongan voucher tidak valid.' };
+            }
+          } else if (normType === 'free_home_service_fee') {
+            if (vObj.value !== undefined && vObj.value !== null && !isFiniteNonNegativeNumber(vObj.value)) {
+              return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Nilai voucher ongkir tidak valid.' };
+            }
+          }
+
+          if (vObj.minimumSpend !== undefined && vObj.minimumSpend !== null && !isFiniteNonNegativeNumber(vObj.minimumSpend)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas minimum transaksi voucher tidak valid.' };
+          }
+          if (vObj.minimumTreatmentPrice !== undefined && vObj.minimumTreatmentPrice !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentPrice)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas harga minimum layanan tidak valid.' };
+          }
+          if (vObj.minimumTreatmentDuration !== undefined && vObj.minimumTreatmentDuration !== null && !isFiniteNonNegativeNumber(vObj.minimumTreatmentDuration)) {
+            return { ok: false, code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED', error: 'Batas durasi minimum layanan tidak valid.' };
+          }
+          return { ok: true, normalizedType: normType };
+        };
+
+        const targetCheck = validateVoucherNumbers(targetMasterData);
+        if (!targetCheck.ok) {
+          return { status: 409, code: targetCheck.code, error: targetCheck.error };
+        }
+
+        if (resolvedGeneralPromoMaster) {
+          const gpCheck = validateVoucherNumbers(resolvedGeneralPromoMaster);
+          if (!gpCheck.ok) return { status: 409, code: gpCheck.code, error: gpCheck.error };
+        }
+        if (resolvedPersonalCv) {
+          const cvCheck = validateVoucherNumbers(resolvedPersonalCv);
+          if (!cvCheck.ok) return { status: 409, code: cvCheck.code, error: cvCheck.error };
+        }
+
+        // Establish Home Service Fee Safely
+        const needsVerifiedHomeServiceFee =
+          targetCheck.normalizedType === 'free_home_service_fee' ||
+          normalizeSupportedVoucherType(resolvedGeneralPromoMaster?.voucherType) === 'free_home_service_fee' ||
+          normalizeSupportedVoucherType(resolvedPersonalCv?.voucherType) === 'free_home_service_fee';
+
+        let authoritativeHomeServiceFee = 0;
+        if (needsVerifiedHomeServiceFee) {
+          const lat = bookingData.latitude ?? bookingData.customerLat;
+          const lng = bookingData.longitude ?? bookingData.customerLng;
+          const distKm = bookingData.distanceKm;
+          const persistedFee = bookingData.homeServiceFee;
+
+          if (
+            typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90 ||
+            typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180 ||
+            typeof distKm !== 'number' || !Number.isFinite(distKm) || distKm < 0 ||
+            !isFinitePositiveNumber(persistedFee)
+          ) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Biaya home service untuk voucher ini memerlukan peninjauan.',
+            };
+          }
+
+          const minStraightKm = calculateStraightDistanceKm(
+            SENZU_BASE_LOCATION.lat,
+            SENZU_BASE_LOCATION.lng,
+            lat,
+            lng
+          );
+          if (distKm < minStraightKm * 0.95 || (minStraightKm > 0.2 && distKm === 0)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Jarak lokasi pesanan tidak dapat diverifikasi untuk potongan biaya home service.',
+            };
+          }
+
+          const feeFromDist = calculateHomeServiceFee(distKm).fee;
+          const feeFromStraight = calculateHomeServiceFee(minStraightKm).fee;
+          if (feeFromDist !== persistedFee || feeFromStraight !== feeFromDist) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Nominal biaya home service memerlukan peninjauan.',
+            };
+          }
+          authoritativeHomeServiceFee = feeFromDist;
+        } else if (bookingData.homeServiceFee !== undefined && bookingData.homeServiceFee !== null) {
+          if (!isFiniteNonNegativeNumber(bookingData.homeServiceFee)) {
+            return {
+              status: 409,
+              code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+              error: 'Data biaya home service pada pesanan tidak valid.',
+            };
+          }
+          authoritativeHomeServiceFee = bookingData.homeServiceFee;
+        }
+
+        // Prepare inputs for unchanged calculateBookingPrice
+        const promoForCalc = resolvedGeneralPromoMaster
+          ? {
+              ...resolvedGeneralPromoMaster,
+              minimumSpend: Math.max(
+                resolvedGeneralPromoMaster.minimumSpend || 0,
+                resolvedGeneralPromoMaster.minimumTreatmentPrice || 0
+              ),
+              enabled: true,
+            }
+          : null;
+
+        const cvForCalc = resolvedPersonalCv
+          ? {
+              ...resolvedPersonalCv,
+              voucherType: normalizeSupportedVoucherType(resolvedPersonalCv.voucherType) || resolvedPersonalCv.voucherType,
+              minimumSpend: Math.max(
+                resolvedPersonalCv.minimumSpend || 0,
+                resolvedPersonalCvMaster?.minimumSpend || 0,
+                resolvedPersonalCvMaster?.minimumTreatmentPrice || 0
+              ),
+              maximumDiscount: resolvedPersonalCv.maximumDiscount ?? resolvedPersonalCvMaster?.maximumDiscount,
+              status: 'available' as const,
+            }
+          : null;
+
+        const pricingBreakdown = calculateBookingPrice({
+          servicePrice: authoritativeServicePrice,
+          homeServiceFee: authoritativeHomeServiceFee,
+          promoVoucher: promoForCalc,
+          customerVoucher: cvForCalc,
+          customerTier: resolvedTier,
+          settings: loyaltySettings,
+        });
+
+        if (
+          promoForCalc &&
+          cvForCalc &&
+          loyaltySettings.allowStacking &&
+          pricingBreakdown.promoDiscountAmount + pricingBreakdown.voucherDiscountAmount >
+            pricingBreakdown.totalPromoAndVoucherDiscount
+        ) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Kombinasi diskon melebihi nilai pesanan dan memerlukan peninjauan.',
+          };
+        }
+
+        let serverDerivedDiscountAmount = 0;
+        if (isRedeemingGeneralPromo && !isRedeemingPersonalCv) {
+          serverDerivedDiscountAmount = Math.min(
+            pricingBreakdown.promoDiscountAmount,
+            pricingBreakdown.totalPromoAndVoucherDiscount
+          );
+        } else if (isRedeemingPersonalCv && !isRedeemingGeneralPromo) {
+          serverDerivedDiscountAmount = Math.min(
+            pricingBreakdown.voucherDiscountAmount,
+            pricingBreakdown.totalPromoAndVoucherDiscount
+          );
+        } else {
+          serverDerivedDiscountAmount =
+            pricingBreakdown.promoDiscountAmount > 0
+              ? pricingBreakdown.promoDiscountAmount
+              : pricingBreakdown.voucherDiscountAmount;
+        }
+
+        // Legacy or client-created voucher_redemptions record without trusted private receipt
+        if (snapExists(redemptionSnap)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
+            error: 'Catatan penukaran tanpa tanda terima server ditemukan dan memerlukan peninjauan.',
+          };
+        }
+
+        // 3F. New-Commit Eligibility, Restrictions, Quotas & Lock Reservations
+        if (targetMasterData.enabled !== true) {
+          return {
+            status: 409,
+            code: 'VOUCHER_INACTIVE',
+            error: 'Voucher sedang tidak aktif.',
+          };
+        }
+
+        if (targetMasterData.validFrom !== undefined && targetMasterData.validFrom !== null && targetMasterData.validFrom !== '') {
+          if (typeof targetMasterData.validFrom !== 'string' || Number.isNaN(Date.parse(targetMasterData.validFrom))) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode mulai voucher tidak valid.' };
+          }
+          if (targetMasterData.validFrom > nowIso) {
+            return { status: 409, code: 'VOUCHER_NOT_YET_VALID', error: 'Periode promo belum dimulai.' };
+          }
+        }
+        if (targetMasterData.validUntil !== undefined && targetMasterData.validUntil !== null && targetMasterData.validUntil !== '') {
+          if (typeof targetMasterData.validUntil !== 'string' || Number.isNaN(Date.parse(targetMasterData.validUntil))) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Periode berakhir voucher tidak valid.' };
+          }
+          if (targetMasterData.validUntil < nowIso) {
+            return { status: 409, code: 'VOUCHER_EXPIRED', error: 'Voucher sudah tidak berlaku.' };
+          }
+        }
+
+        const minSpend = Math.max(
+          targetMasterData.minimumSpend || 0,
+          targetMasterData.minimumTreatmentPrice || 0
+        );
+        const priceAfterTier = Math.max(0, authoritativeServicePrice - pricingBreakdown.tierDiscountAmount);
+        if (priceAfterTier < minSpend || authoritativeServicePrice < minSpend) {
+          return {
+            status: 409,
+            code: 'VOUCHER_MINIMUM_SPEND_NOT_MET',
+            error: `Minimum transaksi untuk promo ini adalah Rp ${minSpend.toLocaleString('id-ID')}.`,
+          };
+        }
+
+        // Service / Category / Duration / Tier / Customer-Specific Restrictions
+        const checkServiceIds = (ids: unknown): boolean => {
+          if (ids === undefined || ids === null) return true;
+          if (!Array.isArray(ids)) return false;
+          if (ids.length === 0) return true;
+          return ids.includes(serviceId);
+        };
+        if (!checkServiceIds(targetMasterData.applicableServiceIds) || (resolvedPersonalCv && !checkServiceIds(resolvedPersonalCv.applicableServiceIds))) {
+          return {
+            status: 409,
+            code: 'VOUCHER_SERVICE_INELIGIBLE',
+            error: 'Promo tidak berlaku untuk layanan yang dipilih.',
+          };
+        }
+
+        if (targetMasterData.applicableCategoryIds !== undefined && targetMasterData.applicableCategoryIds !== null) {
+          if (!Array.isArray(targetMasterData.applicableCategoryIds)) {
+            return { status: 409, code: 'VOUCHER_CONFIG_INVALID', error: 'Konfigurasi kategori voucher tidak valid.' };
+          }
+          if (targetMasterData.applicableCategoryIds.length > 0) {
+            const srvCatId = typeof serviceData.categoryId === 'string' ? serviceData.categoryId.trim() : '';
+            const srvCatName = typeof serviceData.category === 'string' ? serviceData.category.trim() : '';
+            if (
+              (!srvCatId || !targetMasterData.applicableCategoryIds.includes(srvCatId)) &&
+              (!srvCatName || !targetMasterData.applicableCategoryIds.includes(srvCatName))
+            ) {
+              return {
+                status: 409,
+                code: 'VOUCHER_CATEGORY_INELIGIBLE',
+                error: 'Promo tidak berlaku untuk kategori layanan ini.',
+              };
+            }
+          }
+        }
+
+        if (isFinitePositiveNumber(targetMasterData.minimumTreatmentDuration)) {
+          if (!isFinitePositiveNumber(serviceData.duration) || serviceData.duration < targetMasterData.minimumTreatmentDuration) {
+            return {
+              status: 409,
+              code: 'VOUCHER_DURATION_INELIGIBLE',
+              error: `Promo memerlukan durasi layanan minimal ${targetMasterData.minimumTreatmentDuration} menit.`,
+            };
+          }
+        }
+
+        const checkTierIds = (ids: unknown): boolean => {
+          if (ids === undefined || ids === null) return true;
+          if (!Array.isArray(ids)) return false;
+          if (ids.length === 0) return true;
+          const lowerIds = ids.map((x) => String(x).trim().toLowerCase());
+          return (
+            lowerIds.includes(String(resolvedTier.id || '').trim().toLowerCase()) ||
+            lowerIds.includes(String(resolvedTier.name || '').trim().toLowerCase())
+          );
+        };
+        if (!checkTierIds(targetMasterData.applicableTierIds) || (resolvedPersonalCv && !checkTierIds(resolvedPersonalCv.applicableTierIds))) {
+          return {
+            status: 409,
+            code: 'VOUCHER_TIER_INELIGIBLE',
+            error: 'Promo tidak berlaku untuk tier keanggotaan Anda.',
+          };
+        }
+
+        if (
+          targetMasterData.customerSpecific === true ||
+          (targetMasterData.customerId !== undefined && targetMasterData.customerId !== null && targetMasterData.customerId !== '')
+        ) {
+          const targetCust = typeof targetMasterData.customerId === 'string' ? targetMasterData.customerId.trim() : '';
+          if (!targetCust || (targetCust !== verifiedUid && (!verifiedCustomerId || targetCust !== verifiedCustomerId))) {
+            return {
+              status: 403,
+              code: 'VOUCHER_CUSTOMER_INELIGIBLE',
+              error: 'Voucher khusus ini tidak ditujukan untuk akun Anda.',
+            };
+          }
+        }
+
+        if (!isFinitePositiveNumber(serverDerivedDiscountAmount)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_INELIGIBLE',
+            error: 'Voucher tidak menghasilkan potongan yang valid pada pesanan ini.',
+          };
+        }
+
+        // Validate Master Counter & Quota Fields as Finite Integers
+        const rawCurrentUsage = targetMasterData.currentUsageCount ?? 0;
+        if (!isFiniteNonNegativeInt(rawCurrentUsage)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CONFIG_INVALID',
+            error: 'Data penggunaan voucher tidak valid.',
+          };
+        }
+        const currentUsageCount = rawCurrentUsage;
+
+        const rawLimitTotal = targetMasterData.usageLimitTotal ?? 0;
+        if (!isFiniteNonNegativeInt(rawLimitTotal)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CONFIG_INVALID',
+            error: 'Batas kuota total voucher tidak valid.',
+          };
+        }
+        const usageLimitTotal = rawLimitTotal;
+
+        const rawLimitPerCustomer =
+          targetMasterData.usageLimitPerCustomer !== undefined && targetMasterData.usageLimitPerCustomer !== null
+            ? targetMasterData.usageLimitPerCustomer
+            : code === 'SENZUWELCOME'
+              ? 1
+              : 0;
+        if (!isFiniteNonNegativeInt(rawLimitPerCustomer)) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CONFIG_INVALID',
+            error: 'Batas kuota per pelanggan tidak valid.',
+          };
+        }
+        const usageLimitPerCustomer = rawLimitPerCustomer;
+
+        // Inspect Lock Documents (vlock_*)
+        const validateLockSnap = (
+          lSnap: any,
+          isPhoneLock = false
+        ): { ok: boolean; activeOtherBookingId?: string; isSameBooking?: boolean; code?: string; error?: string } => {
+          if (!lSnap || !snapExists(lSnap)) {
+            return { ok: true, activeOtherBookingId: '', isSameBooking: false };
+          }
+          const lData = lSnap.data() || {};
+          const lStatus = typeof lData.status === 'string' ? lData.status.trim().toLowerCase() : 'active';
+          if (lStatus === 'cancelled' || lStatus === 'batal') {
+            return { ok: true, activeOtherBookingId: '', isSameBooking: false };
+          }
+
+          const lCode = typeof lData.voucherCode === 'string' ? lData.voucherCode.trim().toUpperCase() : '';
+          if (lCode && lCode !== code) {
+            return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Data reservasi voucher tidak konsisten.' };
+          }
+
+          const lUid = typeof lData.customerAuthUid === 'string' ? lData.customerAuthUid.trim() : '';
+          const lBookingId = typeof lData.bookingId === 'string' ? lData.bookingId.trim() : '';
+
+          if (lBookingId === bookingId) {
+            if (!lCode || (lUid && lUid !== verifiedUid)) {
+              return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Reservasi voucher pada pesanan ini tidak valid.' };
+            }
+            if (
+              lData.voucherId !== undefined &&
+              lData.voucherId !== null &&
+              lData.voucherId !== '' &&
+              lData.voucherId !== targetMasterId &&
+              !(isRedeemingPersonalCv && lData.voucherId === personalCvId)
+            ) {
+              return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'ID reservasi voucher bertentangan.' };
+            }
+            return { ok: true, activeOtherBookingId: '', isSameBooking: true };
+          }
+
+          // Lock points to another booking (or missing bookingId)
+          if (!isPhoneLock) {
+            if (lUid && lUid !== verifiedUid) {
+              return { ok: false, code: 'VOUCHER_LOCK_CONFLICT', error: 'Reservasi voucher bertentangan dengan pemilik akun.' };
+            }
+            return {
+              ok: true,
+              activeOtherBookingId: lBookingId || lSnap.id,
+              isSameBooking: false,
+            };
+          }
+
+          // For a phone lock pointing to another booking: if owned by verifiedUid, count as other booking; if foreign, never overwrite
+          return {
+            ok: true,
+            activeOtherBookingId: lUid === verifiedUid ? lBookingId || lSnap.id : '',
+            isSameBooking: false,
+          };
+        };
+
+        const uidLockCheck = validateLockSnap(uidLockSnap, false);
+        if (!uidLockCheck.ok) {
+          return { status: 409, code: uidLockCheck.code, error: uidLockCheck.error };
+        }
+
+        const otherReservedBookingIds = new Set<string>();
+        if (uidLockCheck.activeOtherBookingId) {
+          otherReservedBookingIds.add(uidLockCheck.activeOtherBookingId);
+        }
+
+        if (verifiedCustomerId && custLockSnaps.has(verifiedCustomerId)) {
+          const custLockCheck = validateLockSnap(custLockSnaps.get(verifiedCustomerId), false);
+          if (!custLockCheck.ok) {
+            return { status: 409, code: custLockCheck.code, error: custLockCheck.error };
+          }
+          if (custLockCheck.activeOtherBookingId) {
+            otherReservedBookingIds.add(custLockCheck.activeOtherBookingId);
+          }
+        }
+
+        let canWritePhoneLock = false;
+        if (phoneLockSnap) {
+          if (!snapExists(phoneLockSnap)) {
+            canWritePhoneLock = true;
+          } else {
+            const pCheck = validateLockSnap(phoneLockSnap, true);
+            if (!pCheck.ok) {
+              return { status: 409, code: pCheck.code, error: pCheck.error };
+            }
+            if (pCheck.isSameBooking) {
+              canWritePhoneLock = true;
+            }
+          }
+        }
+
+        // Combine voucher_redemptions docs (excluding vlock_* reservation locks)
+        const allRedemptionDocs = new Map<string, any>();
+        for (const d of [
+          ...(redemptionsByCodeSnap?.docs || []),
+          ...(redemptionsByMasterIdSnap?.docs || []),
+        ]) {
+          if (snapExists(d) && !d.id.startsWith('vlock_')) {
+            allRedemptionDocs.set(d.id, d.data() || {});
+          }
+        }
+
+        let activeGlobalRedemptionsCount = 0;
+        const priorCustomerUseKeys = new Set<string>();
+
+        for (const [rId, rData] of allRedemptionDocs.entries()) {
+          if (rId === redemptionId || rData.bookingId === bookingId) continue;
+          const rStatus = typeof rData.status === 'string' ? rData.status.trim().toLowerCase() : 'active';
+          if (rStatus === 'cancelled' || rStatus === 'batal') continue;
+
+          const rCode = typeof rData.voucherCode === 'string' ? rData.voucherCode.trim().toUpperCase() : '';
+          const rVoucherId = typeof rData.voucherId === 'string' ? rData.voucherId.trim() : '';
+          if (rCode !== code && rVoucherId !== targetMasterId) continue;
+
+          activeGlobalRedemptionsCount++;
+
+          const rUid = typeof rData.customerAuthUid === 'string' ? rData.customerAuthUid.trim() : '';
+          const rCustId = typeof rData.customerId === 'string' ? rData.customerId.trim() : '';
+          if (rUid === verifiedUid || (verifiedCustomerId && rCustId === verifiedCustomerId)) {
+            priorCustomerUseKeys.add(rData.bookingId || rId);
+          }
+        }
+
+        if (usageLimitTotal > 0) {
+          const effectiveGlobalUsed = Math.max(currentUsageCount, activeGlobalRedemptionsCount);
+          if (effectiveGlobalUsed >= usageLimitTotal) {
+            return {
+              status: 409,
+              code: 'VOUCHER_QUOTA_EXHAUSTED',
+              error: 'Kuota promo sudah habis.',
+            };
+          }
+        }
+
+        // Combine owned bookings (excluding current bookingId) for per-customer quota and first-order check
+        const ownedBookingsMap = new Map<string, any>();
+        for (const d of [
+          ...(bookingsByCanonicalSnap?.docs || []),
+          ...(bookingsByLegacySnap?.docs || []),
+        ]) {
+          if (!snapExists(d) || d.id === bookingId) continue;
+          const b = d.data() || {};
+          if (b.customerAuthUid && b.authUserId && b.customerAuthUid !== b.authUserId) continue;
+          if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+          if (!b.customerAuthUid && b.authUserId !== verifiedUid) continue;
+          ownedBookingsMap.set(d.id, b);
+        }
+        if (verifiedCustomerId && bookingsByCustIdSnaps.has(verifiedCustomerId)) {
+          for (const d of bookingsByCustIdSnaps.get(verifiedCustomerId)?.docs || []) {
+            if (!snapExists(d) || d.id === bookingId || ownedBookingsMap.has(d.id)) continue;
+            const b = d.data() || {};
+            if (b.customerAuthUid && b.customerAuthUid !== verifiedUid) continue;
+            if (b.authUserId && b.authUserId !== verifiedUid) continue;
+            ownedBookingsMap.set(d.id, b);
+          }
+        }
+
+        let hasPreviousNonCancelledBooking = false;
+        for (const [bId, b] of ownedBookingsMap.entries()) {
+          const bStatus = typeof b.status === 'string' ? b.status.trim().toLowerCase() : '';
+          if (bStatus === 'cancelled' || bStatus === 'batal') continue;
+
+          hasPreviousNonCancelledBooking = true;
+
+          const bPromoCode = typeof b.promoCode === 'string' ? b.promoCode.trim().toUpperCase() : '';
+          const bVoucherCode = typeof b.voucherCode === 'string' ? b.voucherCode.trim().toUpperCase() : '';
+          const bPromoId = typeof b.promoId === 'string' ? b.promoId.trim() : '';
+          const bVoucherId = typeof b.voucherId === 'string' ? b.voucherId.trim() : '';
+
+          if (
+            bPromoCode === code ||
+            bVoucherCode === code ||
+            bPromoId === targetMasterId ||
+            bVoucherId === targetMasterId
+          ) {
+            priorCustomerUseKeys.add(bId);
+          }
+        }
+
+        for (const reservedBookingId of otherReservedBookingIds) {
+          priorCustomerUseKeys.add(reservedBookingId);
+        }
+
+        if (usageLimitPerCustomer > 0 && priorCustomerUseKeys.size >= usageLimitPerCustomer) {
+          return {
+            status: 409,
+            code: 'VOUCHER_CUSTOMER_QUOTA_EXHAUSTED',
+            error: `Voucher ${code} sudah pernah digunakan pada akun ini.`,
+          };
+        }
+
+        if (targetMasterData.firstOrderOnly === true || targetMasterData.newCustomerOnly === true) {
+          if (hasPreviousNonCancelledBooking) {
+            return {
+              status: 409,
+              code: 'VOUCHER_FIRST_ORDER_ONLY',
+              error: 'Voucher ini khusus untuk pesanan pertama.',
+            };
+          }
+          if (verifiedCustomerData) {
+            const comp = verifiedCustomerData.completedBookings ?? 0;
+            const tot = verifiedCustomerData.totalBookings ?? 0;
+            if (!isFiniteNonNegativeInt(comp) || !isFiniteNonNegativeInt(tot)) {
+              return {
+                status: 409,
+                code: 'VOUCHER_CONFIG_INVALID',
+                error: 'Data riwayat pesanan pelanggan tidak valid.',
+              };
+            }
+            if (comp > 0 || tot > 1) {
+              return {
+                status: 409,
+                code: 'VOUCHER_FIRST_ORDER_ONLY',
+                error: 'Voucher ini khusus untuk pesanan pertama.',
+              };
+            }
+            if (
+              tot === 1 &&
+              verifiedCustomerData.lastBookingId &&
+              verifiedCustomerData.lastBookingId !== bookingId
+            ) {
+              return {
+                status: 409,
+                code: 'VOUCHER_FIRST_ORDER_ONLY',
+                error: 'Voucher ini khusus untuk pesanan pertama.',
+              };
+            }
+          }
+        }
+
+        // --- PHASE 4: ATOMIC TRANSACTION WRITES ---
+        const bookingCodeStr = typeof bookingData.bookingCode === 'string' ? bookingData.bookingCode.trim() : '';
+        const effectiveCustId = verifiedCustomerId || bookingCustomerId || '';
+
+        transaction.set(
+          redemptionRef,
+          {
+            id: redemptionId,
+            voucherId: targetMasterId,
+            voucherCode: code,
+            customerId: effectiveCustId,
+            customerAuthUid: verifiedUid,
+            customerPhone: bookingPhoneRaw || null,
+            normalizedPhone: bookingPhoneDigits ? `+${bookingPhoneDigits}` : null,
+            bookingId,
+            bookingCode: bookingCodeStr,
+            discountAmount: serverDerivedDiscountAmount,
+            redeemedAt: nowIso,
+            status: 'active',
+            source: 'booking_submission',
+            updatedAt: nowIso,
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          uidLockRef,
+          {
+            voucherCode: code,
+            voucherId: targetMasterId,
+            customerAuthUid: verifiedUid,
+            bookingId,
+            bookingCode: bookingCodeStr,
+            redeemedAt: nowIso,
+            status: 'active',
+            updatedAt: nowIso,
+          },
+          { merge: true }
+        );
+
+        if (verifiedCustomerId && custLockRefs.has(verifiedCustomerId)) {
+          transaction.set(
+            custLockRefs.get(verifiedCustomerId),
+            {
+              voucherCode: code,
+              voucherId: targetMasterId,
+              customerId: verifiedCustomerId,
+              customerAuthUid: verifiedUid,
+              bookingId,
+              bookingCode: bookingCodeStr,
+              redeemedAt: nowIso,
+              status: 'active',
+              updatedAt: nowIso,
+            },
+            { merge: true }
+          );
+        }
+
+        if (phoneLockRef && canWritePhoneLock) {
+          transaction.set(
+            phoneLockRef,
+            {
+              voucherCode: code,
+              voucherId: targetMasterId,
+              customerPhone: bookingPhoneDigits,
+              customerAuthUid: verifiedUid,
+              bookingId,
+              bookingCode: bookingCodeStr,
+              redeemedAt: nowIso,
+              status: 'active',
+              updatedAt: nowIso,
+            },
+            { merge: true }
+          );
+        }
+
+        if (isRedeemingPersonalCv && personalCvRef && resolvedPersonalCv?.status !== 'used') {
+          transaction.update(personalCvRef, {
+            status: 'used',
+            usedAt: nowIso,
+            bookingId,
+            bookingCode: bookingCodeStr,
+          });
+        }
+
+        transaction.update(targetMasterRef, {
+          currentUsageCount: currentUsageCount + 1,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(receiptRef, {
+          schemaVersion: 1,
+          redemptionId,
+          bookingId,
+          voucherId: targetMasterId,
+          voucherCode: code,
+          customerAuthUid: verifiedUid,
+          discountAmount: serverDerivedDiscountAmount,
+          committedAt: nowIso,
+        });
+
+        return {
+          status: 200,
+          isIdempotent: false,
+          redemptionId,
+          voucherId: targetMasterId,
+          voucherCode: code,
+          discountAmount: serverDerivedDiscountAmount,
+        };
+      });
+
+      if (txOutcome.status !== 200) {
+        return res.status(txOutcome.status).json({
+          success: false,
+          code: txOutcome.code,
+          error: txOutcome.error,
+          message: txOutcome.error,
+        });
       }
 
-      res.json({ success: true, redemptionId: redDocId });
+      if (!txOutcome.isIdempotent) {
+        emitStructuredLog({
+          severity: 'INFO',
+          event: 'voucher_redeemed_atomic',
+          redemptionId: txOutcome.redemptionId,
+          bookingId,
+          voucherId: txOutcome.voucherId,
+          voucherCode: txOutcome.voucherCode,
+          customerAuthUid: verifiedUid,
+          discountAmount: txOutcome.discountAmount,
+          message: `Voucher ${code} atomically redeemed for booking ${bookingId}`,
+        });
+      }
+
+      return res.json({
+        success: true,
+        redemptionId: txOutcome.redemptionId,
+        isIdempotent: Boolean(txOutcome.isIdempotent),
+        discountAmount: txOutcome.discountAmount,
+      });
     } catch (err: any) {
-      console.error('Voucher redeem endpoint error:', err);
-      res.status(500).json({ error: err.message || 'Gagal menyimpan data penggunaan voucher.' });
+      console.error('[VoucherRedeem] Transaction or infrastructure failure:', err?.code || err?.message || err);
+      return res.status(503).json({
+        success: false,
+        code: 'VOUCHER_REDEMPTION_UNAVAILABLE',
+        error: 'Layanan penukaran voucher sedang mengalami kendala. Silakan coba kembali.',
+      });
     }
   });
 
@@ -3957,6 +12437,3106 @@ async function startServer() {
       });
     }
   });
+
+  // POST /api/customer-audit/append - Authoritative Customer Audit Log Append (Stage 7A: Finding 6)
+  app.post('/api/customer-audit/append', async (req, res) => {
+    const isValidDocId = (val: unknown, maxBytes = 128): val is string => {
+      if (typeof val !== 'string') return false;
+      const trimmed = val.trim();
+      if (!trimmed || trimmed !== val) return false;
+      if (trimmed === '.' || trimmed === '..') return false;
+      if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) return false;
+      if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+      return true;
+    };
+
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const textId = (value: unknown): string =>
+      typeof value === 'string' ? value.trim() : '';
+
+    const sanitizeText = (value: unknown, maxLen = 250): string =>
+      typeof value === 'string'
+        ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, maxLen)
+        : '';
+
+    const ALLOWED_CUSTOMER_AUDIT_ACTIONS = new Set([
+      'created',
+      'updated',
+      'merged',
+      'status_change',
+      'status_changed',
+      'vip_change',
+      'promoted_to_vip',
+      'demoted_from_vip',
+      'segment_change',
+      'note_added',
+      'tag_added',
+      'review_added',
+    ]);
+
+    const computeAuditFingerprint = (params: {
+      actorScope: 'staff' | 'customer';
+      actorUid: string;
+      customerId: string;
+      action: string;
+      details: string;
+    }): string =>
+      createHash('sha256')
+        .update(
+          JSON.stringify([
+            'v1',
+            params.actorScope,
+            params.actorUid,
+            params.customerId,
+            params.action,
+            params.details,
+          ])
+        )
+        .digest('hex');
+
+    try {
+      // 1. Require verified Bearer Firebase ID token BEFORE any database access (no alternate identity fallback)
+      const rawAuthHeader = req.headers?.authorization;
+      const tokenMatch =
+        typeof rawAuthHeader === 'string'
+          ? /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim())
+          : null;
+      if (!tokenMatch || !tokenMatch[1]) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Autentikasi diperlukan untuk mencatat audit pelanggan.',
+          message: 'Autentikasi diperlukan untuk mencatat audit pelanggan.',
+        });
+      }
+
+      if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          error: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+          message: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+        });
+      }
+
+      let verifiedUid = '';
+      let verifiedEmail = '';
+      try {
+        const decoded = await adminAuth.verifyIdToken(tokenMatch[1]);
+        if (!decoded || typeof decoded.uid !== 'string' || !isValidDocId(decoded.uid, 128)) {
+          return res.status(401).json({
+            success: false,
+            code: 'AUTH_TOKEN_INVALID',
+            error: 'Identitas sesi autentikasi tidak valid.',
+            message: 'Identitas sesi autentikasi tidak valid.',
+          });
+        }
+        verifiedUid = decoded.uid;
+        verifiedEmail = typeof decoded.email === 'string' ? decoded.email.trim().toLowerCase() : '';
+      } catch (authErr: any) {
+        const errCode = String(authErr?.code || '');
+        const errMsg = String(authErr?.message || '');
+        const isInfraError =
+          errCode === 'auth/internal-error' ||
+          errCode === 'auth/network-request-failed' ||
+          errCode === 'unavailable' ||
+          errCode === 'deadline-exceeded' ||
+          authErr?.status === 503 ||
+          authErr?.statusCode === 503 ||
+          /unavailable|network|econnrefused|enotfound|etimedout|eai_again|socket hang up|fetch failed|deadline|internal-error|503/i.test(
+            `${errCode} ${errMsg}`
+          );
+        if (isInfraError) {
+          return res.status(503).json({
+            success: false,
+            code: 'AUTH_SERVICE_UNAVAILABLE',
+            error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+            message: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+          });
+        }
+        return res.status(401).json({
+          success: false,
+          code: errCode === 'auth/id-token-expired' ? 'SESSION_EXPIRED' : 'AUTH_TOKEN_INVALID',
+          error: 'Sesi autentikasi tidak valid atau telah berakhir.',
+          message: 'Sesi autentikasi tidak valid atau telah berakhir.',
+        });
+      }
+
+      // 2. Validate bounded customerId, action, details, and requestId BEFORE database access
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYLOAD',
+          error: 'Format permintaan audit pelanggan tidak valid.',
+          message: 'Format permintaan audit pelanggan tidak valid.',
+        });
+      }
+
+      const rawCustomerId = req.body.customerId;
+      if (!isValidDocId(rawCustomerId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CUSTOMER_ID',
+          error: 'ID pelanggan tidak valid.',
+          message: 'ID pelanggan tidak valid.',
+        });
+      }
+      const customerId = rawCustomerId;
+
+      const rawAction = req.body.action;
+      if (typeof rawAction !== 'string' || !ALLOWED_CUSTOMER_AUDIT_ACTIONS.has(rawAction)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_AUDIT_ACTION',
+          error: 'Tindakan audit pelanggan tidak valid.',
+          message: 'Tindakan audit pelanggan tidak valid.',
+        });
+      }
+      const action = rawAction;
+
+      const rawDetails = req.body.details;
+      if (
+        rawDetails !== undefined &&
+        rawDetails !== null &&
+        (typeof rawDetails !== 'string' ||
+          rawDetails.length > 1000 ||
+          Buffer.byteLength(rawDetails, 'utf8') > 1000)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_AUDIT_DETAILS',
+          error: 'Detail audit pelanggan tidak valid atau melebihi batas.',
+          message: 'Detail audit pelanggan tidak valid atau melebihi batas.',
+        });
+      }
+      const sanitizedDetails =
+        typeof rawDetails === 'string'
+          ? rawDetails.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+          : '';
+
+      const rawRequestId = req.body.requestId;
+      let cleanRequestId = '';
+      if (rawRequestId !== undefined && rawRequestId !== null && rawRequestId !== '') {
+        if (!isValidDocId(rawRequestId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REQUEST_ID',
+            error: 'ID permintaan audit tidak valid.',
+            message: 'ID permintaan audit tidak valid.',
+          });
+        }
+        cleanRequestId = rawRequestId;
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      // Staff idempotency key is derived from verified UID and requestId ONLY (independent of customerId/action/details)
+      const staffLogId = cleanRequestId
+        ? `aud_${createHash('sha256')
+            .update(`staff:${verifiedUid}:${cleanRequestId}`)
+            .digest('hex')
+            .slice(0, 32)}`
+        : `aud_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+      // Customer self-registration identity is derived from verified UID and owned customerId ONLY (independent of requestId)
+      const selfRegLogId =
+        customerId !== 'all'
+          ? `aud_${createHash('sha256')
+              .update(`selfreg:${verifiedUid}:${customerId}:created`)
+              .digest('hex')
+              .slice(0, 32)}`
+          : '';
+
+      // 3. Authoritative Read-Only Staff/Customer Resolution & Audit Append inside Transaction
+      const txResult = await adminDb.runTransaction(async (transaction: any) => {
+        const hasUidConflict = (record: any): boolean =>
+          [record?.authUserId, record?.authUid].some(
+            (value) =>
+              value != null &&
+              value !== '' &&
+              (typeof value !== 'string' ||
+                value.trim() !== value ||
+                !isValidDocId(value, 128) ||
+                value !== verifiedUid)
+          );
+
+        const isStaffDisabled = (record: any): boolean =>
+          !record ||
+          record.isActive === false ||
+          record.loginEnabled === false ||
+          [
+            'INACTIVE',
+            'DISABLED',
+            'ARCHIVED',
+            'DINONAKTIFKAN',
+            'DELETED',
+            'TERMINATED',
+            'SUSPENDED',
+          ].includes(textId(record.status).toUpperCase()) ||
+          textId(record.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const canonicalStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const legacyStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUid', '==', verifiedUid)
+          .limit(2);
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const targetCustRef =
+          customerId !== 'all' ? adminDb.collection('customers').doc(customerId) : null;
+        const custByAuthUserQuery = adminDb
+          .collection('customers')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const custByCanonicalQuery = adminDb
+          .collection('customers')
+          .where('customerAuthUid', '==', verifiedUid)
+          .limit(2);
+        const staffAuditRef = adminDb.collection('customer_audit_logs').doc(staffLogId);
+        const selfRegAuditRef = selfRegLogId
+          ? adminDb.collection('customer_audit_logs').doc(selfRegLogId)
+          : null;
+        const custAuditQuery =
+          customerId !== 'all' && action === 'created'
+            ? adminDb
+                .collection('customer_audit_logs')
+                .where('customerId', '==', customerId)
+                .limit(20)
+            : null;
+
+        const [
+          roleSnap,
+          canonicalStaffSnap,
+          legacyStaffSnap,
+          directStaffSnap,
+          targetCustSnap,
+          custByAuthUserSnap,
+          custByCanonicalSnap,
+          existingStaffAuditSnap,
+          existingSelfRegAuditSnap,
+          existingCustAuditQuerySnap,
+        ] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(canonicalStaffQuery),
+          transaction.get(legacyStaffQuery),
+          transaction.get(directStaffRef),
+          targetCustRef ? transaction.get(targetCustRef) : Promise.resolve(null),
+          transaction.get(custByAuthUserQuery),
+          transaction.get(custByCanonicalQuery),
+          transaction.get(staffAuditRef),
+          selfRegAuditRef ? transaction.get(selfRegAuditRef) : Promise.resolve(null),
+          custAuditQuery ? transaction.get(custAuditQuery) : Promise.resolve(null),
+        ]);
+
+        const staffDocs = new Map<string, any>();
+        for (const d of [
+          ...(canonicalStaffSnap?.docs || []),
+          ...(legacyStaffSnap?.docs || []),
+        ]) {
+          if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaffSnap)) {
+          staffDocs.set(directStaffSnap.id, directStaffSnap);
+        }
+
+        const roleExists = snapExists(roleSnap);
+        if (roleExists) {
+          const roleData = roleSnap.data() || {};
+          for (const linked of [roleData.staffId, roleData.staffUserId]) {
+            if (typeof linked === 'string' && isValidDocId(linked, 128) && !staffDocs.has(linked)) {
+              const linkedSnap = await transaction.get(
+                adminDb.collection('staff_users').doc(linked)
+              );
+              if (snapExists(linkedSnap)) {
+                staffDocs.set(linkedSnap.id, linkedSnap);
+              }
+            }
+          }
+        }
+
+        const hasStaffFootprint = staffDocs.size > 0 || roleExists;
+
+        if (hasStaffFootprint) {
+          // Stage 4B/4C: Require unique UID-bound Staff Master AND matching active staff_roles
+          if (staffDocs.size === 0 || !roleExists) {
+            return {
+              status: 403,
+              code: 'STAFF_AUTHORIZATION_DENIED',
+              message: 'Identitas staf belum terikat atau tidak memiliki otorisasi aktif.',
+            };
+          }
+          if (staffDocs.size > 1) {
+            return {
+              status: 403,
+              code: 'STAFF_DUPLICATE_MAPPING',
+              message: 'Identitas staf memiliki duplikasi pemetaan pada Staff Master.',
+            };
+          }
+
+          const staffSnap = [...staffDocs.values()][0];
+          const staff = staffSnap.data() || {};
+          const role = roleSnap.data() || {};
+
+          if (hasUidConflict(staff) || hasUidConflict(role)) {
+            return {
+              status: 403,
+              code: 'STAFF_UID_MISMATCH',
+              message: 'Identitas UID staf tidak sesuai dengan sesi autentikasi.',
+            };
+          }
+
+          const isUidBound =
+            staffSnap.id === verifiedUid ||
+            (typeof staff.authUserId === 'string' && staff.authUserId === verifiedUid) ||
+            (typeof staff.authUid === 'string' && staff.authUid === verifiedUid);
+          if (!isUidBound) {
+            return {
+              status: 403,
+              code: 'STAFF_UID_UNBOUND',
+              message: 'Profil Staff Master tidak terikat pada UID sesi saat ini.',
+            };
+          }
+
+          if (
+            isStaffDisabled(staff) ||
+            isStaffDisabled(role) ||
+            role.isActive !== true
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_INACTIVE',
+              message: 'Akun staf sedang tidak aktif atau telah dinonaktifkan.',
+            };
+          }
+
+          const staffRole = textId(staff.role);
+          const activeRole = textId(role.role);
+          if (
+            !staffRole ||
+            staff.role !== staffRole ||
+            role.role !== activeRole ||
+            activeRole !== staffRole
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_ROLE_MISMATCH',
+              message: 'Role staf tidak sesuai dengan Staff Master saat ini.',
+            };
+          }
+
+          for (const aliasField of [staff.uid, staff.id]) {
+            if (aliasField !== undefined && aliasField !== null && aliasField !== '') {
+              if (typeof aliasField !== 'string' || !isValidDocId(aliasField, 128)) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'Alias identitas Staff Master tidak valid.',
+                };
+              }
+            }
+          }
+
+          if (
+            typeof staff.uid === 'string' &&
+            staff.uid !== '' &&
+            typeof staff.id === 'string' &&
+            staff.id !== '' &&
+            staff.uid !== staff.id &&
+            ![verifiedUid, staffSnap.id].includes(staff.uid) &&
+            ![verifiedUid, staffSnap.id].includes(staff.id)
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_ROLE_MAPPING_CONFLICT',
+              message: 'Konflik alias uid/id pada Staff Master.',
+            };
+          }
+
+          const aliases = new Set(
+            [verifiedUid, staffSnap.id, textId(staff.uid), textId(staff.id)].filter(Boolean)
+          );
+          for (const linkedId of [role.staffId, role.staffUserId]) {
+            if (linkedId !== undefined && linkedId !== null && linkedId !== '') {
+              if (
+                typeof linkedId !== 'string' ||
+                !isValidDocId(linkedId, 128) ||
+                !aliases.has(linkedId)
+              ) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'Referensi Staff Master pada staff_roles tidak sesuai.',
+                };
+              }
+            }
+          }
+
+          if (!['css', 'supervisor', 'manager', 'admin'].includes(staffRole)) {
+            return {
+              status: 403,
+              code: 'PERMISSION_DENIED',
+              message: 'Hanya staf operasional aktif (CSS, Supervisor, Manager, Admin) yang berwenang.',
+            };
+          }
+
+          if (!sanitizedDetails) {
+            return {
+              status: 400,
+              code: 'INVALID_AUDIT_DETAILS',
+              message: 'Detail tindakan audit wajib diisi.',
+            };
+          }
+
+          const actorRole = staffRole;
+          const actorName =
+            sanitizeText(staff.name, 120) ||
+            sanitizeText(staff.displayName, 120) ||
+            sanitizeText(staff.fullName, 120) ||
+            sanitizeText(role.name, 120) ||
+            'Staff Senzu';
+          const performedBy = `${actorName} (${actorRole})`;
+          const finalDetails = sanitizedDetails;
+          const requestFingerprint = computeAuditFingerprint({
+            actorScope: 'staff',
+            actorUid: verifiedUid,
+            customerId,
+            action,
+            details: finalDetails,
+          });
+
+          // Staff Idempotency Check (keyed by verifiedUid + requestId, independent of customerId/action/details)
+          if (cleanRequestId && snapExists(existingStaffAuditSnap)) {
+            const existingEntry = existingStaffAuditSnap.data();
+            const isValidStoredStaffEntry =
+              Boolean(
+                existingEntry &&
+                  typeof existingEntry === 'object' &&
+                  !Array.isArray(existingEntry)
+              ) &&
+              existingEntry.id === staffLogId &&
+              existingEntry.requestId === cleanRequestId &&
+              existingEntry.actorUid === verifiedUid &&
+              existingEntry.actorId === verifiedUid &&
+              existingEntry.actorRole === actorRole &&
+              typeof existingEntry.actorName === 'string' &&
+              existingEntry.actorName.trim().length > 0 &&
+              existingEntry.performedBy === performedBy &&
+              typeof existingEntry.customerId === 'string' &&
+              isValidDocId(existingEntry.customerId, 128) &&
+              typeof existingEntry.action === 'string' &&
+              ALLOWED_CUSTOMER_AUDIT_ACTIONS.has(existingEntry.action) &&
+              (existingEntry.customerId !== 'all' || existingEntry.action === 'updated') &&
+              typeof existingEntry.details === 'string' &&
+              existingEntry.details.trim().length > 0 &&
+              existingEntry.details.trim() === existingEntry.details &&
+              Buffer.byteLength(existingEntry.details, 'utf8') <= 1000 &&
+              typeof existingEntry.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(existingEntry.timestamp)) &&
+              typeof existingEntry.requestFingerprint === 'string' &&
+              /^[a-f0-9]{64}$/.test(existingEntry.requestFingerprint) &&
+              existingEntry.requestFingerprint ===
+                computeAuditFingerprint({
+                  actorScope: 'staff',
+                  actorUid: existingEntry.actorUid,
+                  customerId: existingEntry.customerId,
+                  action: existingEntry.action,
+                  details: existingEntry.details,
+                });
+
+            if (!isValidStoredStaffEntry) {
+              return {
+                status: 409,
+                code: 'AUDIT_REPLAY_INVALID',
+                message: 'Data audit sebelumnya tidak valid atau mengalami konflik kepemilikan.',
+              };
+            }
+
+            if (
+              existingEntry.requestFingerprint !== requestFingerprint ||
+              existingEntry.customerId !== customerId ||
+              existingEntry.action !== action ||
+              existingEntry.details !== finalDetails
+            ) {
+              return {
+                status: 409,
+                code: 'AUDIT_IDEMPOTENCY_MISMATCH',
+                message:
+                  'ID permintaan (requestId) telah digunakan dengan parameter audit yang berbeda.',
+              };
+            }
+
+            if (customerId !== 'all') {
+              if (!snapExists(targetCustSnap)) {
+                return {
+                  status: 409,
+                  code: 'AUDIT_REPLAY_INVALID',
+                  message: 'Target pelanggan pada entri audit sudah tidak ditemukan.',
+                };
+              }
+              const targetCustData = targetCustSnap.data() || {};
+              if (
+                targetCustData.id !== undefined &&
+                targetCustData.id !== null &&
+                targetCustData.id !== '' &&
+                (typeof targetCustData.id !== 'string' || targetCustData.id !== customerId)
+              ) {
+                return {
+                  status: 409,
+                  code: 'AUDIT_REPLAY_INVALID',
+                  message: 'Identitas profil pelanggan pada entri audit mengalami konflik.',
+                };
+              }
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: existingEntry,
+            };
+          }
+
+          if (customerId === 'all') {
+            if (action !== 'updated') {
+              return {
+                status: 403,
+                code: 'INVALID_GLOBAL_AUDIT_ACTION',
+                message: 'Target customerId="all" hanya diizinkan untuk ringkasan global staf.',
+              };
+            }
+          } else {
+            if (!snapExists(targetCustSnap)) {
+              return {
+                status: 404,
+                code: 'CUSTOMER_NOT_FOUND',
+                message: 'Data pelanggan tidak ditemukan.',
+              };
+            }
+            const targetCustData = targetCustSnap.data() || {};
+            if (
+              targetCustData.id !== undefined &&
+              targetCustData.id !== null &&
+              targetCustData.id !== '' &&
+              (typeof targetCustData.id !== 'string' || targetCustData.id !== customerId)
+            ) {
+              return {
+                status: 409,
+                code: 'CUSTOMER_RECORD_CONFLICT',
+                message: 'Identitas dokumen pelanggan tidak konsisten.',
+              };
+            }
+          }
+
+          if (snapExists(existingStaffAuditSnap)) {
+            return {
+              status: 409,
+              code: 'AUDIT_ID_CONFLICT',
+              message: 'Entri audit sudah ada. Silakan coba kembali.',
+            };
+          }
+
+          const nowIso = new Date().toISOString();
+          const entry: Record<string, any> = {
+            id: staffLogId,
+            source: 'client_report',
+            customerId,
+            action,
+            details: finalDetails,
+            performedBy,
+            actorUid: verifiedUid,
+            actorId: verifiedUid,
+            actorRole,
+            actorName,
+            timestamp: nowIso,
+            requestFingerprint,
+            ...(cleanRequestId ? { requestId: cleanRequestId } : {}),
+          };
+
+          transaction.create(staffAuditRef, entry);
+          return {
+            status: 200,
+            isIdempotent: false,
+            entry,
+          };
+        } else {
+          // Non-operational caller (Customer): ONLY action="created" for own UID-bound profile
+          if (customerId === 'all' || action !== 'created') {
+            return {
+              status: 403,
+              code: 'PERMISSION_DENIED',
+              message: 'Pelanggan hanya dapat mencatat audit pembuatan profil milik sendiri.',
+            };
+          }
+
+          if (
+            customerId.startsWith('cust_u_') &&
+            customerId !== `cust_u_${verifiedUid}` &&
+            customerId !== `cust_u_${verifiedUid.slice(0, 10)}`
+          ) {
+            return {
+              status: 403,
+              code: 'FOREIGN_CUSTOMER_PROFILE',
+              message: 'ID profil pelanggan tidak sesuai dengan identitas akun.',
+            };
+          }
+
+          if (!snapExists(targetCustSnap) || !selfRegAuditRef) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_UNVERIFIED',
+              message: 'Profil pelanggan tidak ditemukan atau akses ditolak.',
+            };
+          }
+
+          const profile = targetCustSnap.data() || {};
+          if (
+            profile.id !== undefined &&
+            profile.id !== null &&
+            profile.id !== '' &&
+            (typeof profile.id !== 'string' || profile.id !== customerId)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_MALFORMED',
+              message: 'Identitas profil pelanggan tidak sesuai.',
+            };
+          }
+
+          for (const rawUidVal of [profile.authUserId, profile.customerAuthUid]) {
+            if (rawUidVal !== undefined && rawUidVal !== null && rawUidVal !== '') {
+              if (
+                typeof rawUidVal !== 'string' ||
+                rawUidVal.trim() !== rawUidVal ||
+                !isValidDocId(rawUidVal, 128)
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_OWNERSHIP_MALFORMED',
+                  message: 'Atribut kepemilikan profil pelanggan tidak valid.',
+                };
+              }
+            }
+          }
+
+          const ownerAuthUserId = textId(profile.authUserId);
+          const ownerCustomerAuthUid = textId(profile.customerAuthUid);
+
+          if (!ownerAuthUserId && !ownerCustomerAuthUid) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_MISSING',
+              message: 'Profil pelanggan tidak memiliki ikatan UID terotentikasi.',
+            };
+          }
+
+          if (
+            ownerAuthUserId &&
+            ownerCustomerAuthUid &&
+            ownerAuthUserId !== ownerCustomerAuthUid
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              message: 'Kepemilikan profil pelanggan mengalami konflik.',
+            };
+          }
+
+          if (
+            (ownerAuthUserId && ownerAuthUserId !== verifiedUid) ||
+            (ownerCustomerAuthUid && ownerCustomerAuthUid !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'FOREIGN_CUSTOMER_PROFILE',
+              message: 'Akses ke profil pelanggan lain ditolak.',
+            };
+          }
+
+          const ownedProfiles = new Map<string, any>();
+          for (const d of [
+            ...(custByAuthUserSnap?.docs || []),
+            ...(custByCanonicalSnap?.docs || []),
+          ]) {
+            if (snapExists(d)) ownedProfiles.set(d.id, d);
+          }
+
+          if (ownedProfiles.size !== 1 || !ownedProfiles.has(customerId)) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              message: 'Kepemilikan profil pelanggan tidak unik atau konflik.',
+            };
+          }
+
+          const acctType = textId(profile.accountType).toUpperCase();
+          const acctStatus = textId(profile.accountStatus).toUpperCase();
+          const profStatus = textId(profile.status).toUpperCase();
+          const crmStatus = textId(profile.crmStatus).toLowerCase();
+          const custStatus = textId(profile.customerStatus).toLowerCase();
+
+          if (
+            (acctType && acctType !== 'CUSTOMER') ||
+            acctStatus === 'DISABLED' ||
+            acctStatus === 'NOT_REGISTERED' ||
+            acctStatus === 'INACTIVE' ||
+            ['DISABLED', 'INACTIVE', 'ARCHIVED', 'BLOCKED', 'DELETED', 'DELETION_REQUESTED'].includes(
+              profStatus
+            ) ||
+            ['archived', 'blocked'].includes(crmStatus) ||
+            ['archived', 'blocked'].includes(custStatus)
+          ) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_PROFILE_INACTIVE',
+              message: 'Profil pelanggan sedang tidak aktif atau tidak memenuhi syarat.',
+            };
+          }
+
+          const profileEmail =
+            sanitizeText(profile.email, 120).toLowerCase() || verifiedEmail || '-';
+          const profilePhone =
+            sanitizeText(profile.normalizedPhone, 40) ||
+            sanitizeText(profile.phone, 40) ||
+            sanitizeText(profile.whatsapp, 40) ||
+            '-';
+
+          const actorRole = 'customer';
+          const actorName =
+            sanitizeText(profile.name, 120) ||
+            sanitizeText(profile.displayName, 120) ||
+            'Pelanggan Senzu';
+          const performedBy = 'Customer / Self-Registration';
+          const finalDetails = `Akun pelanggan berhasil didaftarkan via Email (${profileEmail}) & WhatsApp (${profilePhone}).`;
+          const requestFingerprint = computeAuditFingerprint({
+            actorScope: 'customer',
+            actorUid: verifiedUid,
+            customerId,
+            action: 'created',
+            details: finalDetails,
+          });
+
+          // 1) Check stable server-side self-registration audit document first
+          if (snapExists(existingSelfRegAuditSnap)) {
+            const existingEntry = existingSelfRegAuditSnap.data();
+            const isValidSelfRegEntry =
+              Boolean(
+                existingEntry &&
+                  typeof existingEntry === 'object' &&
+                  !Array.isArray(existingEntry)
+              ) &&
+              existingEntry.id === selfRegLogId &&
+              existingEntry.customerId === customerId &&
+              existingEntry.action === 'created' &&
+              existingEntry.actorUid === verifiedUid &&
+              existingEntry.actorId === verifiedUid &&
+              existingEntry.actorRole === 'customer' &&
+              typeof existingEntry.actorName === 'string' &&
+              existingEntry.actorName.trim().length > 0 &&
+              existingEntry.performedBy === 'Customer / Self-Registration' &&
+              typeof existingEntry.details === 'string' &&
+              existingEntry.details.trim().length > 0 &&
+              existingEntry.details.trim() === existingEntry.details &&
+              Buffer.byteLength(existingEntry.details, 'utf8') <= 1000 &&
+              typeof existingEntry.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(existingEntry.timestamp)) &&
+              typeof existingEntry.requestFingerprint === 'string' &&
+              /^[a-f0-9]{64}$/.test(existingEntry.requestFingerprint) &&
+              existingEntry.requestFingerprint ===
+                computeAuditFingerprint({
+                  actorScope: 'customer',
+                  actorUid: existingEntry.actorUid,
+                  customerId: existingEntry.customerId,
+                  action: 'created',
+                  details: existingEntry.details,
+                }) &&
+              (existingEntry.requestId === undefined ||
+                isValidDocId(existingEntry.requestId, 128));
+
+            if (!isValidSelfRegEntry) {
+              return {
+                status: 409,
+                code: 'AUDIT_REPLAY_INVALID',
+                message: 'Entri audit pendaftaran mandiri mengalami konflik kepemilikan atau integritas.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: existingEntry,
+            };
+          }
+
+          // 2) Check existing historical records for this customer profile (preserve historical logs; prevent duplicate self-registration)
+          for (const d of existingCustAuditQuerySnap?.docs || []) {
+            if (!snapExists(d)) continue;
+            const hist = d.data();
+            if (!hist || typeof hist !== 'object' || Array.isArray(hist)) continue;
+            if (hist.action !== 'created') continue;
+
+            const isSelfRegRecord =
+              hist.performedBy === 'Customer / Self-Registration' ||
+              hist.actorRole === 'customer' ||
+              hist.actorUid !== undefined ||
+              hist.actorId !== undefined;
+
+            if (!isSelfRegRecord) {
+              // Preserve non-self-registration historical "created" record (e.g. 'System / Booking Form') without rewriting it
+              continue;
+            }
+
+            const histValid =
+              (hist.id === undefined || hist.id === d.id) &&
+              hist.customerId === customerId &&
+              hist.action === 'created' &&
+              hist.performedBy === 'Customer / Self-Registration' &&
+              hist.actorRole === 'customer' &&
+              Boolean(hist.actorUid === verifiedUid || hist.actorId === verifiedUid) &&
+              (hist.actorUid === undefined || hist.actorUid === verifiedUid) &&
+              (hist.actorId === undefined || hist.actorId === verifiedUid) &&
+              typeof hist.details === 'string' &&
+              hist.details.trim().length > 0 &&
+              hist.details.trim() === hist.details &&
+              Buffer.byteLength(hist.details, 'utf8') <= 1000 &&
+              typeof hist.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(hist.timestamp)) &&
+              (hist.requestFingerprint === undefined ||
+                (/^[a-f0-9]{64}$/.test(hist.requestFingerprint) &&
+                  hist.requestFingerprint ===
+                    computeAuditFingerprint({
+                      actorScope: 'customer',
+                      actorUid: verifiedUid,
+                      customerId,
+                      action: 'created',
+                      details: hist.details,
+                    }))) &&
+              (hist.requestId === undefined || isValidDocId(hist.requestId, 128));
+
+            if (!histValid) {
+              return {
+                status: 409,
+                code: 'AUDIT_REPLAY_INVALID',
+                message: 'Riwayat audit pendaftaran pelanggan mengalami konflik kepemilikan atau integritas.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: { ...hist, id: hist.id || d.id },
+            };
+          }
+
+          const nowIso = new Date().toISOString();
+          const entry: Record<string, any> = {
+            id: selfRegLogId,
+            customerId,
+            action: 'created',
+            details: finalDetails,
+            performedBy,
+            actorUid: verifiedUid,
+            actorId: verifiedUid,
+            actorRole,
+            actorName,
+            timestamp: nowIso,
+            requestFingerprint,
+            ...(cleanRequestId ? { requestId: cleanRequestId } : {}),
+          };
+
+          transaction.create(selfRegAuditRef, entry);
+          return {
+            status: 200,
+            isIdempotent: false,
+            entry,
+          };
+        }
+      });
+
+      if (txResult.status !== 200) {
+        return res.status(txResult.status).json({
+          success: false,
+          code: txResult.code,
+          error: txResult.message,
+          message: txResult.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        id: txResult.entry.id,
+        isIdempotent: txResult.isIdempotent,
+        auditLog: txResult.entry,
+      });
+    } catch (err: any) {
+      console.error('[Server CRM] Customer audit append error:', err);
+      const errCodeStr = String(err?.code || '');
+      const errMsgStr = String(err?.message || '');
+      const isAlreadyExists =
+        err?.code === 6 ||
+        errCodeStr === 'already-exists' ||
+        /already[-_\s]?exists/i.test(`${errCodeStr} ${errMsgStr}`);
+      if (isAlreadyExists) {
+        return res.status(409).json({
+          success: false,
+          code: 'AUDIT_ID_CONFLICT',
+          error: 'Entri audit sudah ada. Silakan coba kembali.',
+          message: 'Entri audit sudah ada. Silakan coba kembali.',
+        });
+      }
+      const statusCode =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 503;
+      const code = err?.code || (statusCode === 503 ? 'SERVICE_UNAVAILABLE' : 'REQUEST_ERROR');
+      const msg =
+        statusCode === 503
+          ? 'Layanan pencatatan audit pelanggan sedang tidak tersedia.'
+          : err?.message || 'Permintaan tidak dapat diproses.';
+      return res.status(statusCode).json({
+        success: false,
+        code,
+        error: msg,
+        message: msg,
+      });
+    }
+  });
+
+  // =============================================================
+  // STAGE 7B: AUTHORITATIVE BOOKING STATUS HISTORY (Finding 6)
+  // =============================================================
+
+  function isValidBookingHistoryDocId(val: unknown, maxBytes = 128): val is string {
+    if (typeof val !== 'string') return false;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed !== val) return false;
+    if (trimmed === '.' || trimmed === '..') return false;
+    if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) return false;
+    if (/[\/\\\x00-\x1F\x7F\s]/.test(trimmed)) return false;
+    return true;
+  }
+
+  function isValidBookingHistoryCode(val: unknown, maxBytes = 64): val is string {
+    if (!isValidBookingHistoryDocId(val, maxBytes)) return false;
+    return val.length >= 3;
+  }
+
+  function formatBookingHistoryWIB(isoOrDate: string | Date): string {
+    try {
+      const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
+      if (Number.isNaN(d.getTime())) return String(isoOrDate);
+      const formatted = new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(d);
+      return `${formatted} WIB`;
+    } catch {
+      return `${String(isoOrDate)} WIB`;
+    }
+  }
+
+  function computeBookingHistoryFingerprint(params: {
+    actorScope: 'staff' | 'customer';
+    actorUid: string;
+    bookingId: string;
+    bookingCode: string;
+    status: string;
+    note: string;
+  }): string {
+    return createHash('sha256')
+      .update(
+        JSON.stringify([
+          'v1',
+          params.actorScope,
+          params.actorUid,
+          params.bookingId,
+          params.bookingCode,
+          params.status,
+          params.note,
+        ])
+      )
+      .digest('hex');
+  }
+
+  async function recordAcceptedOrderStatusHistory(params: {
+    bookingId: string;
+    bookingCode: string;
+    therapistId: string;
+    therapistName: string;
+    actorUid: string;
+    acceptedAt: string;
+  }): Promise<void> {
+    if (!adminDb || typeof adminDb.runTransaction !== 'function') return;
+    const bookingId = typeof params.bookingId === 'string' ? params.bookingId.trim() : '';
+    const actorUid = typeof params.actorUid === 'string' ? params.actorUid.trim() : '';
+    if (!isValidBookingHistoryDocId(bookingId, 128) || !isValidBookingHistoryDocId(actorUid, 128)) {
+      return;
+    }
+
+    const acceptedAt =
+      typeof params.acceptedAt === 'string' && !Number.isNaN(Date.parse(params.acceptedAt))
+        ? params.acceptedAt
+        : new Date().toISOString();
+    const cleanTherapistName =
+      typeof params.therapistName === 'string'
+        ? params.therapistName.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, 120)
+        : '';
+    const cleanTherapistId =
+      typeof params.therapistId === 'string' && isValidBookingHistoryDocId(params.therapistId, 128)
+        ? params.therapistId
+        : '';
+    const rawCode = typeof params.bookingCode === 'string' ? params.bookingCode.trim() : '';
+
+    const histId = `hist_${createHash('sha256')
+      .update(`accept_order:${actorUid}:${bookingId}:${acceptedAt}`)
+      .digest('hex')
+      .slice(0, 32)}`;
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const snapExists = (snap: any): boolean =>
+        Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const histRef = adminDb.collection('booking_status_history').doc(histId);
+      const byIdQuery = adminDb
+        .collection('booking_status_history')
+        .where('bookingId', '==', bookingId);
+      const byCodeQuery = isValidBookingHistoryCode(rawCode, 64)
+        ? adminDb
+            .collection('booking_status_history')
+            .where('bookingCode', '==', rawCode)
+        : null;
+
+      const [bookingSnap, existingHistSnap, byIdSnap, byCodeSnap] = await Promise.all([
+        transaction.get(bookingRef),
+        transaction.get(histRef),
+        transaction.get(byIdQuery),
+        byCodeQuery ? transaction.get(byCodeQuery) : Promise.resolve(null),
+      ]);
+
+      if (!snapExists(bookingSnap) || snapExists(existingHistSnap)) return;
+      const bData = bookingSnap.data() || {};
+      if (bData.status !== 'Accepted') return;
+
+      const resolvedCode = isValidBookingHistoryCode(bData.bookingCode, 64)
+        ? bData.bookingCode
+        : isValidBookingHistoryCode(rawCode, 64)
+        ? rawCode
+        : bookingId;
+
+      const existingMap = new Map<string, { id: string; data: any }>();
+      for (const d of [...(byIdSnap?.docs || []), ...(byCodeSnap?.docs || [])]) {
+        if (snapExists(d)) {
+          existingMap.set(d.id, { id: d.id, data: d.data() });
+        }
+      }
+      const existingList = [...existingMap.values()].filter(({ data: item }) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        if (item.bookingId !== undefined && item.bookingId !== bookingId) return false;
+        if (item.bookingCode !== undefined && item.bookingCode !== resolvedCode) return false;
+        if (typeof item.status !== 'string' || !item.status.trim()) return false;
+        if (typeof item.timestamp !== 'string' || Number.isNaN(Date.parse(item.timestamp))) {
+          return false;
+        }
+        return true;
+      });
+      existingList.sort((a, b) => {
+        const diff =
+          new Date(a.data.timestamp || 0).getTime() -
+          new Date(b.data.timestamp || 0).getTime();
+        return diff !== 0 ? diff : a.id.localeCompare(b.id);
+      });
+      const last = existingList[existingList.length - 1];
+      if (last && last.data.status === 'Accepted') return;
+
+      const displayTherapist = cleanTherapistName || 'Terapis';
+      const note = `Pesanan diterima oleh Terapis ${cleanTherapistName || 'Senzu'}`;
+      const entry: Record<string, any> = {
+        id: histId,
+        bookingId,
+        bookingCode: resolvedCode,
+        status: 'Accepted',
+        note,
+        updatedByRole: 'therapist',
+        updatedByName: displayTherapist,
+        actorUid,
+        actorId: actorUid,
+        actorRole: 'therapist',
+        actorName: displayTherapist,
+        ...(cleanTherapistId ? { therapistId: cleanTherapistId } : {}),
+        timestamp: acceptedAt,
+        formattedWIB: formatBookingHistoryWIB(acceptedAt),
+        requestFingerprint: computeBookingHistoryFingerprint({
+          actorScope: 'staff',
+          actorUid,
+          bookingId,
+          bookingCode: resolvedCode,
+          status: 'Accepted',
+          note,
+        }),
+      };
+
+      transaction.create(histRef, entry);
+    });
+  }
+
+  const bookingHistoryInitialRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+  const handleBookingStatusHistoryInitial = async (req: express.Request, res: express.Response) => {
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const textId = (value: unknown): string =>
+      typeof value === 'string' ? value.trim() : '';
+
+    const sanitizeText = (value: unknown, maxLen = 250): string =>
+      typeof value === 'string'
+        ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, maxLen)
+        : '';
+
+    const extractSnapshotCreateTimeIso = (snap: any): string | null => {
+      const ct = snap?.createTime;
+      if (ct === null || ct === undefined) return null;
+      if (typeof ct?.toDate === 'function') {
+        const d = ct.toDate();
+        if (d instanceof Date && !Number.isNaN(d.getTime())) return d.toISOString();
+        return null;
+      }
+      if (ct instanceof Date) {
+        return !Number.isNaN(ct.getTime()) ? ct.toISOString() : null;
+      }
+      if (typeof ct === 'string') {
+        const trimmed = ct.trim();
+        if (!trimmed) return null;
+        const parsed = new Date(trimmed);
+        return !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : null;
+      }
+      const secs =
+        typeof ct?.seconds === 'number'
+          ? ct.seconds
+          : typeof ct?._seconds === 'number'
+          ? ct._seconds
+          : null;
+      if (secs !== null && Number.isFinite(secs)) {
+        const nanos =
+          typeof ct?.nanoseconds === 'number'
+            ? ct.nanoseconds
+            : typeof ct?._nanoseconds === 'number'
+            ? ct._nanoseconds
+            : 0;
+        const d = new Date(secs * 1000 + Math.floor(nanos / 1e6));
+        return !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+      }
+      return null;
+    };
+
+    const INITIAL_ELIGIBLE_STATUSES = new Set<string>([
+      'Menunggu Pembayaran',
+      'awaiting_payment',
+      'Draft',
+      'Pending',
+    ]);
+
+    const sendGenericInitialAck = () =>
+      res.status(200).json({
+        success: true,
+        code: 'INITIAL_HISTORY_ACKNOWLEDGED',
+        message: 'Permintaan inisialisasi riwayat pesanan telah diproses.',
+      });
+
+    try {
+      // 1. Rate-limit requests BEFORE any database reads
+      const rawForwarded = req.headers?.['x-forwarded-for'];
+      const forwardedFirst =
+        typeof rawForwarded === 'string' ? rawForwarded.split(',')[0].trim() : '';
+      const clientIp =
+        (forwardedFirst && /^[0-9a-fA-F:.]+$/.test(forwardedFirst) ? forwardedFirst : '') ||
+        req.ip ||
+        req.socket?.remoteAddress ||
+        'unknown';
+
+      const now = Date.now();
+      for (const [ipKey, entry] of bookingHistoryInitialRateLimit.entries()) {
+        if (entry.resetAt <= now) {
+          bookingHistoryInitialRateLimit.delete(ipKey);
+        }
+      }
+      const currentRate = bookingHistoryInitialRateLimit.get(clientIp);
+      if (currentRate && now < currentRate.resetAt) {
+        if (currentRate.count >= 25) {
+          return res.status(429).json({
+            success: false,
+            code: 'RATE_LIMITED',
+            error: 'Terlalu banyak permintaan inisialisasi riwayat dalam waktu singkat.',
+            message: 'Terlalu banyak permintaan inisialisasi riwayat dalam waktu singkat.',
+          });
+        }
+        currentRate.count++;
+      } else {
+        bookingHistoryInitialRateLimit.set(clientIp, {
+          count: 1,
+          resetAt: now + 60_000,
+        });
+      }
+
+      // 2. Reject signed-in credentials and any arbitrary caller fields (browser sends ONLY { bookingId })
+      const rawAuthHeader = req.headers?.authorization;
+      if (typeof rawAuthHeader === 'string' && rawAuthHeader.trim() !== '') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_INITIAL_HISTORY_PAYLOAD',
+          error: 'Endpoint inisialisasi tamu tidak menerima kredensial sesi.',
+          message: 'Endpoint inisialisasi tamu tidak menerima kredensial sesi.',
+        });
+      }
+
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYLOAD',
+          error: 'Format permintaan inisialisasi riwayat tidak valid.',
+          message: 'Format permintaan inisialisasi riwayat tidak valid.',
+        });
+      }
+
+      const bodyKeys = Object.keys(req.body);
+      if (bodyKeys.length !== 1 || bodyKeys[0] !== 'bookingId') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_INITIAL_HISTORY_PAYLOAD',
+          error: 'Permintaan inisialisasi hanya mengizinkan atribut bookingId.',
+          message: 'Permintaan inisialisasi hanya mengizinkan atribut bookingId.',
+        });
+      }
+
+      const rawBookingId = req.body.bookingId;
+      if (!isValidBookingHistoryDocId(rawBookingId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_ID',
+          error: 'ID pesanan tidak valid.',
+          message: 'ID pesanan tidak valid.',
+        });
+      }
+      const bookingId = rawBookingId;
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      const initHistId = `hist_${createHash('sha256')
+        .update(`initial_guest:${bookingId}`)
+        .digest('hex')
+        .slice(0, 32)}`;
+
+      await adminDb.runTransaction(async (transaction: any) => {
+        const bookingRef = adminDb.collection('bookings').doc(bookingId);
+        const initHistRef = adminDb.collection('booking_status_history').doc(initHistId);
+        const byIdQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingId', '==', bookingId);
+
+        const [bookingSnap, existingInitSnap, byIdSnap] = await Promise.all([
+          transaction.get(bookingRef),
+          transaction.get(initHistRef),
+          transaction.get(byIdQuery),
+        ]);
+
+        // Missing booking -> generic ack with zero writes
+        if (!snapExists(bookingSnap)) return;
+
+        const bookingData = bookingSnap.data() || {};
+        if (
+          bookingData.id !== undefined &&
+          bookingData.id !== null &&
+          bookingData.id !== '' &&
+          (typeof bookingData.id !== 'string' || bookingData.id !== bookingId)
+        ) {
+          return;
+        }
+
+        const storedBookingCode = textId(bookingData.bookingCode);
+        if (!isValidBookingHistoryCode(storedBookingCode, 64)) {
+          return;
+        }
+
+        // Reject owned bookings (zero writes, no PII disclosure)
+        for (const ownerField of [
+          bookingData.customerAuthUid,
+          bookingData.authUserId,
+          bookingData.customerUid,
+          bookingData.userId,
+          bookingData.uid,
+        ]) {
+          if (ownerField !== undefined && ownerField !== null && ownerField !== '') {
+            return;
+          }
+        }
+
+        const rawCustomerId = bookingData.customerId;
+        let cleanCustomerId = '';
+        if (rawCustomerId !== undefined && rawCustomerId !== null && rawCustomerId !== '') {
+          if (
+            typeof rawCustomerId !== 'string' ||
+            rawCustomerId.trim() !== rawCustomerId ||
+            !isValidBookingHistoryDocId(rawCustomerId, 128) ||
+            rawCustomerId.startsWith('cust_u_')
+          ) {
+            return;
+          }
+          cleanCustomerId = rawCustomerId;
+        }
+
+        // Must be in an eligible initial status & unpaid/initial lifecycle
+        const storedStatus = textId(bookingData.status);
+        if (!INITIAL_ELIGIBLE_STATUSES.has(storedStatus)) {
+          return;
+        }
+
+        const pStatus = textId(bookingData.paymentStatus).toUpperCase();
+        if (
+          !['', 'UNPAID', 'PENDING', 'PENDING_PAYMENT', 'MENUNGGU PEMBAYARAN'].includes(pStatus)
+        ) {
+          return;
+        }
+
+        for (const lifecycleField of [
+          bookingData.paymentVerifiedAt,
+          bookingData.confirmedAt,
+          bookingData.assignedAt,
+          bookingData.acceptedAt,
+          bookingData.onTheWayAt,
+          bookingData.arrivedAt,
+          bookingData.treatmentStartedAt,
+          bookingData.completedAt,
+          bookingData.therapistId,
+          bookingData.assignedTherapistId,
+        ]) {
+          if (
+            lifecycleField !== undefined &&
+            lifecycleField !== null &&
+            String(lifecycleField).trim() !== ''
+          ) {
+            return;
+          }
+        }
+
+        // Derive initial timestamp strictly from Firestore snapshot.createTime
+        const initialTimestampIso = extractSnapshotCreateTimeIso(bookingSnap);
+        if (!initialTimestampIso) {
+          return;
+        }
+
+        const bookingByCodeQuery = adminDb
+          .collection('bookings')
+          .where('bookingCode', '==', storedBookingCode)
+          .limit(2);
+        const byCodeQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingCode', '==', storedBookingCode);
+
+        const [bookingByCodeSnap, byCodeSnap, custSnap] = await Promise.all([
+          transaction.get(bookingByCodeQuery),
+          transaction.get(byCodeQuery),
+          cleanCustomerId
+            ? transaction.get(adminDb.collection('customers').doc(cleanCustomerId))
+            : Promise.resolve(null),
+        ]);
+
+        for (const d of bookingByCodeSnap?.docs || []) {
+          if (snapExists(d) && d.id !== bookingId) {
+            return;
+          }
+        }
+
+        if (snapExists(custSnap)) {
+          const custData = custSnap.data() || {};
+          if (
+            (custData.customerAuthUid !== undefined &&
+              custData.customerAuthUid !== null &&
+              String(custData.customerAuthUid).trim() !== '') ||
+            (custData.authUserId !== undefined &&
+              custData.authUserId !== null &&
+              String(custData.authUserId).trim() !== '') ||
+            textId(custData.accountStatus).toUpperCase() === 'ACTIVE'
+          ) {
+            return;
+          }
+        }
+
+        // Repeated calls or bookings with existing history must not duplicate or overwrite
+        if (snapExists(existingInitSnap)) return;
+        for (const d of [...(byIdSnap?.docs || []), ...(byCodeSnap?.docs || [])]) {
+          if (snapExists(d)) return;
+        }
+
+        const paymentMethodLabel = sanitizeText(bookingData.paymentMethod, 60) || 'Transfer';
+        const initialNote = `Booking awal tercatat otomatis oleh sistem (${storedStatus}). Metode bayar: ${paymentMethodLabel}`;
+        const entry: Record<string, any> = {
+          id: initHistId,
+          bookingId,
+          bookingCode: storedBookingCode,
+          status: storedStatus,
+          note: initialNote,
+          updatedByRole: 'system',
+          updatedByName: 'Sistem Senzu Home',
+          source: 'server_initial_snapshot',
+          timestamp: initialTimestampIso,
+          formattedWIB: formatBookingHistoryWIB(initialTimestampIso),
+        };
+
+        transaction.create(initHistRef, entry);
+      });
+
+      return sendGenericInitialAck();
+    } catch (err: any) {
+      const errCodeStr = String(err?.code || '');
+      const errMsgStr = String(err?.message || '');
+      const isAlreadyExists =
+        err?.code === 6 ||
+        errCodeStr === 'already-exists' ||
+        /already[-_\s]?exists/i.test(`${errCodeStr} ${errMsgStr}`);
+      if (isAlreadyExists) {
+        return sendGenericInitialAck();
+      }
+      console.error('[Server Booking History Initial] Error:', err);
+      const statusCode =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 503;
+      const code = err?.code || (statusCode === 503 ? 'SERVICE_UNAVAILABLE' : 'REQUEST_ERROR');
+      const msg =
+        statusCode === 503
+          ? 'Layanan inisialisasi riwayat pesanan sedang tidak tersedia.'
+          : err?.message || 'Permintaan tidak dapat diproses.';
+      return res.status(statusCode).json({
+        success: false,
+        code,
+        error: msg,
+        message: msg,
+      });
+    }
+  };
+
+  const handleBookingStatusHistoryAppend = async (req: express.Request, res: express.Response) => {
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const textId = (value: unknown): string =>
+      typeof value === 'string' ? value.trim() : '';
+
+    const sanitizeText = (value: unknown, maxLen = 250): string =>
+      typeof value === 'string'
+        ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, maxLen)
+        : '';
+
+    const ALLOWED_BOOKING_STATUSES = new Set<string>([
+      'Draft',
+      'Menunggu Pembayaran',
+      'Menunggu Verifikasi Pembayaran',
+      'Pembayaran Terverifikasi',
+      'Menunggu Penjadwalan',
+      'Terjadwal',
+      'Confirmed',
+      'Therapist Assigned',
+      'Accepted',
+      'On The Way',
+      'Arrived',
+      'Treatment',
+      'Completed',
+      'Cancelled',
+      'Rescheduled',
+      'Pembayaran Ditolak',
+    ]);
+
+    const THERAPIST_ALLOWED_STATUSES = new Set<string>([
+      'Accepted',
+      'On The Way',
+      'Arrived',
+      'Treatment',
+      'Completed',
+    ]);
+
+    const CUSTOMER_ALLOWED_STATUSES = new Set<string>([
+      'Menunggu Pembayaran',
+      'Cancelled',
+    ]);
+
+    try {
+      // 1. Require verified Bearer Firebase ID token BEFORE any database access
+      const rawAuthHeader = req.headers?.authorization;
+      const tokenMatch =
+        typeof rawAuthHeader === 'string'
+          ? /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim())
+          : null;
+      if (!tokenMatch || !tokenMatch[1]) {
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          error: 'Autentikasi diperlukan untuk mencatat riwayat status pesanan.',
+          message: 'Autentikasi diperlukan untuk mencatat riwayat status pesanan.',
+        });
+      }
+
+      if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'AUTH_SERVICE_UNAVAILABLE',
+          error: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+          message: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+        });
+      }
+
+      let verifiedUid = '';
+      try {
+        const decoded = await adminAuth.verifyIdToken(tokenMatch[1]);
+        if (
+          !decoded ||
+          typeof decoded.uid !== 'string' ||
+          !isValidBookingHistoryDocId(decoded.uid, 128)
+        ) {
+          return res.status(401).json({
+            success: false,
+            code: 'AUTH_TOKEN_INVALID',
+            error: 'Identitas sesi autentikasi tidak valid.',
+            message: 'Identitas sesi autentikasi tidak valid.',
+          });
+        }
+        verifiedUid = decoded.uid;
+      } catch (authErr: any) {
+        const errCode = String(authErr?.code || '');
+        const errMsg = String(authErr?.message || '');
+        const isInfraError =
+          errCode === 'auth/internal-error' ||
+          errCode === 'auth/network-request-failed' ||
+          errCode === 'unavailable' ||
+          errCode === 'deadline-exceeded' ||
+          authErr?.status === 503 ||
+          authErr?.statusCode === 503 ||
+          /unavailable|network|econnrefused|enotfound|etimedout|eai_again|socket hang up|fetch failed|deadline|internal-error|503/i.test(
+            `${errCode} ${errMsg}`
+          );
+        if (isInfraError) {
+          return res.status(503).json({
+            success: false,
+            code: 'AUTH_SERVICE_UNAVAILABLE',
+            error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+            message: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+          });
+        }
+        return res.status(401).json({
+          success: false,
+          code: errCode === 'auth/id-token-expired' ? 'SESSION_EXPIRED' : 'AUTH_TOKEN_INVALID',
+          error: 'Sesi autentikasi tidak valid atau telah berakhir.',
+          message: 'Sesi autentikasi tidak valid atau telah berakhir.',
+        });
+      }
+
+      // 2. Validate bounded bookingId, bookingCode, status, note, and requestId BEFORE database access
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PAYLOAD',
+          error: 'Format permintaan riwayat status pesanan tidak valid.',
+          message: 'Format permintaan riwayat status pesanan tidak valid.',
+        });
+      }
+
+      const rawBookingId = req.body.bookingId;
+      if (!isValidBookingHistoryDocId(rawBookingId, 128)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_ID',
+          error: 'ID pesanan tidak valid.',
+          message: 'ID pesanan tidak valid.',
+        });
+      }
+      const bookingId = rawBookingId;
+
+      const rawBookingCode = req.body.bookingCode;
+      if (!isValidBookingHistoryCode(rawBookingCode, 64)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_CODE',
+          error: 'Kode pesanan tidak valid.',
+          message: 'Kode pesanan tidak valid.',
+        });
+      }
+      const bookingCode = rawBookingCode;
+
+      const rawStatus = req.body.status;
+      if (typeof rawStatus !== 'string' || !ALLOWED_BOOKING_STATUSES.has(rawStatus)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_STATUS',
+          error: 'Status pesanan tidak valid.',
+          message: 'Status pesanan tidak valid.',
+        });
+      }
+      const status = rawStatus;
+
+      const rawNote = req.body.note;
+      if (
+        rawNote !== undefined &&
+        rawNote !== null &&
+        (typeof rawNote !== 'string' ||
+          rawNote.length > 1000 ||
+          Buffer.byteLength(rawNote, 'utf8') > 1000)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_HISTORY_NOTE',
+          error: 'Catatan riwayat status tidak valid atau melebihi batas.',
+          message: 'Catatan riwayat status tidak valid atau melebihi batas.',
+        });
+      }
+      const sanitizedNote =
+        typeof rawNote === 'string'
+          ? rawNote.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+          : '';
+
+      const rawRequestId = req.body.requestId;
+      let cleanRequestId = '';
+      if (rawRequestId !== undefined && rawRequestId !== null && rawRequestId !== '') {
+        if (!isValidBookingHistoryDocId(rawRequestId, 128)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_REQUEST_ID',
+            error: 'ID permintaan riwayat tidak valid.',
+            message: 'ID permintaan riwayat tidak valid.',
+          });
+        }
+        cleanRequestId = rawRequestId;
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      // Staff/therapist idempotency key derived from verifiedUid + requestId ONLY (independent of bookingId/bookingCode/status/note)
+      const staffHistId = cleanRequestId
+        ? `hist_${createHash('sha256')
+            .update(`staff:${verifiedUid}:${cleanRequestId}`)
+            .digest('hex')
+            .slice(0, 32)}`
+        : `hist_${Date.now()}_${randomInt(100000, 1000000).toString(36)}`;
+
+      // Customer history key derived from verifiedUid + bookingId + status ONLY (independent of caller-supplied requestId)
+      const custHistId = `hist_${createHash('sha256')
+        .update(`customer:${verifiedUid}:${bookingId}:${status}`)
+        .digest('hex')
+        .slice(0, 32)}`;
+
+      // 3. Authoritative Read-Only Staff/Customer/Booking Resolution & History Append inside Transaction
+      const txResult = await adminDb.runTransaction(async (transaction: any) => {
+        const hasUidConflict = (record: any): boolean =>
+          [record?.authUserId, record?.authUid].some(
+            (value) =>
+              value != null &&
+              value !== '' &&
+              (typeof value !== 'string' ||
+                value.trim() !== value ||
+                !isValidBookingHistoryDocId(value, 128) ||
+                value !== verifiedUid)
+          );
+
+        const isStaffDisabled = (record: any): boolean =>
+          !record ||
+          record.isActive === false ||
+          record.loginEnabled === false ||
+          [
+            'INACTIVE',
+            'DISABLED',
+            'ARCHIVED',
+            'DINONAKTIFKAN',
+            'DELETED',
+            'TERMINATED',
+            'SUSPENDED',
+          ].includes(textId(record.status).toUpperCase()) ||
+          textId(record.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const canonicalStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const legacyStaffQuery = adminDb
+          .collection('staff_users')
+          .where('authUid', '==', verifiedUid)
+          .limit(2);
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const targetBookingRef = adminDb.collection('bookings').doc(bookingId);
+        const bookingByCodeQuery = adminDb
+          .collection('bookings')
+          .where('bookingCode', '==', bookingCode)
+          .limit(2);
+        const custByAuthUserQuery = adminDb
+          .collection('customers')
+          .where('authUserId', '==', verifiedUid)
+          .limit(2);
+        const custByCanonicalQuery = adminDb
+          .collection('customers')
+          .where('customerAuthUid', '==', verifiedUid)
+          .limit(2);
+        const staffHistRef = adminDb.collection('booking_status_history').doc(staffHistId);
+        const custHistRef = adminDb.collection('booking_status_history').doc(custHistId);
+        const histByBookingIdQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingId', '==', bookingId);
+        const histByBookingCodeQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingCode', '==', bookingCode);
+        const histByRequestIdQuery = cleanRequestId
+          ? adminDb
+              .collection('booking_status_history')
+              .where('requestId', '==', cleanRequestId)
+          : null;
+
+        const [
+          roleSnap,
+          canonicalStaffSnap,
+          legacyStaffSnap,
+          directStaffSnap,
+          targetBookingSnap,
+          bookingByCodeSnap,
+          custByAuthUserSnap,
+          custByCanonicalSnap,
+          existingStaffHistSnap,
+          existingCustHistSnap,
+          histByBookingIdSnap,
+          histByBookingCodeSnap,
+          histByRequestIdSnap,
+        ] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(canonicalStaffQuery),
+          transaction.get(legacyStaffQuery),
+          transaction.get(directStaffRef),
+          transaction.get(targetBookingRef),
+          transaction.get(bookingByCodeQuery),
+          transaction.get(custByAuthUserQuery),
+          transaction.get(custByCanonicalQuery),
+          transaction.get(staffHistRef),
+          transaction.get(custHistRef),
+          transaction.get(histByBookingIdQuery),
+          transaction.get(histByBookingCodeQuery),
+          histByRequestIdQuery ? transaction.get(histByRequestIdQuery) : Promise.resolve(null),
+        ]);
+
+        const staffDocs = new Map<string, any>();
+        for (const d of [
+          ...(canonicalStaffSnap?.docs || []),
+          ...(legacyStaffSnap?.docs || []),
+        ]) {
+          if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaffSnap)) {
+          staffDocs.set(directStaffSnap.id, directStaffSnap);
+        }
+
+        const roleExists = snapExists(roleSnap);
+        if (roleExists) {
+          const roleData = roleSnap.data() || {};
+          for (const linked of [roleData.staffId, roleData.staffUserId]) {
+            if (
+              typeof linked === 'string' &&
+              isValidBookingHistoryDocId(linked, 128) &&
+              !staffDocs.has(linked)
+            ) {
+              const linkedSnap = await transaction.get(
+                adminDb.collection('staff_users').doc(linked)
+              );
+              if (snapExists(linkedSnap)) {
+                staffDocs.set(linkedSnap.id, linkedSnap);
+              }
+            }
+          }
+        }
+
+        let therapistDocSnap: any = null;
+        let candidateTherapistId = '';
+        if (staffDocs.size === 1 && roleExists) {
+          const staffCandidate = [...staffDocs.values()][0].data() || {};
+          const roleCandidate = roleSnap.data() || {};
+          if (textId(staffCandidate.role) === 'therapist') {
+            candidateTherapistId =
+              textId(staffCandidate.therapistId) ||
+              textId(roleCandidate.therapistId) ||
+              textId(staffCandidate.uid) ||
+              [...staffDocs.values()][0].id;
+            if (isValidBookingHistoryDocId(candidateTherapistId, 128)) {
+              therapistDocSnap = await transaction.get(
+                adminDb.collection('therapists').doc(candidateTherapistId)
+              );
+            }
+          }
+        }
+
+        let targetBookingCustSnap: any = null;
+        if (snapExists(targetBookingSnap)) {
+          const bData = targetBookingSnap.data() || {};
+          const bCustId = textId(bData.customerId);
+          if (isValidBookingHistoryDocId(bCustId, 128)) {
+            targetBookingCustSnap = await transaction.get(
+              adminDb.collection('customers').doc(bCustId)
+            );
+          }
+        }
+
+        const existingHistMap = new Map<string, { id: string; data: any }>();
+        for (const d of [
+          ...(histByBookingIdSnap?.docs || []),
+          ...(histByBookingCodeSnap?.docs || []),
+        ]) {
+          if (snapExists(d)) {
+            existingHistMap.set(d.id, { id: d.id, data: d.data() || {} });
+          }
+        }
+
+        const hasStaffFootprint = staffDocs.size > 0 || roleExists;
+
+        if (hasStaffFootprint) {
+          // Stage 4B/4C/5B/7A: Require unique UID-bound Staff Master AND matching active staff_roles
+          if (staffDocs.size === 0 || !roleExists) {
+            return {
+              status: 403,
+              code: 'STAFF_AUTHORIZATION_DENIED',
+              message: 'Identitas staf belum terikat atau tidak memiliki otorisasi aktif.',
+            };
+          }
+          if (staffDocs.size > 1) {
+            return {
+              status: 403,
+              code: 'STAFF_DUPLICATE_MAPPING',
+              message: 'Identitas staf memiliki duplikasi pemetaan pada Staff Master.',
+            };
+          }
+
+          const staffSnap = [...staffDocs.values()][0];
+          const staff = staffSnap.data() || {};
+          const role = roleSnap.data() || {};
+
+          if (hasUidConflict(staff) || hasUidConflict(role)) {
+            return {
+              status: 403,
+              code: 'STAFF_UID_MISMATCH',
+              message: 'Identitas UID staf tidak sesuai dengan sesi autentikasi.',
+            };
+          }
+
+          const isUidBound =
+            staffSnap.id === verifiedUid ||
+            (typeof staff.authUserId === 'string' && staff.authUserId === verifiedUid) ||
+            (typeof staff.authUid === 'string' && staff.authUid === verifiedUid);
+          if (!isUidBound) {
+            return {
+              status: 403,
+              code: 'STAFF_UID_UNBOUND',
+              message: 'Profil Staff Master tidak terikat pada UID sesi saat ini.',
+            };
+          }
+
+          if (
+            isStaffDisabled(staff) ||
+            isStaffDisabled(role) ||
+            role.isActive !== true
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_INACTIVE',
+              message: 'Akun staf sedang tidak aktif atau telah dinonaktifkan.',
+            };
+          }
+
+          const staffRole = textId(staff.role);
+          const activeRole = textId(role.role);
+          if (
+            !staffRole ||
+            staff.role !== staffRole ||
+            role.role !== activeRole ||
+            activeRole !== staffRole
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_ROLE_MISMATCH',
+              message: 'Role staf tidak sesuai dengan Staff Master saat ini.',
+            };
+          }
+
+          for (const aliasField of [staff.uid, staff.id]) {
+            if (aliasField !== undefined && aliasField !== null && aliasField !== '') {
+              if (
+                typeof aliasField !== 'string' ||
+                !isValidBookingHistoryDocId(aliasField, 128)
+              ) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'Alias identitas Staff Master tidak valid.',
+                };
+              }
+            }
+          }
+
+          if (
+            typeof staff.uid === 'string' &&
+            staff.uid !== '' &&
+            typeof staff.id === 'string' &&
+            staff.id !== '' &&
+            staff.uid !== staff.id &&
+            ![verifiedUid, staffSnap.id].includes(staff.uid) &&
+            ![verifiedUid, staffSnap.id].includes(staff.id)
+          ) {
+            return {
+              status: 403,
+              code: 'STAFF_ROLE_MAPPING_CONFLICT',
+              message: 'Konflik alias uid/id pada Staff Master.',
+            };
+          }
+
+          const aliases = new Set(
+            [verifiedUid, staffSnap.id, textId(staff.uid), textId(staff.id)].filter(Boolean)
+          );
+          for (const linkedId of [role.staffId, role.staffUserId]) {
+            if (linkedId !== undefined && linkedId !== null && linkedId !== '') {
+              if (
+                typeof linkedId !== 'string' ||
+                !isValidBookingHistoryDocId(linkedId, 128) ||
+                !aliases.has(linkedId)
+              ) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'Referensi Staff Master pada staff_roles tidak sesuai.',
+                };
+              }
+            }
+          }
+
+          if (!['css', 'supervisor', 'manager', 'admin', 'therapist'].includes(staffRole)) {
+            return {
+              status: 403,
+              code: 'PERMISSION_DENIED',
+              message: 'Peran staf tidak memiliki wewenang mencatat riwayat status pesanan.',
+            };
+          }
+
+          let resolvedTherapistId = '';
+          let trustedTherapistIds = new Set<string>();
+          if (staffRole === 'therapist') {
+            const masterTherapistId = textId(staff.therapistId);
+            const roleTherapistId = textId(role.therapistId);
+            for (const rawThId of [staff.therapistId, role.therapistId]) {
+              if (rawThId !== undefined && rawThId !== null && rawThId !== '') {
+                if (
+                  typeof rawThId !== 'string' ||
+                  !isValidBookingHistoryDocId(rawThId, 128)
+                ) {
+                  return {
+                    status: 403,
+                    code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                    message: 'ID terapis pada Staff Master atau staff_roles tidak valid.',
+                  };
+                }
+              }
+            }
+            resolvedTherapistId =
+              masterTherapistId || roleTherapistId || textId(staff.uid) || staffSnap.id;
+            if (!isValidBookingHistoryDocId(resolvedTherapistId, 128)) {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message: 'Identitas terapis tidak valid.',
+              };
+            }
+            const therapistData = snapExists(therapistDocSnap)
+              ? therapistDocSnap.data() || {}
+              : null;
+            if (therapistData) {
+              if (isStaffDisabled(therapistData)) {
+                return {
+                  status: 403,
+                  code: 'STAFF_INACTIVE',
+                  message: 'Akun terapis sedang tidak aktif.',
+                };
+              }
+              if (
+                hasUidConflict(therapistData) ||
+                (therapistData.staffId != null &&
+                  therapistData.staffId !== '' &&
+                  (typeof therapistData.staffId !== 'string' ||
+                    !aliases.has(textId(therapistData.staffId)))) ||
+                (therapistData.id != null &&
+                  therapistData.id !== '' &&
+                  (typeof therapistData.id !== 'string' ||
+                    textId(therapistData.id) !== resolvedTherapistId))
+              ) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'Profil terapis mengalami konflik identitas.',
+                };
+              }
+            }
+            if (
+              !masterTherapistId &&
+              !aliases.has(resolvedTherapistId) &&
+              !(
+                therapistData &&
+                (textId(therapistData.authUserId) === verifiedUid ||
+                  textId(therapistData.authUid) === verifiedUid ||
+                  aliases.has(textId(therapistData.staffId)))
+              )
+            ) {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message: 'Ikatan profil terapis tidak dapat diverifikasi.',
+              };
+            }
+            trustedTherapistIds = new Set([...aliases, resolvedTherapistId]);
+            if (roleTherapistId && !trustedTherapistIds.has(roleTherapistId)) {
+              return {
+                status: 403,
+                code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                message: 'ID terapis pada staff_roles tidak sesuai dengan Staff Master.',
+              };
+            }
+          }
+
+          const actorRole = staffRole;
+          const actorName =
+            sanitizeText(staff.name, 120) ||
+            sanitizeText(staff.displayName, 120) ||
+            sanitizeText(staff.fullName, 120) ||
+            sanitizeText(role.name, 120) ||
+            (staffRole === 'therapist' ? 'Terapis Senzu' : 'Staff Senzu');
+          const finalNote =
+            sanitizedNote ||
+            `Status pesanan diperbarui menjadi ${status} oleh ${actorName}`;
+          const requestFingerprint = computeBookingHistoryFingerprint({
+            actorScope: 'staff',
+            actorUid: verifiedUid,
+            bookingId,
+            bookingCode,
+            status,
+            note: finalNote,
+          });
+
+          // Staff Idempotency Check (keyed by verifiedUid + requestId, independent of bookingId/bookingCode/status/note)
+          if (cleanRequestId && snapExists(existingStaffHistSnap)) {
+            const existingEntry = existingStaffHistSnap.data();
+            const isValidStoredStaffEntry =
+              Boolean(
+                existingEntry &&
+                  typeof existingEntry === 'object' &&
+                  !Array.isArray(existingEntry)
+              ) &&
+              existingEntry.id === staffHistId &&
+              existingEntry.requestId === cleanRequestId &&
+              existingEntry.actorUid === verifiedUid &&
+              existingEntry.actorId === verifiedUid &&
+              existingEntry.actorRole === actorRole &&
+              existingEntry.updatedByRole === actorRole &&
+              typeof existingEntry.actorName === 'string' &&
+              existingEntry.actorName.trim().length > 0 &&
+              typeof existingEntry.updatedByName === 'string' &&
+              existingEntry.updatedByName.trim().length > 0 &&
+              typeof existingEntry.bookingId === 'string' &&
+              isValidBookingHistoryDocId(existingEntry.bookingId, 128) &&
+              typeof existingEntry.bookingCode === 'string' &&
+              isValidBookingHistoryCode(existingEntry.bookingCode, 64) &&
+              typeof existingEntry.status === 'string' &&
+              ALLOWED_BOOKING_STATUSES.has(existingEntry.status) &&
+              typeof existingEntry.note === 'string' &&
+              existingEntry.note.trim().length > 0 &&
+              existingEntry.note.trim() === existingEntry.note &&
+              Buffer.byteLength(existingEntry.note, 'utf8') <= 1000 &&
+              typeof existingEntry.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(existingEntry.timestamp)) &&
+              typeof existingEntry.formattedWIB === 'string' &&
+              existingEntry.formattedWIB.trim().length > 0 &&
+              typeof existingEntry.requestFingerprint === 'string' &&
+              /^[a-f0-9]{64}$/.test(existingEntry.requestFingerprint) &&
+              existingEntry.requestFingerprint ===
+                computeBookingHistoryFingerprint({
+                  actorScope: 'staff',
+                  actorUid: existingEntry.actorUid,
+                  bookingId: existingEntry.bookingId,
+                  bookingCode: existingEntry.bookingCode,
+                  status: existingEntry.status,
+                  note: existingEntry.note,
+                });
+
+            if (!isValidStoredStaffEntry) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message: 'Data riwayat status sebelumnya tidak valid atau mengalami konflik kepemilikan.',
+              };
+            }
+
+            if (
+              existingEntry.requestFingerprint !== requestFingerprint ||
+              existingEntry.bookingId !== bookingId ||
+              existingEntry.bookingCode !== bookingCode ||
+              existingEntry.status !== status ||
+              existingEntry.note !== finalNote
+            ) {
+              return {
+                status: 409,
+                code: 'HISTORY_IDEMPOTENCY_MISMATCH',
+                message:
+                  'ID permintaan (requestId) telah digunakan dengan parameter riwayat status yang berbeda.',
+              };
+            }
+
+            if (!snapExists(targetBookingSnap)) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message: 'Target pesanan pada entri riwayat status sudah tidak ditemukan.',
+              };
+            }
+            const replayBookingData = targetBookingSnap.data() || {};
+            if (
+              (replayBookingData.id !== undefined &&
+                replayBookingData.id !== null &&
+                replayBookingData.id !== '' &&
+                (typeof replayBookingData.id !== 'string' ||
+                  replayBookingData.id !== bookingId)) ||
+              textId(replayBookingData.bookingCode) !== bookingCode
+            ) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message: 'Identitas dokumen pesanan pada entri riwayat mengalami konflik.',
+              };
+            }
+            if (staffRole === 'therapist') {
+              const assignedIds = [
+                textId(replayBookingData.therapistId),
+                textId(replayBookingData.assignedTherapistId),
+              ].filter(Boolean);
+              if (
+                !assignedIds.length ||
+                assignedIds.some((id) => !trustedTherapistIds.has(id))
+              ) {
+                return {
+                  status: 409,
+                  code: 'HISTORY_REPLAY_INVALID',
+                  message: 'Penugasan terapis pada pesanan sudah tidak sesuai.',
+                };
+              }
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: existingEntry,
+            };
+          }
+
+          for (const d of bookingByCodeSnap?.docs || []) {
+            if (snapExists(d) && d.id !== bookingId) {
+              return {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'Kode pesanan merujuk pada dokumen pesanan lain.',
+              };
+            }
+          }
+
+          if (!snapExists(targetBookingSnap)) {
+            return {
+              status: 404,
+              code: 'BOOKING_NOT_FOUND',
+              message: 'Data pesanan tidak ditemukan.',
+            };
+          }
+
+          const bookingData = targetBookingSnap.data() || {};
+          if (
+            bookingData.id !== undefined &&
+            bookingData.id !== null &&
+            bookingData.id !== '' &&
+            (typeof bookingData.id !== 'string' || bookingData.id !== bookingId)
+          ) {
+            return {
+              status: 409,
+              code: 'BOOKING_RECORD_CONFLICT',
+              message: 'Identitas dokumen pesanan tidak konsisten.',
+            };
+          }
+
+          if (textId(bookingData.bookingCode) !== bookingCode) {
+            return {
+              status: 409,
+              code: 'BOOKING_CODE_MISMATCH',
+              message: 'Kode pesanan tidak sesuai dengan dokumen pesanan.',
+            };
+          }
+
+          const persistedStatus = textId(bookingData.status);
+
+          if (staffRole === 'therapist') {
+            for (const rawAssign of [
+              bookingData.therapistId,
+              bookingData.assignedTherapistId,
+            ]) {
+              if (rawAssign !== undefined && rawAssign !== null && rawAssign !== '') {
+                if (
+                  typeof rawAssign !== 'string' ||
+                  !isValidBookingHistoryDocId(rawAssign, 128)
+                ) {
+                  return {
+                    status: 403,
+                    code: 'PERMISSION_DENIED',
+                    message: 'Atribut penugasan terapis pada pesanan tidak valid.',
+                  };
+                }
+              }
+            }
+            const assignedIds = [
+              textId(bookingData.therapistId),
+              textId(bookingData.assignedTherapistId),
+            ].filter(Boolean);
+            if (
+              !assignedIds.length ||
+              assignedIds.some((id) => !trustedTherapistIds.has(id))
+            ) {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message:
+                  'Hanya terapis aktif yang ditugaskan pada pesanan ini yang berwenang mencatat riwayat status.',
+              };
+            }
+
+            const isIssueOnAssigned =
+              status === 'Therapist Assigned' &&
+              persistedStatus === 'Therapist Assigned' &&
+              Boolean(
+                bookingData.issueReport &&
+                  typeof bookingData.issueReport === 'object' &&
+                  !Array.isArray(bookingData.issueReport)
+              );
+
+            if (!THERAPIST_ALLOWED_STATUSES.has(status) && !isIssueOnAssigned) {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message: 'Terapis tidak berwenang mencatat status pesanan ini.',
+              };
+            }
+          }
+
+          if (persistedStatus !== status) {
+            return {
+              status: 409,
+              code: 'STATUS_STATE_MISMATCH',
+              message: `Status riwayat (${status}) tidak sesuai dengan status pesanan saat ini (${persistedStatus || '-'}).`,
+            };
+          }
+
+          // Check existing history entries for cross-booking conflicts and consecutive duplicate status
+          const existingEntries: Array<{ id: string; data: any }> = [];
+          for (const item of existingHistMap.values()) {
+            const h = item.data;
+            if (!h || typeof h !== 'object' || Array.isArray(h)) continue;
+            if (
+              (h.bookingId !== undefined && h.bookingId !== bookingId) ||
+              (h.bookingCode !== undefined && h.bookingCode !== bookingCode)
+            ) {
+              return {
+                status: 409,
+                code: 'BOOKING_HISTORY_CONFLICT',
+                message: 'Riwayat status pesanan mengalami konflik referensi dokumen.',
+              };
+            }
+            existingEntries.push(item);
+          }
+
+          existingEntries.sort((a, b) => {
+            const diff =
+              new Date(a.data.timestamp || 0).getTime() -
+              new Date(b.data.timestamp || 0).getTime();
+            return diff !== 0 ? diff : a.id.localeCompare(b.id);
+          });
+
+          const lastItem = existingEntries[existingEntries.length - 1];
+          if (lastItem && lastItem.data.status === status) {
+            const lastData = lastItem.data;
+            const lastId = isValidBookingHistoryDocId(lastData.id, 128)
+              ? lastData.id
+              : lastItem.id;
+            const isValidLast =
+              isValidBookingHistoryDocId(lastId, 128) &&
+              lastData.bookingId === bookingId &&
+              lastData.bookingCode === bookingCode &&
+              lastData.status === status &&
+              typeof lastData.updatedByRole === 'string' &&
+              typeof lastData.updatedByName === 'string' &&
+              lastData.updatedByName.trim().length > 0 &&
+              typeof lastData.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(lastData.timestamp));
+
+            if (!isValidLast) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message: 'Entri status terakhir pada riwayat pesanan tidak valid.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              isDuplicateStatus: true,
+              entry: {
+                ...lastData,
+                id: lastId,
+                formattedWIB:
+                  typeof lastData.formattedWIB === 'string' &&
+                  lastData.formattedWIB.trim().length > 0
+                    ? lastData.formattedWIB
+                    : formatBookingHistoryWIB(lastData.timestamp),
+              },
+            };
+          }
+
+          if (snapExists(existingStaffHistSnap)) {
+            return {
+              status: 409,
+              code: 'HISTORY_ID_CONFLICT',
+              message: 'Entri riwayat status sudah ada. Silakan coba kembali.',
+            };
+          }
+
+          const nowIso = new Date().toISOString();
+          const entry: Record<string, any> = {
+            id: staffHistId,
+            source: 'client_report',
+            bookingId,
+            bookingCode,
+            status,
+            note: finalNote,
+            updatedByRole: actorRole,
+            updatedByName: actorName,
+            actorUid: verifiedUid,
+            actorId: verifiedUid,
+            actorRole,
+            actorName,
+            ...(resolvedTherapistId ? { therapistId: resolvedTherapistId } : {}),
+            timestamp: nowIso,
+            formattedWIB: formatBookingHistoryWIB(nowIso),
+            requestFingerprint,
+            ...(cleanRequestId ? { requestId: cleanRequestId } : {}),
+          };
+
+          transaction.create(staffHistRef, entry);
+          return {
+            status: 200,
+            isIdempotent: false,
+            entry,
+          };
+        } else {
+          // Non-operational caller (Customer): ONLY own UID-bound booking & allowed customer statuses
+          if (!CUSTOMER_ALLOWED_STATUSES.has(status)) {
+            return {
+              status: 403,
+              code: 'PERMISSION_DENIED',
+              message: 'Pelanggan tidak memiliki wewenang untuk mencatat status pesanan ini.',
+            };
+          }
+
+          for (const d of bookingByCodeSnap?.docs || []) {
+            if (snapExists(d) && d.id !== bookingId) {
+              return {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'Kode pesanan merujuk pada dokumen pesanan lain.',
+              };
+            }
+          }
+
+          if (!snapExists(targetBookingSnap)) {
+            return {
+              status: 403,
+              code: 'BOOKING_OWNERSHIP_UNVERIFIED',
+              message: 'Pesanan tidak ditemukan atau akses ditolak.',
+            };
+          }
+
+          const bookingData = targetBookingSnap.data() || {};
+          if (
+            bookingData.id !== undefined &&
+            bookingData.id !== null &&
+            bookingData.id !== '' &&
+            (typeof bookingData.id !== 'string' || bookingData.id !== bookingId)
+          ) {
+            return {
+              status: 403,
+              code: 'BOOKING_OWNERSHIP_MALFORMED',
+              message: 'Identitas dokumen pesanan tidak valid.',
+            };
+          }
+
+          if (textId(bookingData.bookingCode) !== bookingCode) {
+            return {
+              status: 403,
+              code: 'BOOKING_CODE_MISMATCH',
+              message: 'Kode pesanan tidak sesuai dengan dokumen pesanan.',
+            };
+          }
+
+          for (const rawUidVal of [bookingData.customerAuthUid, bookingData.authUserId]) {
+            if (rawUidVal !== undefined && rawUidVal !== null && rawUidVal !== '') {
+              if (
+                typeof rawUidVal !== 'string' ||
+                rawUidVal.trim() !== rawUidVal ||
+                !isValidBookingHistoryDocId(rawUidVal, 128)
+              ) {
+                return {
+                  status: 403,
+                  code: 'BOOKING_OWNERSHIP_MALFORMED',
+                  message: 'Atribut kepemilikan pesanan tidak valid.',
+                };
+              }
+            }
+          }
+
+          const bookingCustomerAuthUid = textId(bookingData.customerAuthUid);
+          const bookingAuthUserId = textId(bookingData.authUserId);
+
+          if (!bookingCustomerAuthUid && !bookingAuthUserId) {
+            return {
+              status: 403,
+              code: 'BOOKING_OWNERSHIP_MISSING',
+              message: 'Pesanan tidak memiliki ikatan UID pelanggan terotentikasi.',
+            };
+          }
+
+          if (
+            bookingCustomerAuthUid &&
+            bookingAuthUserId &&
+            bookingCustomerAuthUid !== bookingAuthUserId
+          ) {
+            return {
+              status: 403,
+              code: 'BOOKING_OWNERSHIP_CONFLICT',
+              message: 'Kepemilikan UID pesanan mengalami konflik.',
+            };
+          }
+
+          if (
+            (bookingCustomerAuthUid && bookingCustomerAuthUid !== verifiedUid) ||
+            (bookingAuthUserId && bookingAuthUserId !== verifiedUid)
+          ) {
+            return {
+              status: 403,
+              code: 'FOREIGN_BOOKING',
+              message: 'Akses ke pesanan pelanggan lain ditolak.',
+            };
+          }
+
+          const rawBookingCustId = bookingData.customerId;
+          let bookingCustomerId = '';
+          if (rawBookingCustId !== undefined && rawBookingCustId !== null && rawBookingCustId !== '') {
+            if (
+              typeof rawBookingCustId !== 'string' ||
+              rawBookingCustId.trim() !== rawBookingCustId ||
+              !isValidBookingHistoryDocId(rawBookingCustId, 128)
+            ) {
+              return {
+                status: 403,
+                code: 'BOOKING_OWNERSHIP_MALFORMED',
+                message: 'ID pelanggan pada pesanan tidak valid.',
+              };
+            }
+            bookingCustomerId = rawBookingCustId;
+            if (
+              bookingCustomerId.startsWith('cust_u_') &&
+              bookingCustomerId !== `cust_u_${verifiedUid}` &&
+              bookingCustomerId !== `cust_u_${verifiedUid.slice(0, 10)}`
+            ) {
+              return {
+                status: 403,
+                code: 'FOREIGN_CUSTOMER_PROFILE',
+                message: 'ID profil pelanggan pada pesanan tidak sesuai dengan sesi.',
+              };
+            }
+          }
+
+          const ownedProfiles = new Map<string, any>();
+          for (const d of [
+            ...(custByAuthUserSnap?.docs || []),
+            ...(custByCanonicalSnap?.docs || []),
+          ]) {
+            if (snapExists(d)) ownedProfiles.set(d.id, d);
+          }
+
+          if (ownedProfiles.size > 1) {
+            return {
+              status: 403,
+              code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+              message: 'Kepemilikan profil pelanggan tidak unik atau mengalami konflik.',
+            };
+          }
+
+          const profilesToValidate = new Map<string, any>(ownedProfiles);
+          if (snapExists(targetBookingCustSnap)) {
+            profilesToValidate.set(targetBookingCustSnap.id, targetBookingCustSnap);
+          }
+
+          if (
+            ownedProfiles.size === 1 &&
+            bookingCustomerId &&
+            snapExists(targetBookingCustSnap) &&
+            !ownedProfiles.has(bookingCustomerId)
+          ) {
+            const targetCustData = targetBookingCustSnap.data() || {};
+            if (
+              targetCustData.authUserId != null ||
+              targetCustData.customerAuthUid != null ||
+              bookingCustomerId.startsWith('cust_u_')
+            ) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                message: 'Profil pelanggan pada pesanan tidak sesuai dengan profil akun aktif.',
+              };
+            }
+          }
+
+          for (const [profId, profSnap] of profilesToValidate.entries()) {
+            const profile = profSnap.data() || {};
+            if (
+              profile.id !== undefined &&
+              profile.id !== null &&
+              profile.id !== '' &&
+              (typeof profile.id !== 'string' || profile.id !== profId)
+            ) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_OWNERSHIP_MALFORMED',
+                message: 'Identitas profil pelanggan tidak sesuai.',
+              };
+            }
+            for (const rawProfUid of [profile.authUserId, profile.customerAuthUid]) {
+              if (rawProfUid !== undefined && rawProfUid !== null && rawProfUid !== '') {
+                if (
+                  typeof rawProfUid !== 'string' ||
+                  rawProfUid.trim() !== rawProfUid ||
+                  !isValidBookingHistoryDocId(rawProfUid, 128) ||
+                  rawProfUid !== verifiedUid
+                ) {
+                  return {
+                    status: 403,
+                    code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                    message: 'Atribut kepemilikan profil pelanggan mengalami konflik.',
+                  };
+                }
+              }
+            }
+            const acctType = textId(profile.accountType).toUpperCase();
+            const acctStatus = textId(profile.accountStatus).toUpperCase();
+            const profStatus = textId(profile.status).toUpperCase();
+            const crmStatus = textId(profile.crmStatus).toLowerCase();
+            const custStatus = textId(profile.customerStatus).toLowerCase();
+
+            if (
+              (acctType && acctType !== 'CUSTOMER') ||
+              acctStatus === 'DISABLED' ||
+              acctStatus === 'NOT_REGISTERED' ||
+              acctStatus === 'INACTIVE' ||
+              [
+                'DISABLED',
+                'INACTIVE',
+                'ARCHIVED',
+                'BLOCKED',
+                'DELETED',
+                'DELETION_REQUESTED',
+              ].includes(profStatus) ||
+              ['archived', 'blocked'].includes(crmStatus) ||
+              ['archived', 'blocked'].includes(custStatus)
+            ) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_PROFILE_INACTIVE',
+                message: 'Profil pelanggan sedang tidak aktif atau tidak memenuhi syarat.',
+              };
+            }
+          }
+
+          // Check existing history entries for cross-booking conflicts first
+          const existingEntries: Array<{ id: string; data: any }> = [];
+          for (const item of existingHistMap.values()) {
+            const hist = item.data;
+            if (!hist || typeof hist !== 'object' || Array.isArray(hist)) continue;
+            if (
+              (hist.bookingId !== undefined && hist.bookingId !== bookingId) ||
+              (hist.bookingCode !== undefined && hist.bookingCode !== bookingCode)
+            ) {
+              return {
+                status: 409,
+                code: 'BOOKING_HISTORY_CONFLICT',
+                message: 'Riwayat status pesanan mengalami konflik referensi dokumen.',
+              };
+            }
+            existingEntries.push(item);
+          }
+
+          // Validate stored customer entry integrity, linkage, ownership, and self-fingerprint
+          const validateStoredCustomerReceipt = (
+            entryObj: any,
+            expectedDocId?: string
+          ): boolean =>
+            Boolean(entryObj && typeof entryObj === 'object' && !Array.isArray(entryObj)) &&
+            (expectedDocId
+              ? entryObj.id === expectedDocId
+              : isValidBookingHistoryDocId(entryObj.id, 128)) &&
+            typeof entryObj.bookingId === 'string' &&
+            isValidBookingHistoryDocId(entryObj.bookingId, 128) &&
+            typeof entryObj.bookingCode === 'string' &&
+            isValidBookingHistoryCode(entryObj.bookingCode, 64) &&
+            typeof entryObj.status === 'string' &&
+            CUSTOMER_ALLOWED_STATUSES.has(entryObj.status) &&
+            entryObj.updatedByRole === 'customer' &&
+            entryObj.actorRole === 'customer' &&
+            entryObj.actorUid === verifiedUid &&
+            entryObj.actorId === verifiedUid &&
+            typeof entryObj.updatedByName === 'string' &&
+            entryObj.updatedByName.trim().length > 0 &&
+            typeof entryObj.actorName === 'string' &&
+            entryObj.actorName.trim().length > 0 &&
+            typeof entryObj.note === 'string' &&
+            entryObj.note.trim().length > 0 &&
+            entryObj.note.trim() === entryObj.note &&
+            Buffer.byteLength(entryObj.note, 'utf8') <= 1000 &&
+            typeof entryObj.timestamp === 'string' &&
+            !Number.isNaN(Date.parse(entryObj.timestamp)) &&
+            typeof entryObj.formattedWIB === 'string' &&
+            entryObj.formattedWIB.trim().length > 0 &&
+            typeof entryObj.requestFingerprint === 'string' &&
+            /^[a-f0-9]{64}$/.test(entryObj.requestFingerprint) &&
+            entryObj.requestFingerprint ===
+              computeBookingHistoryFingerprint({
+                actorScope: 'customer',
+                actorUid: entryObj.actorUid,
+                bookingId: entryObj.bookingId,
+                bookingCode: entryObj.bookingCode,
+                status: entryObj.status,
+                note: entryObj.note,
+              }) &&
+            (entryObj.requestId === undefined ||
+              isValidBookingHistoryDocId(entryObj.requestId, 128));
+
+          // Check whether caller-supplied note matches committed entry without regenerating from mutable booking labels
+          const isCustomerReplayNoteCompatible = (storedEntry: any): boolean => {
+            const storedNote = typeof storedEntry?.note === 'string' ? storedEntry.note : '';
+            if (storedEntry?.status === 'Menunggu Pembayaran') {
+              if (!sanitizedNote) return true;
+              return sanitizedNote === storedNote;
+            }
+            if (storedEntry?.status === 'Cancelled') {
+              if (sanitizedNote) {
+                const normalizedCancelNote = sanitizedNote.startsWith('Dibatalkan')
+                  ? sanitizedNote
+                  : `Dibatalkan oleh Pelanggan: ${sanitizedNote}`;
+                return sanitizedNote === storedNote || normalizedCancelNote === storedNote;
+              }
+              return (
+                storedNote === 'Dibatalkan oleh pelanggan' ||
+                storedNote === 'Dibatalkan oleh Pelanggan'
+              );
+            }
+            return !sanitizedNote || sanitizedNote === storedNote;
+          };
+
+          // CORRECTION 2: Validate committed customer replays BEFORE applying current-status checks for new entries
+          // 1a) Check any committed customer receipt matching cleanRequestId (across bookings or statuses)
+          if (cleanRequestId) {
+            const reqMatches = new Map<string, any>();
+            for (const d of histByRequestIdSnap?.docs || []) {
+              if (snapExists(d)) {
+                const dData = d.data() || {};
+                if (
+                  dData.requestId === cleanRequestId &&
+                  (dData.actorUid === verifiedUid ||
+                    dData.actorId === verifiedUid ||
+                    dData.updatedByRole === 'customer' ||
+                    dData.actorRole === 'customer')
+                ) {
+                  reqMatches.set(d.id, { id: d.id, data: dData });
+                }
+              }
+            }
+            for (const item of existingEntries) {
+              const h = item.data;
+              if (
+                h.requestId === cleanRequestId &&
+                (h.actorUid === verifiedUid ||
+                  h.actorId === verifiedUid ||
+                  h.updatedByRole === 'customer' ||
+                  h.actorRole === 'customer')
+              ) {
+                reqMatches.set(item.id, item);
+              }
+            }
+
+            for (const matchedItem of reqMatches.values()) {
+              const matchedEntry = matchedItem.data;
+              if (!validateStoredCustomerReceipt(matchedEntry, matchedItem.id)) {
+                return {
+                  status: 409,
+                  code: 'HISTORY_REPLAY_INVALID',
+                  message:
+                    'Entri riwayat status pesanan pelanggan mengalami konflik kepemilikan atau integritas.',
+                };
+              }
+              if (
+                matchedEntry.bookingId !== bookingId ||
+                matchedEntry.bookingCode !== bookingCode ||
+                matchedEntry.status !== status ||
+                !isCustomerReplayNoteCompatible(matchedEntry)
+              ) {
+                return {
+                  status: 409,
+                  code: 'HISTORY_IDEMPOTENCY_MISMATCH',
+                  message:
+                    'ID permintaan (requestId) telah digunakan dengan parameter riwayat status pelanggan yang berbeda.',
+                };
+              }
+              return {
+                status: 200,
+                isIdempotent: true,
+                entry: matchedEntry,
+              };
+            }
+          }
+
+          // 1b) Check deterministic customer status history document (logical deduplication across requestIds)
+          if (snapExists(existingCustHistSnap)) {
+            const existingEntry = existingCustHistSnap.data();
+            if (!validateStoredCustomerReceipt(existingEntry, custHistId)) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message:
+                  'Entri riwayat status pesanan pelanggan mengalami konflik kepemilikan atau integritas.',
+              };
+            }
+
+            if (
+              existingEntry.bookingId !== bookingId ||
+              existingEntry.bookingCode !== bookingCode ||
+              existingEntry.status !== status ||
+              !isCustomerReplayNoteCompatible(existingEntry)
+            ) {
+              return {
+                status: 409,
+                code: 'HISTORY_IDEMPOTENCY_MISMATCH',
+                message:
+                  'Parameter status atau catatan riwayat pelanggan tidak sesuai dengan entri yang telah tercatat.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: existingEntry,
+            };
+          }
+
+          // 1c) Check existing history documents for this booking (preserve legacy records & logical deduplication)
+          for (const item of existingEntries) {
+            const hist = item.data;
+            if (hist.status !== status) continue;
+            const isCustomerRecord =
+              hist.updatedByRole === 'customer' ||
+              hist.actorRole === 'customer' ||
+              hist.actorUid !== undefined ||
+              hist.actorId !== undefined;
+
+            if (!isCustomerRecord) continue;
+
+            const histValid =
+              (hist.id === undefined || hist.id === item.id) &&
+              hist.bookingId === bookingId &&
+              hist.bookingCode === bookingCode &&
+              hist.status === status &&
+              hist.updatedByRole === 'customer' &&
+              (hist.actorRole === undefined || hist.actorRole === 'customer') &&
+              hist.actorUid === verifiedUid &&
+              hist.actorId === verifiedUid &&
+              typeof hist.updatedByName === 'string' &&
+              hist.updatedByName.trim().length > 0 &&
+              typeof hist.note === 'string' &&
+              hist.note.trim().length > 0 &&
+              hist.note.trim() === hist.note &&
+              Buffer.byteLength(hist.note, 'utf8') <= 1000 &&
+              typeof hist.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(hist.timestamp)) &&
+              typeof hist.requestFingerprint === 'string' &&
+              /^[a-f0-9]{64}$/.test(hist.requestFingerprint) &&
+              hist.requestFingerprint ===
+                computeBookingHistoryFingerprint({
+                  actorScope: 'customer',
+                  actorUid: verifiedUid,
+                  bookingId,
+                  bookingCode,
+                  status,
+                  note: hist.note,
+                }) &&
+              (hist.requestId === undefined ||
+                isValidBookingHistoryDocId(hist.requestId, 128));
+
+            if (!histValid) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message:
+                  'Riwayat status pesanan pelanggan mengalami konflik kepemilikan atau integritas.',
+              };
+            }
+
+            if (!isCustomerReplayNoteCompatible(hist)) {
+              return {
+                status: 409,
+                code: 'HISTORY_IDEMPOTENCY_MISMATCH',
+                message:
+                  'Parameter status atau catatan riwayat pelanggan tidak sesuai dengan entri yang telah tercatat.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              entry: {
+                ...hist,
+                id: hist.id || item.id,
+                formattedWIB:
+                  typeof hist.formattedWIB === 'string' && hist.formattedWIB.trim().length > 0
+                    ? hist.formattedWIB
+                    : formatBookingHistoryWIB(hist.timestamp),
+              },
+            };
+          }
+
+          // 2) Current-status & provenance checks for NEW customer history entries
+          const persistedStatus = textId(bookingData.status);
+          if (persistedStatus !== status) {
+            return {
+              status: 409,
+              code: 'STATUS_STATE_MISMATCH',
+              message: `Status riwayat (${status}) tidak sesuai dengan status pesanan saat ini (${persistedStatus || '-'}).`,
+            };
+          }
+
+          const pStatus = textId(bookingData.paymentStatus).toUpperCase();
+          if (status === 'Cancelled') {
+            // CORRECTION 3: Missing cancelledByRole, caller notes, and unprotected client-set markers do NOT prove customer cancellation.
+            // Reject NEW customer-attributed cancellation entries for paid bookings or when permitted pending/unpaid customer-cancellation provenance cannot be established.
+            if (pStatus === 'PAID' || pStatus === 'TERVERIFIKASI') {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message:
+                  'Pembatalan pada pesanan yang telah dibayar tidak dapat diklaim sebagai pembatalan pelanggan.',
+              };
+            }
+            return {
+              status: 403,
+              code: 'PERMISSION_DENIED',
+              message:
+                'Provenans pembatalan pesanan oleh pelanggan tidak dapat diverifikasi secara otoritatif.',
+            };
+          }
+
+          if (status === 'Menunggu Pembayaran') {
+            if (pStatus === 'PAID' || pStatus === 'TERVERIFIKASI') {
+              return {
+                status: 409,
+                code: 'STATUS_STATE_MISMATCH',
+                message: 'Pesanan sudah berstatus lunas.',
+              };
+            }
+          }
+
+          existingEntries.sort((a, b) => {
+            const diff =
+              new Date(a.data.timestamp || 0).getTime() -
+              new Date(b.data.timestamp || 0).getTime();
+            return diff !== 0 ? diff : a.id.localeCompare(b.id);
+          });
+          const lastItem = existingEntries[existingEntries.length - 1];
+          if (lastItem && lastItem.data.status === status) {
+            const lastData = lastItem.data;
+            const lastId = isValidBookingHistoryDocId(lastData.id, 128)
+              ? lastData.id
+              : lastItem.id;
+            const isValidLast =
+              isValidBookingHistoryDocId(lastId, 128) &&
+              lastData.bookingId === bookingId &&
+              lastData.bookingCode === bookingCode &&
+              lastData.status === status &&
+              typeof lastData.updatedByRole === 'string' &&
+              typeof lastData.updatedByName === 'string' &&
+              lastData.updatedByName.trim().length > 0 &&
+              typeof lastData.timestamp === 'string' &&
+              !Number.isNaN(Date.parse(lastData.timestamp));
+
+            if (!isValidLast) {
+              return {
+                status: 409,
+                code: 'HISTORY_REPLAY_INVALID',
+                message: 'Entri status terakhir pada riwayat pesanan tidak valid.',
+              };
+            }
+
+            return {
+              status: 200,
+              isIdempotent: true,
+              isDuplicateStatus: true,
+              entry: {
+                ...lastData,
+                id: lastId,
+                formattedWIB:
+                  typeof lastData.formattedWIB === 'string' &&
+                  lastData.formattedWIB.trim().length > 0
+                    ? lastData.formattedWIB
+                    : formatBookingHistoryWIB(lastData.timestamp),
+              },
+            };
+          }
+
+          const actorRole = 'customer';
+          const actorName =
+            sanitizeText(bookingData.customerName, 120) || 'Pelanggan Senzu';
+          const paymentMethodLabel =
+            sanitizeText(bookingData.paymentMethod, 60) || 'Transfer';
+          const finalNote =
+            sanitizedNote ||
+            `Booking diajukan oleh customer melalui portal Senzu Home. Metode bayar: ${paymentMethodLabel}`;
+
+          const requestFingerprint = computeBookingHistoryFingerprint({
+            actorScope: 'customer',
+            actorUid: verifiedUid,
+            bookingId,
+            bookingCode,
+            status,
+            note: finalNote,
+          });
+
+          const nowIso = new Date().toISOString();
+          const entry: Record<string, any> = {
+            id: custHistId,
+            bookingId,
+            bookingCode,
+            status,
+            note: finalNote,
+            updatedByRole: 'customer',
+            updatedByName: actorName,
+            actorUid: verifiedUid,
+            actorId: verifiedUid,
+            actorRole,
+            actorName,
+            timestamp: nowIso,
+            formattedWIB: formatBookingHistoryWIB(nowIso),
+            requestFingerprint,
+            ...(cleanRequestId ? { requestId: cleanRequestId } : {}),
+          };
+
+          transaction.create(custHistRef, entry);
+          return {
+            status: 200,
+            isIdempotent: false,
+            entry,
+          };
+        }
+      });
+
+      if (txResult.status !== 200) {
+        return res.status(txResult.status).json({
+          success: false,
+          code: txResult.code,
+          error: txResult.message,
+          message: txResult.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        id: txResult.entry.id,
+        isIdempotent: txResult.isIdempotent,
+        ...(txResult.isDuplicateStatus ? { isDuplicateStatus: true } : {}),
+        historyEntry: txResult.entry,
+        history: txResult.entry,
+        entry: txResult.entry,
+      });
+    } catch (err: any) {
+      console.error('[Server Booking History] Append error:', err);
+      const errCodeStr = String(err?.code || '');
+      const errMsgStr = String(err?.message || '');
+      const isAlreadyExists =
+        err?.code === 6 ||
+        errCodeStr === 'already-exists' ||
+        /already[-_\s]?exists/i.test(`${errCodeStr} ${errMsgStr}`);
+      if (isAlreadyExists) {
+        return res.status(409).json({
+          success: false,
+          code: 'HISTORY_ID_CONFLICT',
+          error: 'Entri riwayat status sudah ada. Silakan coba kembali.',
+          message: 'Entri riwayat status sudah ada. Silakan coba kembali.',
+        });
+      }
+      const statusCode =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 503;
+      const code = err?.code || (statusCode === 503 ? 'SERVICE_UNAVAILABLE' : 'REQUEST_ERROR');
+      const msg =
+        statusCode === 503
+          ? 'Layanan pencatatan riwayat status pesanan sedang tidak tersedia.'
+          : err?.message || 'Permintaan tidak dapat diproses.';
+      return res.status(statusCode).json({
+        success: false,
+        code,
+        error: msg,
+        message: msg,
+      });
+    }
+  };
+
+  app.post('/api/booking-history/initial', handleBookingStatusHistoryInitial);
+  app.post('/api/booking-status-history/initial', handleBookingStatusHistoryInitial);
+  app.post('/api/booking-history/append', handleBookingStatusHistoryAppend);
+  app.post('/api/booking-status-history/append', handleBookingStatusHistoryAppend);
 
   // =============================================================
   // MANAGER STAFF MASTER CRUD ENDPOINTS (Server-Authoritative RBAC)
@@ -5751,62 +17331,159 @@ async function startServer() {
     }
   });
 
-  // Authoritative Chat Notification Dispatcher
+  // Authoritative Chat Notification Dispatcher (Stage 7E hardened)
   async function dispatchAuthoritativeChatNotification(params: {
     bookingId: string;
     messageId: string;
-    senderType: 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
-  }) {
-    const { bookingId, messageId, senderType } = params;
+    senderType?: 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
+  }): Promise<{
+    dispatched: boolean;
+    isIdempotent?: boolean;
+    notificationId?: string | null;
+    deliveryId?: string | null;
+    pushDeliveryId?: string | null;
+  }> {
+    const bookingId = typeof params?.bookingId === 'string' ? params.bookingId.trim() : '';
+    const messageId = typeof params?.messageId === 'string' ? params.messageId.trim() : '';
+    if (!bookingId || !messageId || !adminDb) {
+      return { dispatched: false };
+    }
+
     try {
-      if (!adminDb) return;
       const bookingDoc = await adminDb.collection('bookings').doc(bookingId).get();
-      if (!bookingDoc.exists) return;
+      if (!bookingDoc.exists) return { dispatched: false };
 
       const booking = bookingDoc.data() as any;
-      const rawStatus = (booking.status || '').toLowerCase().trim();
-      const isTerminal = ['completed', 'cancelled', 'rescheduled', 'rejected', 'dibatalkan', 'selesai', 'expired'].includes(rawStatus);
+      const rawStatus = String(booking.status || '').toLowerCase().trim();
+      const rawPayStatus = String(booking.paymentStatus || '').toLowerCase().trim();
+      const isTerminal =
+        ['completed', 'cancelled', 'rescheduled', 'rejected', 'dibatalkan', 'selesai', 'expired'].includes(rawStatus) ||
+        ['expired', 'refunded', 'payment_rejected'].includes(rawPayStatus);
 
-      // Do not dispatch notifications for completed/terminal bookings
-      if (isTerminal) return;
+      if (isTerminal) return { dispatched: false };
 
-      // Idempotency using messageId
-      const notifDispatchId = `chat_notif_${messageId}`;
+      const chatDoc = await adminDb.collection('booking_chats').doc(bookingId).get();
+      if (chatDoc.exists && String(chatDoc.data()?.status || '').toLowerCase().trim() === 'closed') {
+        return { dispatched: false };
+      }
+
+      const messageRef = adminDb
+        .collection('booking_chats')
+        .doc(bookingId)
+        .collection('messages')
+        .doc(messageId);
+      const messageSnap = await messageRef.get();
+      if (!messageSnap.exists) {
+        return { dispatched: false };
+      }
+      const persistedMsg = messageSnap.data() as any;
+      if (String(persistedMsg?.bookingId || bookingId).trim() !== bookingId) {
+        return { dispatched: false };
+      }
+
+      const authoritativeSenderType = String(
+        persistedMsg?.senderType || params.senderType || ''
+      )
+        .toUpperCase()
+        .trim() as 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
+      if (!['CUSTOMER', 'THERAPIST', 'SYSTEM'].includes(authoritativeSenderType)) {
+        return { dispatched: false };
+      }
+
+      const safeBookingKey = bookingId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+      const safeMsgKey = messageId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+      const notifDispatchId = `chat_notif_${safeBookingKey}_${safeMsgKey}`;
+      const legacyDispatchId = `chat_notif_${messageId}`;
       const dispatchRef = adminDb.collection('chat_notification_dispatches').doc(notifDispatchId);
-      const dispatchDoc = await dispatchRef.get();
-      if (dispatchDoc.exists) return;
+      const legacyDispatchRef = adminDb.collection('chat_notification_dispatches').doc(legacyDispatchId);
 
-      const isCustomerSender = senderType === 'CUSTOMER';
-      let recipientUserId = '';
+      const [existingDispatch, existingLegacy] = await Promise.all([
+        dispatchRef.get(),
+        notifDispatchId !== legacyDispatchId ? legacyDispatchRef.get() : Promise.resolve(null),
+      ]);
+      if (existingDispatch.exists || (existingLegacy && existingLegacy.exists)) {
+        const existingData = (existingDispatch.exists ? existingDispatch.data() : existingLegacy?.data()) as any;
+        return {
+          dispatched: true,
+          isIdempotent: true,
+          notificationId: existingData?.notificationId || null,
+          deliveryId: existingData?.deliveryId || null,
+          pushDeliveryId: existingData?.pushDeliveryId || null,
+        };
+      }
+
+      const isCustomerSender = authoritativeSenderType === 'CUSTOMER';
+      const recipientRole: 'therapist' | 'customer' = isCustomerSender ? 'therapist' : 'customer';
+      const therapistBusinessId = String(
+        booking.therapistId || booking.assignedTherapistId || ''
+      ).trim();
+
+      let canonicalRecipientId = '';
+      let recipientAuthUid = '';
+      const deviceCandidateUserIds = new Set<string>();
 
       if (isCustomerSender) {
-        // Recipient is therapist: resolve therapist's Auth UID
-        const therapistBusinessId = booking.therapistId || booking.assignedTherapistId;
-        if (therapistBusinessId) {
+        if (!therapistBusinessId) {
+          return { dispatched: false };
+        }
+        canonicalRecipientId = therapistBusinessId;
+        deviceCandidateUserIds.add(therapistBusinessId);
+        try {
+          const tDoc = await adminDb.collection('therapists').doc(therapistBusinessId).get();
+          if (tDoc.exists) {
+            const tData = tDoc.data() as any;
+            const tUid = String(tData?.authUserId || tData?.authUid || '').trim();
+            if (tUid) {
+              recipientAuthUid = tUid;
+              deviceCandidateUserIds.add(tUid);
+            }
+          }
+        } catch {}
+        if (!recipientAuthUid) {
           try {
-            const tDoc = await adminDb.collection('therapists').doc(therapistBusinessId).get();
-            if (tDoc.exists && tDoc.data()?.authUserId) {
-              recipientUserId = tDoc.data()!.authUserId;
+            const srSnap = await adminDb
+              .collection('staff_roles')
+              .where('therapistId', '==', therapistBusinessId)
+              .limit(1)
+              .get();
+            if (!srSnap.empty) {
+              recipientAuthUid = srSnap.docs[0].id;
+              deviceCandidateUserIds.add(recipientAuthUid);
             }
           } catch {}
-          if (!recipientUserId) {
-            try {
-              const srSnap = await adminDb.collection('staff_roles')
-                .where('therapistId', '==', therapistBusinessId)
-                .limit(1)
-                .get();
-              if (!srSnap.empty) {
-                recipientUserId = srSnap.docs[0].id;
-              }
-            } catch {}
-          }
-          if (!recipientUserId) {
-            recipientUserId = booking.therapistAuthUid || therapistBusinessId;
+        }
+        if (booking.therapistAuthUid) {
+          const bTAuth = String(booking.therapistAuthUid).trim();
+          if (bTAuth) {
+            if (!recipientAuthUid) recipientAuthUid = bTAuth;
+            deviceCandidateUserIds.add(bTAuth);
           }
         }
       } else {
-        // Recipient is customer
-        recipientUserId = booking.customerAuthUid || booking.authUserId || booking.customerId || '';
+        const bCustAuthUid = String(booking.customerAuthUid || '').trim();
+        const bAuthUserId = String(booking.authUserId || '').trim();
+        if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
+          return { dispatched: false };
+        }
+        recipientAuthUid = bCustAuthUid || bAuthUserId;
+        const bCustomerId = String(booking.customerId || '').trim();
+        if (!recipientAuthUid && bCustomerId) {
+          try {
+            const cSnap = await adminDb.collection('customers').doc(bCustomerId).get();
+            if (cSnap.exists) {
+              const cData = cSnap.data() as any;
+              const cAuth = String(cData?.authUserId || cData?.customerAuthUid || '').trim();
+              if (cAuth) recipientAuthUid = cAuth;
+            }
+          } catch {}
+        }
+        canonicalRecipientId = bCustomerId || recipientAuthUid;
+        if (canonicalRecipientId) deviceCandidateUserIds.add(canonicalRecipientId);
+        if (recipientAuthUid) deviceCandidateUserIds.add(recipientAuthUid);
+      }
+
+      if (!canonicalRecipientId) {
+        return { dispatched: false };
       }
 
       const notifTitle = 'Senzu Home';
@@ -5814,127 +17491,365 @@ async function startServer() {
         ? 'Pesan baru dari customer.'
         : 'Pesan baru dari terapis Anda.';
       const now = new Date().toISOString();
+      const notifId = `inapp_${safeBookingKey}_${safeMsgKey}`;
+      const inAppDeliveryId = `del_${notifDispatchId}_inapp`;
+      const pushDeliveryId = `del_${notifDispatchId}_push`;
+      const actionUrl = `/?openChat=${encodeURIComponent(bookingId)}`;
 
-      await dispatchRef.set({
+      const eventRecord = {
+        id: notifDispatchId,
+        type: 'chat.message_received',
+        bookingId,
+        bookingCode: booking.bookingCode || '',
+        customerId: booking.customerId || recipientAuthUid || undefined,
+        customerName: booking.customerName || undefined,
+        therapistId: therapistBusinessId || undefined,
+        therapistName: booking.therapistName || booking.assignedTherapistName || undefined,
+        actorId: String(persistedMsg.senderUid || '').trim() || 'system',
+        actorRole: authoritativeSenderType.toLowerCase(),
+        priority: 'HIGH',
+        targetRoles: [recipientRole],
+        payload: {
+          bookingId,
+          bookingCode: booking.bookingCode || '',
+          messageId,
+          senderType: authoritativeSenderType,
+          recipientRole,
+          recipientId: canonicalRecipientId,
+        },
+        createdAt: now,
+        deduplicationKey: `chat:${bookingId}:${messageId}`,
+      };
+
+      const notifDoc: Record<string, any> = {
+        id: notifId,
+        eventId: notifDispatchId,
+        eventType: 'chat.message_received',
+        recipientRole,
+        recipientId: canonicalRecipientId,
+        recipientUserId: recipientAuthUid || canonicalRecipientId,
+        bookingId,
+        bookingCode: booking.bookingCode || '',
+        customerId: booking.customerId || (recipientRole === 'customer' ? canonicalRecipientId : undefined),
+        customerAuthUid: recipientRole === 'customer' ? recipientAuthUid || undefined : undefined,
+        therapistId: therapistBusinessId || undefined,
+        title: notifTitle,
+        message: notifBody,
+        channel: 'in_app',
+        priority: 'HIGH',
+        read: false,
+        readAt: null,
+        actionUrl,
+        metadata: {
+          bookingId,
+          messageId,
+          senderType: authoritativeSenderType,
+        },
+        createdAt: now,
+      };
+
+      await adminDb.collection('notification_events').doc(notifDispatchId).set(
+        JSON.parse(JSON.stringify(eventRecord))
+      );
+      await adminDb.collection('notifications').doc(notifId).set(
+        JSON.parse(JSON.stringify(notifDoc))
+      );
+      await adminDb.collection('notification_deliveries').doc(inAppDeliveryId).set({
+        id: inAppDeliveryId,
+        eventId: notifDispatchId,
+        eventType: 'chat.message_received',
+        bookingId,
+        bookingCode: booking.bookingCode || '',
+        recipientRole,
+        recipientId: canonicalRecipientId,
+        recipientName: isCustomerSender
+          ? booking.therapistName || booking.assignedTherapistName || 'Terapis'
+          : booking.customerName || 'Pelanggan',
+        channel: 'in_app',
+        status: 'delivered',
+        attemptCount: 1,
+        providerResponse: 'Written to Firestore notifications collection',
+        sentAt: now,
+        deliveredAt: now,
+        createdAt: now,
+      });
+
+      // Truthful push delivery recording
+      let pushStatus: 'sent' | 'failed' | 'skipped' = 'skipped';
+      let pushProviderResponse = 'No active push devices registered for recipient';
+      let pushErrorMessage: string | undefined;
+
+      try {
+        const allDeviceSnaps = await adminDb
+          .collection('notification_devices')
+          .where('role', '==', recipientRole)
+          .get();
+        const pushTokens: string[] = [];
+        allDeviceSnaps.docs.forEach((snapDoc) => {
+          const d = snapDoc.data() as any;
+          if (d?.enabled === false) return;
+          const dUid = String(d?.userId || '').trim();
+          const dAuthUid = String(d?.authUid || '').trim();
+          if (
+            (dUid && deviceCandidateUserIds.has(dUid)) ||
+            (dAuthUid && deviceCandidateUserIds.has(dAuthUid))
+          ) {
+            if (typeof d?.token === 'string' && d.token.trim()) {
+              pushTokens.push(d.token.trim());
+            }
+          }
+        });
+
+        if (pushTokens.length === 0) {
+          pushStatus = 'skipped';
+          pushProviderResponse = 'No registered device tokens found for recipient';
+        } else if (!adminMessaging) {
+          pushStatus = 'skipped';
+          pushProviderResponse = 'FCM adminMessaging not configured in this environment';
+        } else {
+          try {
+            const multicastRes = await adminMessaging.sendEachForMulticast({
+              tokens: pushTokens,
+              notification: {
+                title: notifTitle,
+                body: notifBody,
+              },
+              data: {
+                bookingId,
+                messageId,
+                senderType: authoritativeSenderType,
+                actionUrl,
+              },
+            });
+            if (multicastRes && multicastRes.successCount > 0) {
+              pushStatus = 'sent';
+              pushProviderResponse = `FCM multicast sent (${multicastRes.successCount}/${pushTokens.length})`;
+            } else {
+              pushStatus = 'failed';
+              pushErrorMessage = 'FCM multicast returned 0 successful deliveries';
+              pushProviderResponse = pushErrorMessage;
+            }
+          } catch (fcmErr: any) {
+            pushStatus = 'failed';
+            pushErrorMessage = fcmErr?.message || String(fcmErr);
+            pushProviderResponse = `FCM error: ${pushErrorMessage}`;
+          }
+        }
+      } catch (deviceLookupErr: any) {
+        pushStatus = 'failed';
+        pushErrorMessage = deviceLookupErr?.message || String(deviceLookupErr);
+        pushProviderResponse = `Device lookup error: ${pushErrorMessage}`;
+      }
+
+      await adminDb.collection('notification_deliveries').doc(pushDeliveryId).set(
+        JSON.parse(
+          JSON.stringify({
+            id: pushDeliveryId,
+            eventId: notifDispatchId,
+            eventType: 'chat.message_received',
+            bookingId,
+            bookingCode: booking.bookingCode || '',
+            recipientRole,
+            recipientId: canonicalRecipientId,
+            channel: 'push',
+            status: pushStatus,
+            attemptCount: pushStatus === 'skipped' ? 0 : 1,
+            providerResponse: pushProviderResponse,
+            errorMessage: pushErrorMessage,
+            sentAt: pushStatus === 'sent' ? now : undefined,
+            failedAt: pushStatus === 'failed' ? now : undefined,
+            createdAt: now,
+          })
+        )
+      );
+
+      const dispatchRecord = {
         id: notifDispatchId,
         messageId,
         bookingId,
         bookingCode: booking.bookingCode || '',
-        senderType,
-        recipientUserId: recipientUserId || null,
+        senderType: authoritativeSenderType,
+        recipientRole,
+        recipientId: canonicalRecipientId,
+        recipientUserId: recipientAuthUid || canonicalRecipientId,
+        notificationId: notifId,
+        deliveryId: inAppDeliveryId,
+        pushDeliveryId,
+        pushStatus,
         title: notifTitle,
         body: notifBody,
         createdAt: now,
         dispatchedAt: now,
-      });
-
-      // Record in-app notification document for recipient
-      if (recipientUserId) {
-        const notifId = `inapp_${messageId}`;
-        const recipientRole = isCustomerSender ? 'therapist' : 'customer';
-        await adminDb.collection('notifications').doc(notifId).set({
-          id: notifId,
-          eventId: notifDispatchId,
-          eventType: 'chat.message_received',
-          recipientUserId,
-          recipientRole,
-          bookingId,
-          bookingCode: booking.bookingCode || '',
-          title: notifTitle,
-          message: notifBody,
-          channel: 'in_app',
-          priority: 'HIGH',
-          read: false,
-          readAt: null,
-          actionUrl: `/?openChat=${encodeURIComponent(bookingId)}`,
-          metadata: {
-            bookingId,
-            messageId,
-            senderType,
-          },
-          createdAt: now,
-        }).catch(() => {});
-
-        // Deliver push notification to registered active devices if available
-        try {
-          const deviceSnaps = await adminDb.collection('notification_devices')
-            .where('userId', '==', recipientUserId)
-            .where('enabled', '==', true)
-            .get();
-
-          if (!deviceSnaps.empty && adminMessaging) {
-            const pushTokens: string[] = [];
-            deviceSnaps.docs.forEach((snapDoc) => {
-              const dToken = snapDoc.data()?.token;
-              if (dToken && typeof dToken === 'string') {
-                pushTokens.push(dToken);
-              }
-            });
-
-            if (pushTokens.length > 0) {
-              await adminMessaging.sendEachForMulticast({
-                tokens: pushTokens,
-                notification: {
-                  title: notifTitle,
-                  body: notifBody,
-                },
-                data: {
-                  bookingId,
-                  messageId,
-                  senderType,
-                  actionUrl: `/?openChat=${encodeURIComponent(bookingId)}`,
-                },
-              }).catch((fcmErr: any) => {
-                console.warn('[ChatNotification] FCM push delivery notice:', fcmErr?.message || fcmErr);
-              });
-            }
-          }
-        } catch (deviceLookupErr) {
-          console.warn('[ChatNotification] Device lookup notice:', deviceLookupErr);
-        }
+      };
+      await dispatchRef.set(dispatchRecord);
+      if (legacyDispatchId !== notifDispatchId) {
+        await legacyDispatchRef.set(dispatchRecord);
       }
+
+      return {
+        dispatched: true,
+        isIdempotent: false,
+        notificationId: notifId,
+        deliveryId: inAppDeliveryId,
+        pushDeliveryId,
+      };
     } catch (err) {
       console.warn('[ChatNotification] Dispatch error:', err);
+      return { dispatched: false };
     }
   }
 
   app.post('/api/chat/notify', async (req, res) => {
     try {
-      const { bookingId, messageId, senderType } = req.body || {};
-      if (!bookingId || !messageId || !senderType) {
-        return res.status(400).json({ success: false, message: 'Parameter tidak lengkap.' });
+      const bookingId = typeof req.body?.bookingId === 'string' ? req.body.bookingId.trim() : '';
+      const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId.trim() : '';
+      const requestedSenderType =
+        typeof req.body?.senderType === 'string' ? req.body.senderType.trim().toUpperCase() : '';
+      if (!bookingId || !messageId) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_CHAT_NOTIFY_INPUT',
+          message: 'Parameter tidak lengkap.',
+        });
       }
 
       await ensureServerAuthenticated();
       if (!adminDb) {
-        return res.status(500).json({ success: false, message: 'Database server tidak tersedia.' });
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          message: 'Database server tidak tersedia.',
+        });
       }
 
       // Authoritative verification of caller via Bearer token
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ success: false, message: 'Autentikasi diperlukan untuk mengirim notifikasi chat.' });
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_REQUIRED',
+          message: 'Autentikasi diperlukan untuk mengirim notifikasi chat.',
+        });
       }
       const token = authHeader.split('Bearer ')[1]?.trim();
       const verified = await verifyFirebaseIdToken(token);
       if (!verified || !verified.uid) {
-        return res.status(401).json({ success: false, message: 'Sesi autentikasi tidak valid.' });
+        return res.status(401).json({
+          success: false,
+          code: 'AUTH_TOKEN_INVALID',
+          message: 'Sesi autentikasi tidak valid.',
+        });
       }
       const authUid = verified.uid;
 
       const bookingDoc = await adminDb.collection('bookings').doc(bookingId).get();
       if (!bookingDoc.exists) {
-        return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan.' });
+        return res.status(404).json({
+          success: false,
+          code: 'BOOKING_NOT_FOUND',
+          message: 'Pesanan tidak ditemukan.',
+        });
       }
       const booking = bookingDoc.data() as any;
 
       const participant = await resolveChatParticipant(authUid, booking);
       if (!participant.authorized) {
-        return res.status(403).json({ success: false, message: participant.error || 'Akses notifikasi chat ditolak.' });
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_CHAT_PARTICIPANT',
+          message: participant.error || 'Akses notifikasi chat ditolak.',
+        });
       }
 
-      await dispatchAuthoritativeChatNotification({ bookingId, messageId, senderType });
-      return res.json({ success: true });
+      const rawStatus = String(booking.status || '').toLowerCase().trim();
+      const rawPayStatus = String(booking.paymentStatus || '').toLowerCase().trim();
+      const isTerminal =
+        ['completed', 'cancelled', 'rescheduled', 'rejected', 'dibatalkan', 'selesai', 'expired'].includes(rawStatus) ||
+        ['expired', 'refunded', 'payment_rejected'].includes(rawPayStatus);
+      if (isTerminal) {
+        return res.status(409).json({
+          success: false,
+          code: 'CHAT_CLOSED_TERMINAL_BOOKING',
+          message: 'Pesanan telah selesai atau dibatalkan, notifikasi chat tidak dapat dikirim.',
+        });
+      }
+
+      const chatDoc = await adminDb.collection('booking_chats').doc(bookingId).get();
+      if (chatDoc.exists && String(chatDoc.data()?.status || '').toLowerCase().trim() === 'closed') {
+        return res.status(409).json({
+          success: false,
+          code: 'CHAT_SESSION_CLOSED',
+          message: 'Sesi percakapan telah ditutup.',
+        });
+      }
+
+      const msgRef = adminDb
+        .collection('booking_chats')
+        .doc(bookingId)
+        .collection('messages')
+        .doc(messageId);
+      const msgSnap = await msgRef.get();
+      if (!msgSnap.exists) {
+        return res.status(404).json({
+          success: false,
+          code: 'CHAT_MESSAGE_NOT_FOUND',
+          message: 'Pesan chat tidak ditemukan.',
+        });
+      }
+      const msgData = msgSnap.data() as any;
+      if (String(msgData?.bookingId || bookingId).trim() !== bookingId) {
+        return res.status(409).json({
+          success: false,
+          code: 'CHAT_MESSAGE_MISMATCH',
+          message: 'Pesan tidak sesuai dengan pesanan ini.',
+        });
+      }
+
+      const persistedSenderType = String(msgData?.senderType || '').toUpperCase().trim();
+      const persistedSenderUid = String(msgData?.senderUid || '').trim();
+      if (!['CUSTOMER', 'THERAPIST', 'SYSTEM'].includes(persistedSenderType)) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_PERSISTED_SENDER',
+          message: 'Pengirim pesan tidak valid.',
+        });
+      }
+      if (requestedSenderType && requestedSenderType !== persistedSenderType) {
+        return res.status(403).json({
+          success: false,
+          code: 'SENDER_TYPE_MISMATCH',
+          message: 'Tipe pengirim tidak sesuai dengan catatan pesan.',
+        });
+      }
+
+      if (participant.role === 'customer') {
+        if (persistedSenderType !== 'CUSTOMER' || (persistedSenderUid && persistedSenderUid !== authUid)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_MESSAGE_SENDER',
+            message: 'Pelanggan hanya dapat memicu notifikasi untuk pesannya sendiri.',
+          });
+        }
+      } else if (participant.role === 'therapist') {
+        if (persistedSenderType !== 'THERAPIST' || (persistedSenderUid && persistedSenderUid !== authUid)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_MESSAGE_SENDER',
+            message: 'Terapis hanya dapat memicu notifikasi untuk pesannya sendiri.',
+          });
+        }
+      }
+
+      const result = await dispatchAuthoritativeChatNotification({
+        bookingId,
+        messageId,
+        senderType: persistedSenderType as 'CUSTOMER' | 'THERAPIST' | 'SYSTEM',
+      });
+      return res.json({
+        success: true,
+        isIdempotent: Boolean(result.isIdempotent),
+        notificationId: result.notificationId || null,
+      });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -6160,75 +18075,1760 @@ async function startServer() {
     }
   });
 
-  // Public Secure Tracking API: Lookup a booking by code and optional phone for guest tracking
-  app.get('/api/bookings/track', async (req, res) => {
+  // =============================================================
+  // STAGE 7C: AUTHORITATIVE BOOKING TRACKING & STATUS HISTORY READS
+  // Finding 6 (Booking Status History READS) & Finding 10 (Guest Tracking Data Protection)
+  // =============================================================
+  // Process-local in-memory sliding-window rate limiters (scoped to this Node.js process).
+  // Anonymous guest lookups and authenticated reads use separate budgets so legitimate
+  // authenticated owner/staff/therapist polling on shared IPs never consumes guest quota.
+  const BOOKING_READ_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+  const BOOKING_GUEST_READ_RATE_LIMIT_MAX_PER_IP = 30;
+  const BOOKING_AUTH_READ_RATE_LIMIT_MAX_PER_UID = 120;
+  const BOOKING_AUTH_READ_RATE_LIMIT_MAX_PER_IP = 300;
+  const bookingGuestReadRateLimits = new Map<string, number[]>();
+  const bookingAuthUidReadRateLimits = new Map<string, number[]>();
+  const bookingAuthIpReadRateLimits = new Map<string, number[]>();
+
+  function consumeSlidingWindowRateLimit(
+    store: Map<string, number[]>,
+    key: string,
+    maxRequests: number,
+    windowMs: number,
+    nowMs: number
+  ): boolean {
+    if (store.size > 5000) {
+      for (const [k, tsList] of store.entries()) {
+        const active = tsList.filter((t) => nowMs - t < windowMs);
+        if (active.length === 0) store.delete(k);
+        else store.set(k, active);
+      }
+    }
+    const recent = (store.get(key) || []).filter((t) => nowMs - t < windowMs);
+    if (recent.length >= maxRequests) {
+      store.set(key, recent);
+      return false;
+    }
+    recent.push(nowMs);
+    store.set(key, recent);
+    return true;
+  }
+
+  function normalizeCanonicalTrackingPhone(raw: unknown): string {
+    if (typeof raw !== 'string') return '';
+    const trimmed = raw.trim();
+    if (trimmed.length < 8 || trimmed.length > 30) return '';
+    // Reject arbitrary letters or symbols before stripping formatting spaces/hyphens
+    if (!/^\+?[0-9][0-9\s\-]{6,28}[0-9]$/.test(trimmed)) return '';
+    if (/--/.test(trimmed)) return '';
+    const hasLeadingPlus = trimmed.startsWith('+');
+    const digits = trimmed.replace(/^\+/, '').replace(/[\s\-]/g, '');
+    if (!/^[0-9]{8,20}$/.test(digits)) return '';
+    if (hasLeadingPlus) {
+      if (digits.startsWith('0')) return '';
+      return digits;
+    }
+    if (digits.startsWith('00')) return '';
+    if (digits.startsWith('0')) {
+      return `62${digits.slice(1)}`;
+    }
+    if (digits.startsWith('8')) {
+      return `62${digits}`;
+    }
+    return digits;
+  }
+
+  function verifyTrackingPhoneMatch(storedRaw: unknown, inputRaw: unknown): boolean {
+    const storedCanonical = normalizeCanonicalTrackingPhone(storedRaw);
+    const inputCanonical = normalizeCanonicalTrackingPhone(inputRaw);
+    if (!storedCanonical || !inputCanonical) return false;
+    const storedDigest = createHash('sha256').update(`phone:${storedCanonical}`).digest();
+    const inputDigest = createHash('sha256').update(`phone:${inputCanonical}`).digest();
+    return timingSafeEqual(storedDigest, inputDigest);
+  }
+
+  function maskGuestCustomerName(rawName: unknown): string {
+    if (typeof rawName !== 'string') return 'Pelanggan';
+    const cleaned = rawName.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    if (!cleaned) return 'Pelanggan';
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    return parts
+      .slice(0, 3)
+      .map((part) => {
+        const firstChar = Array.from(part)[0] || 'P';
+        return `${firstChar}***`;
+      })
+      .join(' ');
+  }
+
+  function maskGuestWhatsApp(rawPhone: unknown): string {
+    if (typeof rawPhone !== 'string') return '';
+    const digits = rawPhone.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (digits.length <= 6) return `${digits.slice(0, 2)}****`;
+    const prefix = digits.slice(0, Math.min(4, Math.max(2, digits.length - 6)));
+    const suffix = digits.slice(-2);
+    return `${prefix}****${suffix}`;
+  }
+
+  function maskGuestAddress(rawAddress: unknown, rawArea: unknown): string {
+    const area =
+      typeof rawArea === 'string'
+        ? rawArea.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+        : '';
+    if (area) return `Area ${area} (Alamat disamarkan)`;
+    if (typeof rawAddress === 'string' && rawAddress.trim()) {
+      return 'Alamat terverifikasi (Disamarkan untuk privasi)';
+    }
+    return '';
+  }
+
+  function getGuestGenericHistoryActorLabel(role: string): string {
+    switch (role) {
+      case 'customer':
+        return 'Pelanggan';
+      case 'therapist':
+        return 'Terapis Senzu';
+      case 'css':
+        return 'Petugas CSS';
+      case 'supervisor':
+        return 'Supervisor Senzu';
+      case 'manager':
+      case 'admin':
+        return 'Manajemen Senzu';
+      default:
+        return 'Sistem Senzu';
+    }
+  }
+
+  const OWNER_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+    'id',
+    'bookingCode',
+    'customerId',
+    'customerAuthUid',
+    'authUserId',
+    'customerName',
+    'customerWhatsApp',
+    'customerEmail',
+    'serviceId',
+    'serviceName',
+    'packageName',
+    'serviceDuration',
+    'durationMinutes',
+    'serviceNameSnapshot',
+    'durationMinutesSnapshot',
+    'servicePriceSnapshot',
+    'homeServiceFeeSnapshot',
+    'areaIdSnapshot',
+    'areaNameSnapshot',
+    'therapistId',
+    'assignedTherapistId',
+    'therapistName',
+    'assignedTherapistName',
+    'preferredTherapistName',
+    'scheduleDate',
+    'bookingDate',
+    'scheduleTime',
+    'timeSlot',
+    'scheduleAt',
+    'genderPreference',
+    'address',
+    'customerAddress',
+    'latitude',
+    'longitude',
+    'customerLat',
+    'customerLng',
+    'placeId',
+    'area',
+    'areaName',
+    'customerArea',
+    'addressDistrict',
+    'addressNotes',
+    'distanceKm',
+    'distanceMeters',
+    'homeServiceFeeTier',
+    'baseLocationId',
+    'baseLocationName',
+    'baseLatitude',
+    'baseLongitude',
+    'servicePrice',
+    'homeServiceFee',
+    'discountAmount',
+    'voucherId',
+    'voucherCode',
+    'voucherDiscount',
+    'promoId',
+    'promoCode',
+    'promoCodeSnapshot',
+    'promoNameSnapshot',
+    'discountTypeSnapshot',
+    'discountValueSnapshot',
+    'promoDiscount',
+    'pointsRedeemed',
+    'pointsDiscount',
+    'pointsEarned',
+    'membershipTierAtBooking',
+    'totalAmount',
+    'totalPrice',
+    'price',
+    'paymentMethod',
+    'paymentStatus',
+    'status',
+    'customerNotes',
+    'notes',
+    'branchId',
+    'branchName',
+    'assignedAt',
+    'paymentDeadline',
+    'paymentPolicyVersion',
+    'paymentExpiredAt',
+    'paymentVerifiedAt',
+    'confirmedAt',
+    'cancellationReason',
+    'acceptedAt',
+    'onTheWayAt',
+    'arrivedAt',
+    'treatmentStartedAt',
+    'completedAt',
+    'createdAt',
+    'updatedAt',
+  ];
+
+  const THERAPIST_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+    ...OWNER_ALLOWED_BOOKING_FIELDS,
+    'acceptedBy',
+    'arrivalLatitude',
+    'arrivalLongitude',
+    'earlyCompletion',
+  ];
+
+  const STAFF_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
+    ...THERAPIST_ALLOWED_BOOKING_FIELDS,
+    'internalNotes',
+    'requiresAdminConfirmation',
+    'isReassigned',
+    'reassignedFromTherapistId',
+    'referredByCustomerId',
+    'referralCodeUsed',
+    'issueReport',
+  ];
+
+  function projectAllowedBookingFields(
+    rawBooking: Record<string, any>,
+    allowedKeys: ReadonlyArray<string>,
+    overrides: Record<string, any>
+  ): Record<string, any> {
+    const projected: Record<string, any> = {};
+    for (const key of allowedKeys) {
+      if (Object.prototype.hasOwnProperty.call(rawBooking, key) && rawBooking[key] !== undefined) {
+        projected[key] = rawBooking[key];
+      }
+    }
+    return {
+      ...projected,
+      ...overrides,
+    };
+  }
+
+  const executeAuthoritativeBookingRead = async (
+    req: express.Request,
+    res: express.Response,
+    mode: 'track' | 'history'
+  ) => {
+    if (typeof res.setHeader === 'function') {
+      res.setHeader('Cache-Control', 'no-store');
+    } else if (typeof (res as any).set === 'function') {
+      (res as any).set('Cache-Control', 'no-store');
+    }
+
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+
+    const textId = (value: unknown): string =>
+      typeof value === 'string' ? value.trim() : '';
+
+    const sanitizeText = (value: unknown, maxLen = 250): string =>
+      typeof value === 'string'
+        ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, maxLen)
+        : '';
+
+    const ALLOWED_BOOKING_STATUSES = new Set<string>([
+      'Draft',
+      'Pending',
+      'awaiting_payment',
+      'Menunggu Pembayaran',
+      'Menunggu Verifikasi Pembayaran',
+      'Pembayaran Terverifikasi',
+      'Menunggu Penjadwalan',
+      'Terjadwal',
+      'Confirmed',
+      'Therapist Assigned',
+      'Accepted',
+      'On The Way',
+      'Arrived',
+      'Treatment',
+      'Completed',
+      'Cancelled',
+      'Rescheduled',
+      'Pembayaran Ditolak',
+    ]);
+
+    const ALLOWED_HISTORY_ROLES = new Set<string>([
+      'customer',
+      'css',
+      'supervisor',
+      'therapist',
+      'system',
+      'manager',
+      'admin',
+    ]);
+
+    const GENERIC_GUEST_DENIAL_MESSAGE =
+      'Data reservasi tidak ditemukan atau informasi pelacakan tidak sesuai.';
+
     try {
-      const code = typeof req.query.code === 'string' ? req.query.code.trim().toUpperCase() : '';
-      const phone = typeof req.query.phone === 'string' ? req.query.phone.replace(/[^0-9]/g, '') : '';
-      if (!code) {
-        return res.status(400).json({ error: 'Kode booking wajib diisi.' });
-      }
+      // 1. Resolve client IP from Express req.ip (never raw caller-supplied X-Forwarded-For)
+      const rawIp =
+        (typeof req.ip === 'string' && req.ip.trim() ? req.ip.trim() : '') ||
+        (typeof req.socket?.remoteAddress === 'string' && req.socket.remoteAddress.trim()
+          ? req.socket.remoteAddress.trim()
+          : '') ||
+        'unknown';
+      const clientIp = rawIp.slice(0, 128) || 'unknown';
+      const nowMs = Date.now();
 
-      const q = query(collection(db, 'bookings'), where('bookingCode', '==', code), limit(1));
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        return res.status(404).json({ error: 'Data reservasi tidak ditemukan.' });
-      }
-
-      const booking = snap.docs[0].data() as any;
-
-      // If phone is provided, verify match using last 8 digits
-      if (phone && phone.length >= 8) {
-        const dbPhoneClean = (booking.customerWhatsApp || '').replace(/[^0-9]/g, '');
-        const last8Input = phone.slice(-8);
-        const last8Db = dbPhoneClean.slice(-8);
-        if (last8Input !== last8Db) {
-          return res.status(403).json({ error: 'Nomor WhatsApp tidak cocok dengan data reservasi.' });
+      // 2. Detect authentication header presence independently of its non-empty value
+      const headersObj =
+        req.headers && typeof req.headers === 'object'
+          ? (req.headers as Record<string, unknown>)
+          : {};
+      let rawAuthHeader: unknown = undefined;
+      let rawCustomAuthHeader: unknown = undefined;
+      let hasAuthHeaderKey = false;
+      for (const [hdrKey, hdrVal] of Object.entries(headersObj)) {
+        const lowerKey = hdrKey.toLowerCase();
+        if (lowerKey === 'authorization') {
+          hasAuthHeaderKey = true;
+          rawAuthHeader = hdrVal;
+        } else if (lowerKey === 'x-firebase-auth') {
+          hasAuthHeaderKey = true;
+          rawCustomAuthHeader = hdrVal;
         }
       }
 
-      // Return sanitized booking record (PII masked for guest lookup)
-      const sanitizedBooking = {
-        id: snap.docs[0].id,
-        bookingCode: booking.bookingCode,
-        status: booking.status,
-        paymentStatus: booking.paymentStatus,
-        serviceName: booking.serviceName,
-        packageName: booking.packageName,
-        serviceDuration: booking.serviceDuration || booking.durationMinutes,
-        durationMinutes: booking.durationMinutes || booking.serviceDuration,
-        scheduleDate: booking.scheduleDate || booking.bookingDate,
-        bookingDate: booking.bookingDate || booking.scheduleDate,
-        scheduleTime: booking.scheduleTime || booking.timeSlot,
-        timeSlot: booking.timeSlot || booking.scheduleTime,
-        scheduleAt: booking.scheduleAt || (booking.scheduleDate && booking.scheduleTime ? `${booking.scheduleDate} ${booking.scheduleTime}` : ''),
-        therapistId: booking.therapistId,
-        therapistName: booking.therapistName,
-        totalAmount: booking.totalAmount ?? (booking.totalPrice || booking.price || 0),
-        totalPrice: booking.totalPrice || booking.totalAmount || booking.price || 0,
-        servicePrice: booking.servicePrice || 0,
-        homeServiceFee: booking.homeServiceFee || 0,
-        discountAmount: booking.discountAmount || 0,
-        area: booking.area || '',
-        customerName: booking.customerName,
-        customerWhatsApp: booking.customerWhatsApp ? booking.customerWhatsApp.slice(0, 4) + '****' + booking.customerWhatsApp.slice(-4) : '',
-        address: booking.address,
-        createdAt: booking.createdAt,
-        updatedAt: booking.updatedAt,
+      if (!hasAuthHeaderKey) {
+        if (
+          !consumeSlidingWindowRateLimit(
+            bookingGuestReadRateLimits,
+            clientIp,
+            BOOKING_GUEST_READ_RATE_LIMIT_MAX_PER_IP,
+            BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+            nowMs
+          )
+        ) {
+          return res.status(429).json({
+            success: false,
+            code: 'RATE_LIMITED',
+            error: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+            message: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+          });
+        }
+
+        // History read endpoints are strictly authenticated-only; guests must use /api/bookings/track
+        if (mode === 'history') {
+          return res.status(401).json({
+            success: false,
+            code: 'AUTH_REQUIRED',
+            error: 'Autentikasi diperlukan untuk mengakses riwayat status pesanan.',
+            message: 'Autentikasi diperlukan untuk mengakses riwayat status pesanan.',
+          });
+        }
+      }
+
+      // 3. If an authentication header key is present, validate and verify token BEFORE any DB read
+      // Never downgrade a present-but-blank/malformed/invalid Authorization header to guest mode.
+      let verifiedUid = '';
+      if (hasAuthHeaderKey) {
+        if (rawCustomAuthHeader !== undefined && rawAuthHeader === undefined) {
+          if (
+            !consumeSlidingWindowRateLimit(
+              bookingGuestReadRateLimits,
+              clientIp,
+              BOOKING_GUEST_READ_RATE_LIMIT_MAX_PER_IP,
+              BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+              nowMs
+            )
+          ) {
+            return res.status(429).json({
+              success: false,
+              code: 'RATE_LIMITED',
+              error: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+              message: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+            });
+          }
+          return res.status(401).json({
+            success: false,
+            code: 'AUTH_TOKEN_INVALID',
+            error: 'Header autentikasi tidak valid.',
+            message: 'Header autentikasi tidak valid.',
+          });
+        }
+
+        const tokenMatch =
+          typeof rawAuthHeader === 'string'
+            ? /^Bearer\s+(\S+)$/i.exec(rawAuthHeader.trim())
+            : null;
+        if (!tokenMatch || !tokenMatch[1]) {
+          if (
+            !consumeSlidingWindowRateLimit(
+              bookingGuestReadRateLimits,
+              clientIp,
+              BOOKING_GUEST_READ_RATE_LIMIT_MAX_PER_IP,
+              BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+              nowMs
+            )
+          ) {
+            return res.status(429).json({
+              success: false,
+              code: 'RATE_LIMITED',
+              error: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+              message: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+            });
+          }
+          return res.status(401).json({
+            success: false,
+            code: 'AUTH_REQUIRED',
+            error: 'Token autentikasi tidak valid. Silakan masuk kembali.',
+            message: 'Token autentikasi tidak valid. Silakan masuk kembali.',
+          });
+        }
+
+        if (!adminAuth || typeof adminAuth.verifyIdToken !== 'function') {
+          return res.status(503).json({
+            success: false,
+            code: 'AUTH_SERVICE_UNAVAILABLE',
+            error: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+            message: 'Layanan verifikasi otentikasi sedang tidak tersedia.',
+          });
+        }
+
+        try {
+          const decoded = await adminAuth.verifyIdToken(tokenMatch[1]);
+          if (
+            !decoded ||
+            typeof decoded.uid !== 'string' ||
+            !isValidBookingHistoryDocId(decoded.uid, 128)
+          ) {
+            return res.status(401).json({
+              success: false,
+              code: 'AUTH_TOKEN_INVALID',
+              error: 'Identitas sesi autentikasi tidak valid.',
+              message: 'Identitas sesi autentikasi tidak valid.',
+            });
+          }
+          verifiedUid = decoded.uid;
+        } catch (authErr: any) {
+          const errCode = String(authErr?.code || '');
+          const errMsg = String(authErr?.message || '');
+          const isInfraError =
+            errCode === 'auth/internal-error' ||
+            errCode === 'auth/network-request-failed' ||
+            errCode === 'unavailable' ||
+            errCode === 'deadline-exceeded' ||
+            authErr?.status === 503 ||
+            authErr?.statusCode === 503 ||
+            /unavailable|network|econnrefused|enotfound|etimedout|eai_again|socket hang up|fetch failed|deadline|internal-error|503/i.test(
+              `${errCode} ${errMsg}`
+            );
+          if (isInfraError) {
+            return res.status(503).json({
+              success: false,
+              code: 'AUTH_SERVICE_UNAVAILABLE',
+              error: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+              message: 'Layanan verifikasi otentikasi sedang mengalami kendala.',
+            });
+          }
+          if (
+            !consumeSlidingWindowRateLimit(
+              bookingGuestReadRateLimits,
+              clientIp,
+              BOOKING_GUEST_READ_RATE_LIMIT_MAX_PER_IP,
+              BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+              nowMs
+            )
+          ) {
+            return res.status(429).json({
+              success: false,
+              code: 'RATE_LIMITED',
+              error: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+              message: 'Terlalu banyak permintaan pelacakan pesanan. Silakan coba kembali setelah beberapa saat.',
+            });
+          }
+          return res.status(401).json({
+            success: false,
+            code: errCode === 'auth/id-token-expired' ? 'SESSION_EXPIRED' : 'AUTH_TOKEN_INVALID',
+            error: 'Sesi autentikasi tidak valid atau telah berakhir.',
+            message: 'Sesi autentikasi tidak valid atau telah berakhir.',
+          });
+        }
+
+        // Charge authenticated per-UID and shared-IP rate limits (separate from guest bucket)
+        const uidAllowed = consumeSlidingWindowRateLimit(
+          bookingAuthUidReadRateLimits,
+          verifiedUid,
+          BOOKING_AUTH_READ_RATE_LIMIT_MAX_PER_UID,
+          BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+          nowMs
+        );
+        const sharedIpAllowed = consumeSlidingWindowRateLimit(
+          bookingAuthIpReadRateLimits,
+          clientIp,
+          BOOKING_AUTH_READ_RATE_LIMIT_MAX_PER_IP,
+          BOOKING_READ_RATE_LIMIT_WINDOW_MS,
+          nowMs
+        );
+        if (!uidAllowed || !sharedIpAllowed) {
+          return res.status(429).json({
+            success: false,
+            code: 'RATE_LIMITED',
+            error: 'Terlalu banyak permintaan pembacaan pesanan. Silakan coba kembali setelah beberapa saat.',
+            message: 'Terlalu banyak permintaan pembacaan pesanan. Silakan coba kembali setelah beberapa saat.',
+          });
+        }
+      }
+
+      // 4. Validate query/body parameters BEFORE any database read
+      if (req.method === 'POST') {
+        if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PAYLOAD',
+            error: 'Format permintaan tidak valid.',
+            message: 'Format permintaan tidak valid.',
+          });
+        }
+        const allowedBodyKeys = new Set([
+          'code',
+          'bookingCode',
+          'bookingId',
+          'id',
+          'target',
+          'phone',
+          'customerWhatsApp',
+          'whatsapp',
+        ]);
+        for (const k of Object.keys(req.body)) {
+          if (!allowedBodyKeys.has(k)) {
+            return res.status(400).json({
+              success: false,
+              code: 'INVALID_PAYLOAD_FIELDS',
+              error: 'Permintaan mengandung atribut yang tidak diizinkan.',
+              message: 'Permintaan mengandung atribut yang tidak diizinkan.',
+            });
+          }
+        }
+      }
+
+      const pickParam = (...candidates: unknown[]): unknown => {
+        for (const c of candidates) {
+          if (c !== undefined && c !== null && c !== '') return c;
+        }
+        return undefined;
       };
 
-      // Fetch status history
-      const historyQ = query(collection(db, 'booking_status_history'), where('bookingCode', '==', code));
-      const historySnap = await getDocs(historyQ);
-      const history = historySnap.docs
-        .map(d => d.data())
-        .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const rawCodeParam = pickParam(
+        req.query?.code,
+        req.query?.bookingCode,
+        req.body?.code,
+        req.body?.bookingCode
+      );
+      const rawTargetParam = pickParam(req.query?.target, req.body?.target);
+      const rawBookingIdParam = pickParam(
+        req.params?.bookingId,
+        req.query?.bookingId,
+        req.query?.id,
+        req.body?.bookingId,
+        req.body?.id
+      );
+      const rawPhoneParam = pickParam(
+        req.query?.phone,
+        req.query?.customerWhatsApp,
+        req.query?.whatsapp,
+        req.body?.phone,
+        req.body?.customerWhatsApp,
+        req.body?.whatsapp
+      );
 
-      return res.json({ booking: sanitizedBooking, history });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Gagal memuat data tracking.' });
+      let explicitBookingId = '';
+      let explicitBookingCode = '';
+      let singleReference = '';
+
+      if (rawBookingIdParam !== undefined) {
+        if (
+          typeof rawBookingIdParam !== 'string' ||
+          rawBookingIdParam.trim() !== rawBookingIdParam ||
+          !isValidBookingHistoryDocId(rawBookingIdParam, 128)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_ID',
+            error: 'ID pesanan tidak valid.',
+            message: 'ID pesanan tidak valid.',
+          });
+        }
+        explicitBookingId = rawBookingIdParam;
+      }
+
+      if (rawTargetParam !== undefined) {
+        if (
+          typeof rawTargetParam !== 'string' ||
+          rawTargetParam.trim() !== rawTargetParam ||
+          !isValidBookingHistoryDocId(rawTargetParam, 128)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Referensi pesanan tidak valid.',
+            message: 'Referensi pesanan tidak valid.',
+          });
+        }
+        singleReference = rawTargetParam;
+      }
+
+      if (rawCodeParam !== undefined) {
+        if (
+          typeof rawCodeParam !== 'string' ||
+          rawCodeParam.trim() !== rawCodeParam ||
+          !isValidBookingHistoryDocId(rawCodeParam, 128)
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode booking tidak valid.',
+            message: 'Kode booking tidak valid.',
+          });
+        }
+
+        if (!verifiedUid) {
+          // Guest tracking requires a valid booking code
+          const upper = rawCodeParam.toUpperCase();
+          if (upper.startsWith('BK_') || !isValidBookingHistoryCode(upper, 64)) {
+            return res.status(400).json({
+              success: false,
+              code: 'INVALID_BOOKING_CODE',
+              error: 'Kode booking tidak valid.',
+              message: 'Kode booking tidak valid.',
+            });
+          }
+          explicitBookingCode = upper;
+        } else if (explicitBookingId) {
+          // Both bookingId and bookingCode were explicitly supplied
+          const upper = rawCodeParam.toUpperCase();
+          if (upper.startsWith('BK_') || !isValidBookingHistoryCode(upper, 64)) {
+            return res.status(400).json({
+              success: false,
+              code: 'INVALID_BOOKING_CODE',
+              error: 'Kode booking tidak valid.',
+              message: 'Kode booking tidak valid.',
+            });
+          }
+          explicitBookingCode = upper;
+        } else {
+          // Single reference supplied via code/bookingCode by an authenticated caller:
+          // may be an exact document ID (bk_... or arbitrary non-bk_ doc ID) or a bookingCode
+          if (singleReference && singleReference !== rawCodeParam) {
+            return res.status(400).json({
+              success: false,
+              code: 'BOOKING_CODE_MISMATCH',
+              error: 'Referensi pesanan tidak konsisten.',
+              message: 'Referensi pesanan tidak konsisten.',
+            });
+          }
+          singleReference = rawCodeParam;
+        }
+      }
+
+      if (!verifiedUid && !explicitBookingCode && singleReference) {
+        const upper = singleReference.toUpperCase();
+        if (upper.startsWith('BK_') || !isValidBookingHistoryCode(upper, 64)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_BOOKING_CODE',
+            error: 'Kode booking tidak valid.',
+            message: 'Kode booking tidak valid.',
+          });
+        }
+        explicitBookingCode = upper;
+      }
+
+      if (
+        explicitBookingId &&
+        explicitBookingCode &&
+        explicitBookingId.startsWith('bk_') &&
+        explicitBookingId.slice(3).toUpperCase() !== explicitBookingCode
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'BOOKING_CODE_MISMATCH',
+          error: 'Kode booking tidak sesuai dengan ID pesanan.',
+          message: 'Kode booking tidak sesuai dengan ID pesanan.',
+        });
+      }
+
+      if (!explicitBookingId && !explicitBookingCode && !singleReference) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BOOKING_CODE',
+          error: 'Kode booking wajib diisi.',
+          message: 'Kode booking wajib diisi.',
+        });
+      }
+
+      let cleanCanonicalPhone = '';
+      if (rawPhoneParam !== undefined && rawPhoneParam !== null && rawPhoneParam !== '') {
+        cleanCanonicalPhone = normalizeCanonicalTrackingPhone(rawPhoneParam);
+        if (!cleanCanonicalPhone) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PHONE',
+            error: 'Nomor WhatsApp tidak valid.',
+            message: 'Nomor WhatsApp tidak valid.',
+          });
+        }
+      }
+
+      if (!verifiedUid) {
+        // Unauthenticated Guest: booking code + valid phone are both mandatory
+        if (!explicitBookingCode || !cleanCanonicalPhone || explicitBookingId) {
+          return res.status(400).json({
+            success: false,
+            code: 'PHONE_REQUIRED',
+            error: 'Kode booking dan minimal 8 digit Nomor WhatsApp wajib diisi untuk pelacakan tamu.',
+            message: 'Kode booking dan minimal 8 digit Nomor WhatsApp wajib diisi untuk pelacakan tamu.',
+          });
+        }
+      }
+
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({
+          success: false,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'Database server sedang tidak tersedia.',
+          message: 'Database server sedang tidak tersedia.',
+        });
+      }
+
+      // 5. Authoritative Read-Only Transaction via Firebase Admin SDK
+      const txResult: any = await adminDb.runTransaction(async (transaction: any) => {
+        const guestGenericDenial = () => ({
+          status: 404,
+          code: 'BOOKING_NOT_FOUND',
+          message: GENERIC_GUEST_DENIAL_MESSAGE,
+        });
+
+        const candidateDocIds = new Set<string>();
+        let candidateCodeQuery = '';
+
+        if (explicitBookingId) {
+          candidateDocIds.add(explicitBookingId);
+          if (explicitBookingCode) {
+            candidateCodeQuery = explicitBookingCode;
+          } else if (explicitBookingId.startsWith('bk_')) {
+            const derived = explicitBookingId.slice(3).toUpperCase();
+            if (isValidBookingHistoryCode(derived, 64)) {
+              candidateCodeQuery = derived;
+            }
+          }
+        } else if (explicitBookingCode) {
+          const bkId = `bk_${explicitBookingCode}`;
+          if (isValidBookingHistoryDocId(bkId, 128)) {
+            candidateDocIds.add(bkId);
+          }
+          candidateCodeQuery = explicitBookingCode;
+        } else if (singleReference) {
+          if (isValidBookingHistoryDocId(singleReference, 128)) {
+            candidateDocIds.add(singleReference);
+          }
+          if (singleReference.startsWith('bk_')) {
+            const derived = singleReference.slice(3).toUpperCase();
+            if (isValidBookingHistoryCode(derived, 64)) {
+              candidateCodeQuery = derived;
+            }
+          } else {
+            const upper = singleReference.toUpperCase();
+            if (isValidBookingHistoryCode(upper, 64)) {
+              candidateCodeQuery = upper;
+              const bkId = `bk_${upper}`;
+              if (isValidBookingHistoryDocId(bkId, 128)) {
+                candidateDocIds.add(bkId);
+              }
+            }
+          }
+        }
+
+        const docIdArray = [...candidateDocIds];
+        const [docSnaps, initialCodeSnap] = await Promise.all([
+          Promise.all(
+            docIdArray.map((docId) =>
+              transaction.get(adminDb.collection('bookings').doc(docId))
+            )
+          ),
+          candidateCodeQuery
+            ? transaction.get(
+                adminDb
+                  .collection('bookings')
+                  .where('bookingCode', '==', candidateCodeQuery)
+                  .limit(2)
+              )
+            : Promise.resolve(null),
+        ]);
+
+        const matchedBookings = new Map<string, any>();
+        for (const s of docSnaps) {
+          if (snapExists(s)) {
+            matchedBookings.set(s.id, s);
+          }
+        }
+        for (const d of initialCodeSnap?.docs || []) {
+          if (snapExists(d)) {
+            matchedBookings.set(d.id, d);
+          }
+        }
+
+        if (matchedBookings.size === 0) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 404,
+                code: 'BOOKING_NOT_FOUND',
+                message: 'Data reservasi tidak ditemukan.',
+              };
+        }
+
+        if (matchedBookings.size > 1) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'Kode pesanan merujuk pada lebih dari satu dokumen pesanan.',
+              };
+        }
+
+        const bookingSnap = [...matchedBookings.values()][0];
+        const resolvedBookingId = bookingSnap.id;
+        const bookingData = bookingSnap.data() || {};
+
+        if (!isValidBookingHistoryDocId(resolvedBookingId, 128)) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_RECORD_CONFLICT',
+                message: 'ID dokumen pesanan tidak valid.',
+              };
+        }
+
+        if (explicitBookingId && resolvedBookingId !== explicitBookingId) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'ID pesanan tidak sesuai dengan dokumen yang ditemukan.',
+              };
+        }
+
+        if (
+          bookingData.id !== undefined &&
+          bookingData.id !== null &&
+          bookingData.id !== '' &&
+          (typeof bookingData.id !== 'string' || bookingData.id !== resolvedBookingId)
+        ) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_RECORD_CONFLICT',
+                message: 'Identitas internal dokumen pesanan tidak konsisten.',
+              };
+        }
+
+        const resolvedBookingCode = textId(bookingData.bookingCode).toUpperCase();
+        if (!isValidBookingHistoryCode(resolvedBookingCode, 64)) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_RECORD_CONFLICT',
+                message: 'Kode booking pada dokumen pesanan tidak valid.',
+              };
+        }
+
+        if (explicitBookingCode && resolvedBookingCode !== explicitBookingCode) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 403,
+                code: 'BOOKING_CODE_MISMATCH',
+                message: 'Kode booking tidak sesuai dengan dokumen pesanan.',
+              };
+        }
+
+        if (
+          singleReference &&
+          singleReference !== resolvedBookingId &&
+          singleReference !== `bk_${resolvedBookingCode}` &&
+          singleReference.toUpperCase() !== resolvedBookingCode
+        ) {
+          return !verifiedUid
+            ? guestGenericDenial()
+            : {
+                status: 409,
+                code: 'BOOKING_CODE_CONFLICT',
+                message: 'Referensi pesanan tidak sesuai dengan dokumen yang ditemukan.',
+              };
+        }
+
+        // When a document ID resolved the booking and its resolvedBookingCode was not yet queried,
+        // prove resolvedBookingCode is unique across bookings before merging code-based history.
+        if (resolvedBookingCode !== candidateCodeQuery) {
+          const codeUniquenessSnap = await transaction.get(
+            adminDb
+              .collection('bookings')
+              .where('bookingCode', '==', resolvedBookingCode)
+              .limit(2)
+          );
+          for (const d of codeUniquenessSnap?.docs || []) {
+            if (snapExists(d) && d.id !== resolvedBookingId) {
+              return !verifiedUid
+                ? guestGenericDenial()
+                : {
+                    status: 409,
+                    code: 'BOOKING_CODE_CONFLICT',
+                    message: 'Kode pesanan merujuk pada lebih dari satu dokumen pesanan.',
+                  };
+            }
+          }
+        }
+
+        let accessLevel: 'staff' | 'therapist' | 'owner' | 'guest' = 'guest';
+
+        if (verifiedUid) {
+          const hasUidConflict = (record: any): boolean =>
+            [record?.authUserId, record?.authUid].some(
+              (value) =>
+                value != null &&
+                value !== '' &&
+                (typeof value !== 'string' ||
+                  value.trim() !== value ||
+                  !isValidBookingHistoryDocId(value, 128) ||
+                  value !== verifiedUid)
+            );
+
+          const isStaffDisabled = (record: any): boolean =>
+            !record ||
+            record.isActive === false ||
+            record.loginEnabled === false ||
+            [
+              'INACTIVE',
+              'DISABLED',
+              'ARCHIVED',
+              'DINONAKTIFKAN',
+              'DELETED',
+              'TERMINATED',
+              'SUSPENDED',
+            ].includes(textId(record.status).toUpperCase()) ||
+            textId(record.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+
+          const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+          const canonicalStaffQuery = adminDb
+            .collection('staff_users')
+            .where('authUserId', '==', verifiedUid)
+            .limit(2);
+          const legacyStaffQuery = adminDb
+            .collection('staff_users')
+            .where('authUid', '==', verifiedUid)
+            .limit(2);
+          const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+
+          const [roleSnap, canonicalStaffSnap, legacyStaffSnap, directStaffSnap] =
+            await Promise.all([
+              transaction.get(roleRef),
+              transaction.get(canonicalStaffQuery),
+              transaction.get(legacyStaffQuery),
+              transaction.get(directStaffRef),
+            ]);
+
+          const staffDocs = new Map<string, any>();
+          for (const d of [
+            ...(canonicalStaffSnap?.docs || []),
+            ...(legacyStaffSnap?.docs || []),
+          ]) {
+            if (snapExists(d)) staffDocs.set(d.id, d);
+          }
+          if (snapExists(directStaffSnap)) {
+            staffDocs.set(directStaffSnap.id, directStaffSnap);
+          }
+
+          const roleExists = snapExists(roleSnap);
+          if (roleExists) {
+            const roleData = roleSnap.data() || {};
+            for (const linked of [roleData.staffId, roleData.staffUserId]) {
+              if (
+                typeof linked === 'string' &&
+                isValidBookingHistoryDocId(linked, 128) &&
+                !staffDocs.has(linked)
+              ) {
+                const linkedSnap = await transaction.get(
+                  adminDb.collection('staff_users').doc(linked)
+                );
+                if (snapExists(linkedSnap)) {
+                  staffDocs.set(linkedSnap.id, linkedSnap);
+                }
+              }
+            }
+          }
+
+          const hasStaffFootprint = staffDocs.size > 0 || roleExists;
+
+          if (hasStaffFootprint) {
+            if (staffDocs.size === 0 || !roleExists) {
+              return {
+                status: 403,
+                code: 'STAFF_AUTHORIZATION_DENIED',
+                message: 'Identitas staf belum terikat atau tidak memiliki otorisasi aktif.',
+              };
+            }
+            if (staffDocs.size > 1) {
+              return {
+                status: 403,
+                code: 'STAFF_DUPLICATE_MAPPING',
+                message: 'Identitas staf memiliki duplikasi pemetaan pada Staff Master.',
+              };
+            }
+
+            const staffSnap = [...staffDocs.values()][0];
+            const staff = staffSnap.data() || {};
+            const role = roleSnap.data() || {};
+
+            if (hasUidConflict(staff) || hasUidConflict(role)) {
+              return {
+                status: 403,
+                code: 'STAFF_UID_MISMATCH',
+                message: 'Identitas UID staf tidak sesuai dengan sesi autentikasi.',
+              };
+            }
+
+            const isUidBound =
+              staffSnap.id === verifiedUid ||
+              (typeof staff.authUserId === 'string' && staff.authUserId === verifiedUid) ||
+              (typeof staff.authUid === 'string' && staff.authUid === verifiedUid);
+            if (!isUidBound) {
+              return {
+                status: 403,
+                code: 'STAFF_UID_UNBOUND',
+                message: 'Profil Staff Master tidak terikat pada UID sesi saat ini.',
+              };
+            }
+
+            if (
+              isStaffDisabled(staff) ||
+              isStaffDisabled(role) ||
+              role.isActive !== true
+            ) {
+              return {
+                status: 403,
+                code: 'STAFF_INACTIVE',
+                message: 'Akun staf sedang tidak aktif atau telah dinonaktifkan.',
+              };
+            }
+
+            const staffRole = textId(staff.role);
+            const activeRole = textId(role.role);
+            if (
+              !staffRole ||
+              staff.role !== staffRole ||
+              role.role !== activeRole ||
+              activeRole !== staffRole
+            ) {
+              return {
+                status: 403,
+                code: 'STAFF_ROLE_MISMATCH',
+                message: 'Role staf tidak sesuai dengan Staff Master saat ini.',
+              };
+            }
+
+            for (const aliasField of [staff.uid, staff.id]) {
+              if (aliasField !== undefined && aliasField !== null && aliasField !== '') {
+                if (
+                  typeof aliasField !== 'string' ||
+                  !isValidBookingHistoryDocId(aliasField, 128)
+                ) {
+                  return {
+                    status: 403,
+                    code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                    message: 'Alias identitas Staff Master tidak valid.',
+                  };
+                }
+              }
+            }
+
+            const aliases = new Set(
+              [verifiedUid, staffSnap.id, textId(staff.uid), textId(staff.id)].filter(Boolean)
+            );
+            for (const linkedId of [role.staffId, role.staffUserId]) {
+              if (linkedId !== undefined && linkedId !== null && linkedId !== '') {
+                if (
+                  typeof linkedId !== 'string' ||
+                  !isValidBookingHistoryDocId(linkedId, 128) ||
+                  !aliases.has(linkedId)
+                ) {
+                  return {
+                    status: 403,
+                    code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                    message: 'Referensi Staff Master pada staff_roles tidak sesuai.',
+                  };
+                }
+              }
+            }
+
+            if (['css', 'supervisor', 'manager', 'admin'].includes(staffRole)) {
+              accessLevel = 'staff';
+            } else if (staffRole === 'therapist') {
+              const masterTherapistId = textId(staff.therapistId);
+              const roleTherapistId = textId(role.therapistId);
+              for (const rawThId of [staff.therapistId, role.therapistId]) {
+                if (rawThId !== undefined && rawThId !== null && rawThId !== '') {
+                  if (
+                    typeof rawThId !== 'string' ||
+                    !isValidBookingHistoryDocId(rawThId, 128)
+                  ) {
+                    return {
+                      status: 403,
+                      code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                      message: 'ID terapis pada Staff Master atau staff_roles tidak valid.',
+                    };
+                  }
+                }
+              }
+              const resolvedTherapistId =
+                masterTherapistId || roleTherapistId || textId(staff.uid) || staffSnap.id;
+              if (!isValidBookingHistoryDocId(resolvedTherapistId, 128)) {
+                return {
+                  status: 403,
+                  code: 'PERMISSION_DENIED',
+                  message: 'Identitas terapis tidak valid.',
+                };
+              }
+              const therapistDocSnap = await transaction.get(
+                adminDb.collection('therapists').doc(resolvedTherapistId)
+              );
+              const therapistData = snapExists(therapistDocSnap)
+                ? therapistDocSnap.data() || {}
+                : null;
+              if (therapistData) {
+                if (isStaffDisabled(therapistData)) {
+                  return {
+                    status: 403,
+                    code: 'STAFF_INACTIVE',
+                    message: 'Akun terapis sedang tidak aktif.',
+                  };
+                }
+                if (
+                  hasUidConflict(therapistData) ||
+                  (therapistData.staffId != null &&
+                    therapistData.staffId !== '' &&
+                    (typeof therapistData.staffId !== 'string' ||
+                      !aliases.has(textId(therapistData.staffId)))) ||
+                  (therapistData.id != null &&
+                    therapistData.id !== '' &&
+                    (typeof therapistData.id !== 'string' ||
+                      textId(therapistData.id) !== resolvedTherapistId))
+                ) {
+                  return {
+                    status: 403,
+                    code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                    message: 'Profil terapis mengalami konflik identitas.',
+                  };
+                }
+              }
+              const trustedTherapistIds = new Set([...aliases, resolvedTherapistId]);
+              if (roleTherapistId && !trustedTherapistIds.has(roleTherapistId)) {
+                return {
+                  status: 403,
+                  code: 'STAFF_ROLE_MAPPING_CONFLICT',
+                  message: 'ID terapis pada staff_roles tidak sesuai dengan Staff Master.',
+                };
+              }
+
+              for (const rawAssign of [
+                bookingData.therapistId,
+                bookingData.assignedTherapistId,
+              ]) {
+                if (rawAssign !== undefined && rawAssign !== null && rawAssign !== '') {
+                  if (
+                    typeof rawAssign !== 'string' ||
+                    !isValidBookingHistoryDocId(rawAssign, 128)
+                  ) {
+                    return {
+                      status: 403,
+                      code: 'PERMISSION_DENIED',
+                      message: 'Atribut penugasan terapis pada pesanan tidak valid.',
+                    };
+                  }
+                }
+              }
+              const assignedIds = [
+                textId(bookingData.therapistId),
+                textId(bookingData.assignedTherapistId),
+              ].filter(Boolean);
+              if (
+                !assignedIds.length ||
+                assignedIds.some((id) => !trustedTherapistIds.has(id))
+              ) {
+                return {
+                  status: 403,
+                  code: 'PERMISSION_DENIED',
+                  message: 'Pesanan ini tidak ditugaskan kepada terapis aktif saat ini.',
+                };
+              }
+              accessLevel = 'therapist';
+            } else {
+              return {
+                status: 403,
+                code: 'PERMISSION_DENIED',
+                message: 'Peran staf tidak memiliki wewenang membaca data pelacakan pesanan.',
+              };
+            }
+          } else {
+            // Non-staff authenticated caller (Customer): require verified non-conflicting UID ownership
+            for (const rawOwnerField of [
+              bookingData.customerAuthUid,
+              bookingData.authUserId,
+              bookingData.customerUid,
+              bookingData.userId,
+              bookingData.uid,
+            ]) {
+              if (rawOwnerField !== undefined && rawOwnerField !== null && rawOwnerField !== '') {
+                if (
+                  typeof rawOwnerField !== 'string' ||
+                  rawOwnerField.trim() !== rawOwnerField ||
+                  !isValidBookingHistoryDocId(rawOwnerField, 128)
+                ) {
+                  return {
+                    status: 403,
+                    code: 'BOOKING_OWNERSHIP_MALFORMED',
+                    message: 'Atribut kepemilikan pesanan tidak valid.',
+                  };
+                }
+              }
+            }
+
+            const bookingCustomerAuthUid = textId(bookingData.customerAuthUid);
+            const bookingAuthUserId = textId(bookingData.authUserId);
+            const legacyCustomerUid = textId(bookingData.customerUid);
+            const legacyUserId = textId(bookingData.userId);
+            const legacyUid = textId(bookingData.uid);
+
+            if (!bookingCustomerAuthUid && !bookingAuthUserId) {
+              return {
+                status: 403,
+                code: 'BOOKING_OWNERSHIP_MISSING',
+                message: 'Pesanan tidak memiliki ikatan UID pelanggan terotentikasi.',
+              };
+            }
+
+            const presentOwnerUids = new Set(
+              [
+                bookingCustomerAuthUid,
+                bookingAuthUserId,
+                legacyCustomerUid,
+                legacyUserId,
+                legacyUid,
+              ].filter(Boolean)
+            );
+            if (presentOwnerUids.size > 1) {
+              return {
+                status: 403,
+                code: 'BOOKING_OWNERSHIP_CONFLICT',
+                message: 'Kepemilikan UID pesanan mengalami konflik.',
+              };
+            }
+
+            if (!presentOwnerUids.has(verifiedUid)) {
+              return {
+                status: 403,
+                code: 'FOREIGN_BOOKING',
+                message: 'Akses ke pesanan pelanggan lain ditolak.',
+              };
+            }
+
+            const rawBookingCustId = bookingData.customerId;
+            let bookingCustomerId = '';
+            if (rawBookingCustId !== undefined && rawBookingCustId !== null && rawBookingCustId !== '') {
+              if (
+                typeof rawBookingCustId !== 'string' ||
+                rawBookingCustId.trim() !== rawBookingCustId ||
+                !isValidBookingHistoryDocId(rawBookingCustId, 128)
+              ) {
+                return {
+                  status: 403,
+                  code: 'BOOKING_OWNERSHIP_MALFORMED',
+                  message: 'ID pelanggan pada pesanan tidak valid.',
+                };
+              }
+              bookingCustomerId = rawBookingCustId;
+              if (
+                bookingCustomerId.startsWith('cust_u_') &&
+                bookingCustomerId !== `cust_u_${verifiedUid}` &&
+                bookingCustomerId !== `cust_u_${verifiedUid.slice(0, 10)}`
+              ) {
+                return {
+                  status: 403,
+                  code: 'FOREIGN_CUSTOMER_PROFILE',
+                  message: 'ID profil pelanggan pada pesanan tidak sesuai dengan sesi.',
+                };
+              }
+            }
+
+            const custByAuthUserQuery = adminDb
+              .collection('customers')
+              .where('authUserId', '==', verifiedUid)
+              .limit(2);
+            const custByCanonicalQuery = adminDb
+              .collection('customers')
+              .where('customerAuthUid', '==', verifiedUid)
+              .limit(2);
+            const [custByAuthUserSnap, custByCanonicalSnap, targetBookingCustSnap] =
+              await Promise.all([
+                transaction.get(custByAuthUserQuery),
+                transaction.get(custByCanonicalQuery),
+                bookingCustomerId
+                  ? transaction.get(adminDb.collection('customers').doc(bookingCustomerId))
+                  : Promise.resolve(null),
+              ]);
+
+            const ownedProfiles = new Map<string, any>();
+            for (const d of [
+              ...(custByAuthUserSnap?.docs || []),
+              ...(custByCanonicalSnap?.docs || []),
+            ]) {
+              if (snapExists(d)) ownedProfiles.set(d.id, d);
+            }
+
+            if (ownedProfiles.size > 1) {
+              return {
+                status: 403,
+                code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                message: 'Kepemilikan profil pelanggan tidak unik atau mengalami konflik.',
+              };
+            }
+
+            const profilesToValidate = new Map<string, any>(ownedProfiles);
+            if (snapExists(targetBookingCustSnap)) {
+              profilesToValidate.set(targetBookingCustSnap.id, targetBookingCustSnap);
+            }
+
+            if (
+              ownedProfiles.size === 1 &&
+              bookingCustomerId &&
+              snapExists(targetBookingCustSnap) &&
+              !ownedProfiles.has(bookingCustomerId)
+            ) {
+              const targetCustData = targetBookingCustSnap.data() || {};
+              if (
+                targetCustData.authUserId != null ||
+                targetCustData.customerAuthUid != null ||
+                bookingCustomerId.startsWith('cust_u_')
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                  message: 'Profil pelanggan pada pesanan tidak sesuai dengan profil akun aktif.',
+                };
+              }
+            }
+
+            for (const [profId, profSnap] of profilesToValidate.entries()) {
+              const profile = profSnap.data() || {};
+              if (
+                profile.id !== undefined &&
+                profile.id !== null &&
+                profile.id !== '' &&
+                (typeof profile.id !== 'string' || profile.id !== profId)
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_OWNERSHIP_MALFORMED',
+                  message: 'Identitas profil pelanggan tidak sesuai.',
+                };
+              }
+              for (const rawProfUid of [profile.authUserId, profile.customerAuthUid]) {
+                if (rawProfUid !== undefined && rawProfUid !== null && rawProfUid !== '') {
+                  if (
+                    typeof rawProfUid !== 'string' ||
+                    rawProfUid.trim() !== rawProfUid ||
+                    !isValidBookingHistoryDocId(rawProfUid, 128) ||
+                    rawProfUid !== verifiedUid
+                  ) {
+                    return {
+                      status: 403,
+                      code: 'CUSTOMER_OWNERSHIP_CONFLICT',
+                      message: 'Atribut kepemilikan profil pelanggan mengalami konflik.',
+                    };
+                  }
+                }
+              }
+              const acctType = textId(profile.accountType).toUpperCase();
+              const acctStatus = textId(profile.accountStatus).toUpperCase();
+              const profStatus = textId(profile.status).toUpperCase();
+              const crmStatus = textId(profile.crmStatus).toLowerCase();
+              const custStatus = textId(profile.customerStatus).toLowerCase();
+
+              if (
+                (acctType && acctType !== 'CUSTOMER') ||
+                acctStatus === 'DISABLED' ||
+                acctStatus === 'NOT_REGISTERED' ||
+                acctStatus === 'INACTIVE' ||
+                [
+                  'DISABLED',
+                  'INACTIVE',
+                  'ARCHIVED',
+                  'BLOCKED',
+                  'DELETED',
+                  'DELETION_REQUESTED',
+                ].includes(profStatus) ||
+                ['archived', 'blocked'].includes(crmStatus) ||
+                ['archived', 'blocked'].includes(custStatus)
+              ) {
+                return {
+                  status: 403,
+                  code: 'CUSTOMER_PROFILE_INACTIVE',
+                  message: 'Profil pelanggan sedang tidak aktif atau tidak memenuhi syarat.',
+                };
+              }
+            }
+
+            if (
+              cleanCanonicalPhone &&
+              !verifyTrackingPhoneMatch(bookingData.customerWhatsApp, cleanCanonicalPhone)
+            ) {
+              return {
+                status: 403,
+                code: 'PHONE_MISMATCH',
+                message: 'Nomor WhatsApp tidak cocok dengan data reservasi.',
+              };
+            }
+
+            accessLevel = 'owner';
+          }
+        } else {
+          // Unauthenticated Guest: strictly restricted to unowned guest bookings with verified phone.
+          // All lookup/ownership/phone denials normalize to the identical generic response (A5).
+          for (const ownerField of [
+            bookingData.customerAuthUid,
+            bookingData.authUserId,
+            bookingData.customerUid,
+            bookingData.userId,
+            bookingData.uid,
+          ]) {
+            if (ownerField !== undefined && ownerField !== null && ownerField !== '') {
+              return guestGenericDenial();
+            }
+          }
+
+          const rawGuestCustId = bookingData.customerId;
+          let guestCustId = '';
+          if (rawGuestCustId !== undefined && rawGuestCustId !== null && rawGuestCustId !== '') {
+            if (
+              typeof rawGuestCustId !== 'string' ||
+              rawGuestCustId.trim() !== rawGuestCustId ||
+              !isValidBookingHistoryDocId(rawGuestCustId, 128) ||
+              rawGuestCustId.startsWith('cust_u_')
+            ) {
+              return guestGenericDenial();
+            }
+            guestCustId = rawGuestCustId;
+          }
+
+          if (guestCustId) {
+            const linkedCustSnap = await transaction.get(
+              adminDb.collection('customers').doc(guestCustId)
+            );
+            if (snapExists(linkedCustSnap)) {
+              const linkedCustData = linkedCustSnap.data() || {};
+              if (
+                linkedCustData.id !== undefined &&
+                linkedCustData.id !== null &&
+                linkedCustData.id !== '' &&
+                (typeof linkedCustData.id !== 'string' || linkedCustData.id !== guestCustId)
+              ) {
+                return guestGenericDenial();
+              }
+              for (const profOwnerField of [
+                linkedCustData.customerAuthUid,
+                linkedCustData.authUserId,
+                linkedCustData.authUid,
+                linkedCustData.customerUid,
+                linkedCustData.userId,
+                linkedCustData.uid,
+              ]) {
+                if (
+                  profOwnerField !== undefined &&
+                  profOwnerField !== null &&
+                  profOwnerField !== ''
+                ) {
+                  return guestGenericDenial();
+                }
+              }
+              const linkedAcctStatus =
+                typeof linkedCustData.accountStatus === 'string'
+                  ? linkedCustData.accountStatus.trim().toUpperCase()
+                  : '';
+              if (
+                linkedAcctStatus === 'ACTIVE' ||
+                linkedCustData.isRegistered === true ||
+                linkedCustData.loginEnabled === true
+              ) {
+                return guestGenericDenial();
+              }
+            }
+          }
+
+          if (!verifyTrackingPhoneMatch(bookingData.customerWhatsApp, cleanCanonicalPhone)) {
+            return guestGenericDenial();
+          }
+
+          accessLevel = 'guest';
+        }
+
+        // 6. Read & validate booking_status_history across both bookingId and bookingCode
+        const histByBookingIdQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingId', '==', resolvedBookingId);
+        const histByBookingCodeQuery = adminDb
+          .collection('booking_status_history')
+          .where('bookingCode', '==', resolvedBookingCode);
+
+        const [histByBookingIdSnap, histByBookingCodeSnap] = await Promise.all([
+          transaction.get(histByBookingIdQuery),
+          transaction.get(histByBookingCodeQuery),
+        ]);
+
+        const mergedHistoryMap = new Map<string, { id: string; data: any }>();
+        for (const d of [
+          ...(histByBookingIdSnap?.docs || []),
+          ...(histByBookingCodeSnap?.docs || []),
+        ]) {
+          if (snapExists(d) && isValidBookingHistoryDocId(d.id, 128)) {
+            mergedHistoryMap.set(d.id, { id: d.id, data: d.data() || {} });
+          }
+        }
+
+        const validHistoryEntries: Array<{ id: string; data: any }> = [];
+        for (const item of mergedHistoryMap.values()) {
+          const h = item.data;
+          if (!h || typeof h !== 'object' || Array.isArray(h)) continue;
+          if (
+            (h.bookingId !== undefined &&
+              h.bookingId !== null &&
+              h.bookingId !== '' &&
+              (typeof h.bookingId !== 'string' || h.bookingId !== resolvedBookingId)) ||
+            (h.bookingCode !== undefined &&
+              h.bookingCode !== null &&
+              h.bookingCode !== '' &&
+              (typeof h.bookingCode !== 'string' ||
+                h.bookingCode.trim().toUpperCase() !== resolvedBookingCode))
+          ) {
+            return !verifiedUid
+              ? guestGenericDenial()
+              : {
+                  status: 409,
+                  code: 'BOOKING_HISTORY_CONFLICT',
+                  message: 'Riwayat status pesanan mengalami konflik referensi dokumen.',
+                };
+          }
+          const hStatus = textId(h.status);
+          if (!hStatus || !ALLOWED_BOOKING_STATUSES.has(hStatus)) continue;
+          if (typeof h.timestamp !== 'string' || Number.isNaN(Date.parse(h.timestamp))) continue;
+          validHistoryEntries.push(item);
+        }
+
+        validHistoryEntries.sort((a, b) => {
+          const diff =
+            new Date(a.data.timestamp || 0).getTime() -
+            new Date(b.data.timestamp || 0).getTime();
+          return diff !== 0 ? diff : a.id.localeCompare(b.id);
+        });
+
+        const deduplicatedHistory: any[] = [];
+        for (const item of validHistoryEntries) {
+          const h = item.data;
+          const cleanStatus = textId(h.status);
+          if (
+            deduplicatedHistory.length > 0 &&
+            deduplicatedHistory[deduplicatedHistory.length - 1].status === cleanStatus
+          ) {
+            continue;
+          }
+
+          // Canonical snapshot ID unconditionally (stored h.id cannot override snapshot identity)
+          const entryId = item.id;
+          const rawRole = textId(h.updatedByRole);
+          const cleanRole = ALLOWED_HISTORY_ROLES.has(rawRole) ? rawRole : 'system';
+          const safeUpdatedByName =
+            accessLevel === 'guest'
+              ? getGuestGenericHistoryActorLabel(cleanRole)
+              : sanitizeText(h.updatedByName, 120) || 'Sistem Senzu';
+          // Omit raw history notes for guests so private notes/addresses/codes are never exposed
+          const rawNoteText =
+            accessLevel === 'guest' ? '' : sanitizeText(h.note, 1000);
+
+          const sanitizedEntry: Record<string, any> = {
+            id: entryId,
+            bookingId: resolvedBookingId,
+            bookingCode: resolvedBookingCode,
+            status: cleanStatus,
+            ...(rawNoteText ? { note: rawNoteText } : {}),
+            updatedByRole: cleanRole,
+            updatedByName: safeUpdatedByName,
+            timestamp: h.timestamp,
+            formattedWIB:
+              sanitizeText(h.formattedWIB, 80) || formatBookingHistoryWIB(h.timestamp),
+          };
+          deduplicatedHistory.push(sanitizedEntry);
+        }
+
+        const scheduleDate = bookingData.scheduleDate || bookingData.bookingDate || '';
+        const scheduleTime = bookingData.scheduleTime || bookingData.timeSlot || '';
+        const scheduleAt =
+          bookingData.scheduleAt ||
+          (scheduleDate && scheduleTime ? `${scheduleDate} ${scheduleTime}` : '');
+        const serviceDuration =
+          bookingData.serviceDuration || bookingData.durationMinutes || 90;
+        const totalAmount =
+          bookingData.totalAmount ?? (bookingData.totalPrice || bookingData.price || 0);
+
+        let responseBooking: Record<string, any>;
+        if (accessLevel === 'guest') {
+          // Strictly redacted guest booking summary: never expose raw phone, full name, street address, coordinates, email, notes, or UIDs
+          responseBooking = {
+            id: resolvedBookingId,
+            bookingCode: resolvedBookingCode,
+            status: bookingData.status,
+            paymentStatus: bookingData.paymentStatus,
+            paymentMethod: bookingData.paymentMethod || '',
+            ...(bookingData.paymentDeadline ? { paymentDeadline: bookingData.paymentDeadline } : {}),
+            serviceId: bookingData.serviceId || '',
+            serviceName: bookingData.serviceName || '',
+            ...(bookingData.packageName ? { packageName: bookingData.packageName } : {}),
+            serviceDuration,
+            durationMinutes: bookingData.durationMinutes || serviceDuration,
+            scheduleDate,
+            bookingDate: bookingData.bookingDate || scheduleDate,
+            scheduleTime,
+            timeSlot: bookingData.timeSlot || scheduleTime,
+            scheduleAt,
+            genderPreference: bookingData.genderPreference || 'Bebas',
+            therapistName: bookingData.therapistName || '',
+            totalAmount,
+            totalPrice: bookingData.totalPrice || totalAmount,
+            servicePrice: bookingData.servicePrice || 0,
+            homeServiceFee: bookingData.homeServiceFee || 0,
+            discountAmount: bookingData.discountAmount || 0,
+            area: bookingData.area || '',
+            customerName: maskGuestCustomerName(bookingData.customerName),
+            customerWhatsApp: maskGuestWhatsApp(bookingData.customerWhatsApp),
+            address: maskGuestAddress(bookingData.address, bookingData.area),
+            createdAt: bookingData.createdAt || '',
+            updatedAt: bookingData.updatedAt || '',
+          };
+        } else {
+          const allowedFieldList =
+            accessLevel === 'owner'
+              ? OWNER_ALLOWED_BOOKING_FIELDS
+              : accessLevel === 'therapist'
+              ? THERAPIST_ALLOWED_BOOKING_FIELDS
+              : STAFF_ALLOWED_BOOKING_FIELDS;
+
+          responseBooking = projectAllowedBookingFields(bookingData, allowedFieldList, {
+            id: resolvedBookingId,
+            bookingCode: resolvedBookingCode,
+            serviceDuration,
+            durationMinutes: bookingData.durationMinutes || serviceDuration,
+            scheduleDate,
+            bookingDate: bookingData.bookingDate || scheduleDate,
+            scheduleTime,
+            timeSlot: bookingData.timeSlot || scheduleTime,
+            scheduleAt,
+            totalAmount,
+            totalPrice: bookingData.totalPrice || totalAmount,
+          });
+        }
+
+        return {
+          status: 200,
+          accessLevel,
+          bookingId: resolvedBookingId,
+          bookingCode: resolvedBookingCode,
+          booking: responseBooking,
+          history: deduplicatedHistory,
+        };
+      });
+
+      if (txResult.status !== 200) {
+        return res.status(txResult.status).json({
+          success: false,
+          code: txResult.code,
+          error: txResult.message,
+          message: txResult.message,
+        });
+      }
+
+      if (mode === 'history') {
+        return res.status(200).json({
+          success: true,
+          accessLevel: txResult.accessLevel,
+          bookingId: txResult.bookingId,
+          bookingCode: txResult.bookingCode,
+          history: txResult.history,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        accessLevel: txResult.accessLevel,
+        booking: txResult.booking,
+        history: txResult.history,
+      });
+    } catch {
+      return res.status(503).json({
+        success: false,
+        code: 'SERVICE_UNAVAILABLE',
+        error: 'Layanan pelacakan pesanan sedang tidak tersedia.',
+        message: 'Layanan pelacakan pesanan sedang tidak tersedia.',
+      });
     }
-  });
+  };
+
+  const handleBookingTrackRead = async (req: express.Request, res: express.Response) =>
+    executeAuthoritativeBookingRead(req, res, 'track');
+
+  const handleBookingStatusHistoryRead = async (req: express.Request, res: express.Response) =>
+    executeAuthoritativeBookingRead(req, res, 'history');
+
+  app.get('/api/bookings/track', handleBookingTrackRead);
+  app.post('/api/bookings/track', handleBookingTrackRead);
+  app.get('/api/booking-history/read', handleBookingStatusHistoryRead);
+  app.post('/api/booking-history/read', handleBookingStatusHistoryRead);
+  app.get('/api/booking-status-history/read', handleBookingStatusHistoryRead);
+  app.post('/api/booking-status-history/read', handleBookingStatusHistoryRead);
+  app.get('/api/booking-history', handleBookingStatusHistoryRead);
+  app.get('/api/booking-status-history', handleBookingStatusHistoryRead);
+  app.get('/api/bookings/history', handleBookingStatusHistoryRead);
+  app.post('/api/bookings/history', handleBookingStatusHistoryRead);
+  app.get('/api/bookings/:bookingId/history', handleBookingStatusHistoryRead);
 
   // In-memory cache for manager status (30s TTL)
   let managerStatusCache: { data: any; cachedAt: number } | null = null;
@@ -6822,6 +20422,2493 @@ async function startServer() {
         success: false,
         code: 'SETUP_FAILED',
         message: 'Gagal membuat akun Manager. Silakan coba kembali atau periksa konfigurasi server.',
+      });
+    }
+  });
+
+  // ===========================================================================
+  // STAGE 7E: PRIVATE NOTIFICATIONS, AUTHORITATIVE EVENTS & DELIVERY RECORDS
+  // ===========================================================================
+
+  type Stage7ERecipientRole = 'customer' | 'therapist' | 'supervisor' | 'manager' | 'admin' | 'css';
+  type Stage7EPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
+
+  const STAGE7E_EVENT_ALIASES: Record<string, string> = {
+    SCHEDULE_CHANGED: 'therapist.shift_updated',
+    'therapist.off_updated': 'therapist.shift_updated',
+    'therapist.schedule_override': 'therapist.shift_updated',
+    'therapist.assigned': 'booking.assigned',
+    'therapist.reassigned': 'booking.reassigned',
+    'therapist.on_the_way': 'therapist.departing',
+    'booking.reminder': 'booking.Reminder',
+    'supervisor.unassigned_alert': 'booking.stale_unassigned',
+    'therapist.late_departure_alert': 'therapist.late_alert',
+    'therapist.not_accepted_alert': 'therapist.late_alert',
+    'tracking.location_stale': 'therapist.late_alert',
+    'loyalty.tier_upgraded': 'membership.tier_upgraded',
+    'loyalty.voucher_issued': 'voucher.issued',
+    'loyalty.referral_rewarded': 'referral.qualified',
+    'loyalty.birthday_reward': 'birthday.reward_issued',
+  };
+
+  interface Stage7EEventRule {
+    canonicalType: string;
+    entityKind:
+      | 'booking'
+      | 'payment'
+      | 'roster'
+      | 'loyalty_tx'
+      | 'tier_upgrade'
+      | 'voucher'
+      | 'referral'
+      | 'birthday'
+      | 'case'
+      | 'review'
+      | 'chat'
+      | 'system';
+    allowedStaffRoles: string[];
+    allowCustomerOwner: boolean;
+    allowAssignedTherapist: boolean;
+    defaultRoles: Stage7ERecipientRole[];
+    defaultPriority: Stage7EPriority;
+  }
+
+  const STAGE7E_EVENT_RULES: Record<string, Stage7EEventRule> = {
+    'booking.created': {
+      canonicalType: 'booking.created',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'supervisor', 'manager'],
+      defaultPriority: 'NORMAL',
+    },
+    'booking.confirmed': {
+      canonicalType: 'booking.confirmed',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'supervisor'],
+      defaultPriority: 'NORMAL',
+    },
+    'booking.assigned': {
+      canonicalType: 'booking.assigned',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['therapist', 'customer', 'supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'booking.reassigned': {
+      canonicalType: 'booking.reassigned',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['therapist', 'customer', 'supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'booking.rescheduled': {
+      canonicalType: 'booking.rescheduled',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'therapist', 'supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'booking.cancelled': {
+      canonicalType: 'booking.cancelled',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'therapist', 'supervisor', 'manager'],
+      defaultPriority: 'CRITICAL',
+    },
+    'booking.Reminder': {
+      canonicalType: 'booking.Reminder',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'therapist'],
+      defaultPriority: 'HIGH',
+    },
+    'booking.stale_unassigned': {
+      canonicalType: 'booking.stale_unassigned',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['supervisor', 'manager'],
+      defaultPriority: 'CRITICAL',
+    },
+    'payment.pending': {
+      canonicalType: 'payment.pending',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer'],
+      defaultPriority: 'NORMAL',
+    },
+    'payment.proof_uploaded': {
+      canonicalType: 'payment.proof_uploaded',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'payment.verified': {
+      canonicalType: 'payment.verified',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'therapist', 'supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'payment.rejected': {
+      canonicalType: 'payment.rejected',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'payment.expired': {
+      canonicalType: 'payment.expired',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'payment.refund_requested': {
+      canonicalType: 'payment.refund_requested',
+      entityKind: 'payment',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['manager', 'supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'payment.refund_completed': {
+      canonicalType: 'payment.refund_completed',
+      entityKind: 'payment',
+      allowedStaffRoles: ['manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer', 'manager', 'supervisor'],
+      defaultPriority: 'NORMAL',
+    },
+    'therapist.accepted': {
+      canonicalType: 'therapist.accepted',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'supervisor'],
+      defaultPriority: 'NORMAL',
+    },
+    'therapist.departing': {
+      canonicalType: 'therapist.departing',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'therapist.nearby': {
+      canonicalType: 'therapist.nearby',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer'],
+      defaultPriority: 'HIGH',
+    },
+    'therapist.arrived': {
+      canonicalType: 'therapist.arrived',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'treatment.started': {
+      canonicalType: 'treatment.started',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'supervisor'],
+      defaultPriority: 'NORMAL',
+    },
+    'treatment.completed': {
+      canonicalType: 'treatment.completed',
+      entityKind: 'booking',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'supervisor', 'manager'],
+      defaultPriority: 'NORMAL',
+    },
+    'booking.ready_for_assignment': {
+      canonicalType: 'booking.ready_for_assignment',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['supervisor'],
+      defaultPriority: 'HIGH',
+    },
+    'therapist.late_alert': {
+      canonicalType: 'therapist.late_alert',
+      entityKind: 'booking',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['supervisor', 'manager', 'therapist'],
+      defaultPriority: 'CRITICAL',
+    },
+    'therapist.shift_updated': {
+      canonicalType: 'therapist.shift_updated',
+      entityKind: 'roster',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['therapist'],
+      defaultPriority: 'NORMAL',
+    },
+    'loyalty.points_earned': {
+      canonicalType: 'loyalty.points_earned',
+      entityKind: 'loyalty_tx',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer'],
+      defaultPriority: 'NORMAL',
+    },
+    'loyalty.points_redeemed': {
+      canonicalType: 'loyalty.points_redeemed',
+      entityKind: 'loyalty_tx',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer'],
+      defaultPriority: 'LOW',
+    },
+    'membership.tier_upgraded': {
+      canonicalType: 'membership.tier_upgraded',
+      entityKind: 'tier_upgrade',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'voucher.issued': {
+      canonicalType: 'voucher.issued',
+      entityKind: 'voucher',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer'],
+      defaultPriority: 'NORMAL',
+    },
+    'referral.qualified': {
+      canonicalType: 'referral.qualified',
+      entityKind: 'referral',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: true,
+      defaultRoles: ['customer'],
+      defaultPriority: 'NORMAL',
+    },
+    'birthday.reward_issued': {
+      canonicalType: 'birthday.reward_issued',
+      entityKind: 'birthday',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['customer'],
+      defaultPriority: 'NORMAL',
+    },
+    'system.daily_summary': {
+      canonicalType: 'system.daily_summary',
+      entityKind: 'system',
+      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
+      allowCustomerOwner: false,
+      allowAssignedTherapist: false,
+      defaultRoles: ['manager', 'supervisor'],
+      defaultPriority: 'LOW',
+    },
+    'review.low_rating': {
+      canonicalType: 'review.low_rating',
+      entityKind: 'review',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: false,
+      defaultRoles: ['css', 'supervisor', 'manager'],
+      defaultPriority: 'HIGH',
+    },
+    'case.created': {
+      canonicalType: 'case.created',
+      entityKind: 'case',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: true,
+      defaultRoles: ['supervisor', 'manager', 'css'],
+      defaultPriority: 'HIGH',
+    },
+    'case.high_severity': {
+      canonicalType: 'case.high_severity',
+      entityKind: 'case',
+      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
+      allowCustomerOwner: true,
+      allowAssignedTherapist: true,
+      defaultRoles: ['supervisor', 'manager', 'css'],
+      defaultPriority: 'CRITICAL',
+    },
+  };
+
+  interface Stage7ECallerContext {
+    uid: string;
+    email?: string;
+    isStaff: boolean;
+    staffRole?: 'admin' | 'manager' | 'supervisor' | 'css' | 'therapist';
+    staffMasterId?: string;
+    staffName?: string;
+    therapistIds: Set<string>;
+    customerIds: Set<string>;
+  }
+
+  async function resolveStage7ECaller(req: express.Request): Promise<Stage7ECallerContext> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+      throw Object.assign(new Error('Autentikasi diperlukan.'), {
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+      });
+    }
+    const token = authHeader.slice('Bearer '.length).trim();
+    if (!token) {
+      throw Object.assign(new Error('Token autentikasi tidak ditemukan.'), {
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+      });
+    }
+    const verified = await verifyFirebaseIdToken(token);
+    if (!verified || !verified.uid) {
+      throw Object.assign(new Error('Sesi autentikasi tidak valid atau telah berakhir.'), {
+        statusCode: 401,
+        code: 'AUTH_TOKEN_INVALID',
+      });
+    }
+
+    const uid = String(verified.uid).trim();
+    const therapistIds = new Set<string>();
+    const customerIds = new Set<string>([uid]);
+    let isStaff = false;
+    let staffRole: Stage7ECallerContext['staffRole'];
+    let staffMasterId: string | undefined;
+    let staffName: string | undefined;
+
+    if (adminDb) {
+      const roleSnap = await adminDb.collection('staff_roles').doc(uid).get();
+      if (roleSnap.exists) {
+        const roleData = roleSnap.data() as any;
+        const roleAuthUid = String(roleData?.authUserId || roleData?.authUid || '').trim();
+        if (roleAuthUid && roleAuthUid !== uid) {
+          throw Object.assign(new Error('Identitas peran staf tidak sesuai dengan sesi.'), {
+            statusCode: 403,
+            code: 'STAFF_UID_MISMATCH',
+          });
+        }
+        const roleDisabled =
+          roleData?.isActive !== true ||
+          roleData?.loginEnabled === false ||
+          ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED'].includes(
+            String(roleData?.status || '').trim().toUpperCase()
+          ) ||
+          String(roleData?.loginAccountStatus || '').trim().toUpperCase() === 'DINONAKTIFKAN';
+        if (roleDisabled) {
+          throw Object.assign(new Error('Akun staf sedang dinonaktifkan.'), {
+            statusCode: 403,
+            code: 'STAFF_ACCOUNT_DISABLED',
+          });
+        }
+
+        const candidateMasterId = String(
+          roleData?.staffId || roleData?.staffUserId || uid
+        ).trim();
+        const masterSnap = await adminDb.collection('staff_users').doc(candidateMasterId).get();
+        if (!masterSnap.exists) {
+          throw Object.assign(new Error('Data Staff Master tidak ditemukan.'), {
+            statusCode: 403,
+            code: 'STAFF_MASTER_MISSING',
+          });
+        }
+        const masterData = masterSnap.data() as any;
+        const masterAuthUid = String(masterData?.authUserId || masterData?.authUid || '').trim();
+        if ((masterAuthUid && masterAuthUid !== uid) || (!masterAuthUid && candidateMasterId !== uid)) {
+          throw Object.assign(new Error('Ikatan UID Staff Master tidak cocok.'), {
+            statusCode: 403,
+            code: 'STAFF_MASTER_UID_MISMATCH',
+          });
+        }
+        const masterDisabled =
+          masterData?.isActive === false ||
+          masterData?.loginEnabled === false ||
+          ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED'].includes(
+            String(masterData?.status || '').trim().toUpperCase()
+          ) ||
+          String(masterData?.loginAccountStatus || '').trim().toUpperCase() === 'DINONAKTIFKAN';
+        if (masterDisabled) {
+          throw Object.assign(new Error('Data Staff Master telah dinonaktifkan.'), {
+            statusCode: 403,
+            code: 'STAFF_MASTER_DISABLED',
+          });
+        }
+
+        const rRole = String(roleData?.role || '').trim().toLowerCase();
+        const mRole = String(masterData?.role || '').trim().toLowerCase();
+        if (!rRole || rRole !== mRole || !['admin', 'manager', 'supervisor', 'css', 'therapist'].includes(rRole)) {
+          throw Object.assign(new Error('Peran staf tidak sinkron dengan Staff Master.'), {
+            statusCode: 403,
+            code: 'STAFF_ROLE_MISMATCH',
+          });
+        }
+
+        isStaff = true;
+        staffRole = rRole as Stage7ECallerContext['staffRole'];
+        staffMasterId = candidateMasterId;
+        staffName = String(masterData?.fullName || masterData?.name || roleData?.name || '').trim();
+
+        if (staffRole === 'therapist') {
+          for (const candidate of [
+            uid,
+            candidateMasterId,
+            roleData?.therapistId,
+            roleData?.staffId,
+            roleData?.staffUserId,
+            masterData?.therapistId,
+            masterData?.id,
+            masterData?.uid,
+          ]) {
+            const clean = typeof candidate === 'string' ? candidate.trim() : '';
+            if (clean) therapistIds.add(clean);
+          }
+          try {
+            const tSnap = await adminDb
+              .collection('therapists')
+              .where('authUserId', '==', uid)
+              .limit(5)
+              .get();
+            tSnap.docs.forEach((d) => therapistIds.add(d.id));
+          } catch {}
+        }
+      }
+
+      try {
+        const custDirect = await adminDb.collection('customers').doc(uid).get();
+        if (custDirect.exists) {
+          const cData = custDirect.data() as any;
+          const cAuth = String(cData?.authUserId || cData?.customerAuthUid || '').trim();
+          if (!cAuth || cAuth === uid) {
+            customerIds.add(uid);
+            if (typeof cData?.id === 'string' && cData.id.trim()) {
+              customerIds.add(cData.id.trim());
+            }
+          }
+        }
+        const custByAuthSnap = await adminDb
+          .collection('customers')
+          .where('authUserId', '==', uid)
+          .limit(5)
+          .get();
+        custByAuthSnap.docs.forEach((d) => {
+          customerIds.add(d.id);
+          const cid = String(d.data()?.id || '').trim();
+          if (cid) customerIds.add(cid);
+        });
+      } catch {}
+    }
+
+    return {
+      uid,
+      email: verified.email,
+      isStaff,
+      staffRole,
+      staffMasterId,
+      staffName,
+      therapistIds,
+      customerIds,
+    };
+  }
+
+  function isBookingOwnedByCaller(booking: any, caller: Stage7ECallerContext): boolean {
+    if (!booking || typeof booking !== 'object') return false;
+    const bCustAuthUid = String(booking.customerAuthUid || '').trim();
+    const bAuthUserId = String(booking.authUserId || '').trim();
+    if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
+      return false;
+    }
+    if (bCustAuthUid || bAuthUserId) {
+      return (bCustAuthUid || bAuthUserId) === caller.uid;
+    }
+    const bCustId = String(booking.customerId || '').trim();
+    return Boolean(bCustId && caller.customerIds.has(bCustId));
+  }
+
+  function isBookingAssignedToTherapistCaller(booking: any, caller: Stage7ECallerContext): boolean {
+    if (!caller.isStaff || caller.staffRole !== 'therapist' || !booking) return false;
+    const tId = String(booking.therapistId || booking.assignedTherapistId || '').trim();
+    const tAuthUid = String(booking.therapistAuthUid || '').trim();
+    if (tId && caller.therapistIds.has(tId)) return true;
+    if (tAuthUid && tAuthUid === caller.uid) return true;
+    return false;
+  }
+
+  async function resolveCanonicalCustomerIdentity(
+    customerIdHint: string,
+    bookingData?: any
+  ): Promise<{ customerId: string; customerAuthUid?: string; customerName?: string; customerPhone?: string }> {
+    let bCustAuthUid = '';
+    let bAuthUserId = '';
+    if (bookingData && typeof bookingData === 'object') {
+      bCustAuthUid = String(bookingData.customerAuthUid || '').trim();
+      bAuthUserId = String(bookingData.authUserId || '').trim();
+      if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
+        throw Object.assign(new Error('Konflik pemilik akun pada data pesanan.'), {
+          statusCode: 403,
+          code: 'CUSTOMER_OWNER_CONFLICT',
+        });
+      }
+    }
+
+    const effectiveCustomerId = String(
+      bookingData?.customerId || customerIdHint || bCustAuthUid || bAuthUserId || ''
+    ).trim();
+    let resolvedAuthUid = bCustAuthUid || bAuthUserId;
+    let resolvedName = String(bookingData?.customerName || '').trim();
+    let resolvedPhone = String(bookingData?.customerWhatsApp || bookingData?.customerPhone || '').trim();
+
+    if (adminDb && effectiveCustomerId) {
+      try {
+        const cSnap = await adminDb.collection('customers').doc(effectiveCustomerId).get();
+        if (cSnap.exists) {
+          const cData = cSnap.data() as any;
+          const cAuth1 = String(cData?.authUserId || '').trim();
+          const cAuth2 = String(cData?.customerAuthUid || '').trim();
+          if (cAuth1 && cAuth2 && cAuth1 !== cAuth2) {
+            throw Object.assign(new Error('Konflik identitas akun pelanggan.'), {
+              statusCode: 403,
+              code: 'CUSTOMER_OWNER_CONFLICT',
+            });
+          }
+          const profileAuthUid = cAuth1 || cAuth2;
+          if (resolvedAuthUid && profileAuthUid && resolvedAuthUid !== profileAuthUid) {
+            throw Object.assign(new Error('Konflik pemilik pesanan dan profil pelanggan.'), {
+              statusCode: 403,
+              code: 'CUSTOMER_OWNER_CONFLICT',
+            });
+          }
+          if (!resolvedAuthUid && profileAuthUid) {
+            resolvedAuthUid = profileAuthUid;
+          }
+          if (!resolvedName && cData?.name) resolvedName = String(cData.name).trim();
+          if (!resolvedPhone && (cData?.whatsapp || cData?.phone)) {
+            resolvedPhone = String(cData.whatsapp || cData.phone).trim();
+          }
+        }
+      } catch (err: any) {
+        if (err?.code === 'CUSTOMER_OWNER_CONFLICT') throw err;
+      }
+    }
+
+    return {
+      customerId: effectiveCustomerId || resolvedAuthUid,
+      customerAuthUid: resolvedAuthUid || undefined,
+      customerName: resolvedName || undefined,
+      customerPhone: resolvedPhone || undefined,
+    };
+  }
+
+  async function isStage7ECallerAuthorizedForNotification(
+    notifData: Record<string, any> | undefined | null,
+    caller: Stage7ECallerContext
+  ): Promise<boolean> {
+    if (!notifData || typeof notifData !== 'object') return false;
+    const recRole = String(notifData.recipientRole || notifData.targetRole || '')
+      .trim()
+      .toLowerCase();
+    const recId = String(notifData.recipientId || '').trim();
+    const recUserId = String(notifData.recipientUserId || '').trim();
+
+    if (caller.isStaff && caller.staffRole) {
+      if (caller.staffRole === 'admin' || caller.staffRole === 'manager') {
+        if (
+          ['admin', 'manager', 'supervisor', 'css'].includes(recRole) ||
+          ['admin', 'manager', 'supervisor', 'css', caller.uid, caller.staffMasterId || ''].includes(recId) ||
+          recUserId === caller.uid
+        ) {
+          return true;
+        }
+      }
+      if (caller.staffRole === 'supervisor') {
+        if (
+          recRole === 'supervisor' ||
+          ['supervisor', caller.uid, caller.staffMasterId || ''].includes(recId) ||
+          recUserId === caller.uid
+        ) {
+          return true;
+        }
+      }
+      if (caller.staffRole === 'css') {
+        if (
+          ['css', 'supervisor'].includes(recRole) ||
+          ['css', caller.uid, caller.staffMasterId || ''].includes(recId) ||
+          recUserId === caller.uid
+        ) {
+          return true;
+        }
+      }
+      if (caller.staffRole === 'therapist' && recRole === 'therapist') {
+        for (const candidate of [
+          notifData.recipientId,
+          notifData.recipientUserId,
+          notifData.therapistId,
+          notifData.targetUserId,
+        ]) {
+          const clean = typeof candidate === 'string' ? candidate.trim() : '';
+          if (clean && caller.therapistIds.has(clean)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+
+    if (recRole === 'customer') {
+      const docCustAuthUid = String(notifData.customerAuthUid || '').trim();
+      const docAuthUserId = String(notifData.authUserId || '').trim();
+      if (docCustAuthUid && docAuthUserId && docCustAuthUid !== docAuthUserId) {
+        return false;
+      }
+      if (docCustAuthUid || docAuthUserId) {
+        return (docCustAuthUid || docAuthUserId) === caller.uid;
+      }
+      if (recUserId === caller.uid || recId === caller.uid) {
+        return true;
+      }
+      const docCustId = String(notifData.customerId || recId || '').trim();
+      if (docCustId && caller.customerIds.has(docCustId)) {
+        return true;
+      }
+      const bookingId = String(notifData.bookingId || '').trim();
+      if (bookingId && adminDb) {
+        try {
+          const bSnap = await adminDb.collection('bookings').doc(bookingId).get();
+          if (bSnap.exists && isBookingOwnedByCaller(bSnap.data(), caller)) {
+            return true;
+          }
+        } catch {}
+      }
+    }
+
+    return false;
+  }
+
+  app.post('/api/notifications/emit', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+
+      const caller = await resolveStage7ECaller(req);
+      const rawEventType = typeof req.body?.eventType === 'string' ? req.body.eventType.trim() : '';
+      const canonicalEventType = STAGE7E_EVENT_ALIASES[rawEventType] || rawEventType;
+      const rule = STAGE7E_EVENT_RULES[canonicalEventType];
+
+      if (!rawEventType || !rule) {
+        return res.status(400).json({
+          success: false,
+          code: 'UNSUPPORTED_NOTIFICATION_EVENT',
+          error: 'Tipe event notifikasi tidak dikenal atau tidak diizinkan.',
+        });
+      }
+
+      const rawPayload =
+        req.body?.payload && typeof req.body.payload === 'object' && !Array.isArray(req.body.payload)
+          ? (req.body.payload as Record<string, any>)
+          : null;
+      if (!rawPayload) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_EVENT_PAYLOAD',
+          error: 'Payload notifikasi tidak valid.',
+        });
+      }
+
+      // Reject chat notification spoofing through generic emit endpoint
+      if (canonicalEventType === 'chat.message_received') {
+        return res.status(403).json({
+          success: false,
+          code: 'USE_CHAT_NOTIFY_ENDPOINT',
+          error: 'Notifikasi chat harus dikirim melalui jalur resmi /api/chat/notify.',
+        });
+      }
+
+      let authoritativeBooking: any = null;
+      let authoritativeBookingId = String(
+        rawPayload.bookingId || rawPayload.id || rawPayload.sourceBookingId || ''
+      ).trim();
+      let authoritativePayment: any = null;
+      let authoritativePaymentId = String(rawPayload.paymentId || '').trim();
+      let authoritativeCustomerId = String(rawPayload.customerId || '').trim();
+      let authoritativeCustomerAuthUid = '';
+      let authoritativeCustomerName = String(rawPayload.customerName || '').trim();
+      let authoritativeCustomerPhone = String(
+        rawPayload.customerWhatsApp || rawPayload.customerPhone || ''
+      ).trim();
+      let authoritativeTherapistId = String(
+        rawPayload.therapistId || rawPayload.assignedTherapistId || ''
+      ).trim();
+      let authoritativeTherapistName = String(
+        rawPayload.therapistName || rawPayload.assignedTherapistName || ''
+      ).trim();
+      let entityReferenceKey = '';
+
+      // Load booking if referenced
+      if (authoritativeBookingId) {
+        const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
+        if (bSnap.exists) {
+          authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
+        }
+      } else if (typeof rawPayload.bookingCode === 'string' && rawPayload.bookingCode.trim()) {
+        const bCodeSnap = await adminDb
+          .collection('bookings')
+          .where('bookingCode', '==', rawPayload.bookingCode.trim())
+          .limit(1)
+          .get();
+        if (!bCodeSnap.empty) {
+          authoritativeBooking = {
+            id: bCodeSnap.docs[0].id,
+            ...(bCodeSnap.docs[0].data() as any),
+          };
+          authoritativeBookingId = authoritativeBooking.id;
+        }
+      }
+
+      // 1. Validate entity & state truthfulness per rule.entityKind
+      if (rule.entityKind === 'booking') {
+        if (!authoritativeBooking) {
+          return res.status(404).json({
+            success: false,
+            code: 'BOOKING_NOT_FOUND',
+            error: 'Data pesanan sumber tidak ditemukan untuk notifikasi ini.',
+          });
+        }
+        const bStatus = String(authoritativeBooking.status || '').trim();
+        const bStatusLower = bStatus.toLowerCase();
+        const bTherapistId = String(
+          authoritativeBooking.therapistId || authoritativeBooking.assignedTherapistId || ''
+        ).trim();
+
+        if (canonicalEventType === 'booking.cancelled') {
+          if (!['cancelled', 'dibatalkan'].includes(bStatusLower)) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Pesanan belum berstatus dibatalkan.',
+            });
+          }
+        } else if (canonicalEventType === 'booking.confirmed') {
+          if (['cancelled', 'dibatalkan', 'expired'].includes(bStatusLower)) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Status pesanan tidak sesuai untuk konfirmasi.',
+            });
+          }
+        } else if (
+          canonicalEventType === 'booking.assigned' ||
+          canonicalEventType === 'booking.reassigned'
+        ) {
+          if (!bTherapistId) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_THERAPIST_UNASSIGNED',
+              error: 'Pesanan belum memiliki terapis yang ditugaskan.',
+            });
+          }
+          if (authoritativeTherapistId && authoritativeTherapistId !== bTherapistId) {
+            return res.status(409).json({
+              success: false,
+              code: 'THERAPIST_ASSIGNMENT_MISMATCH',
+              error: 'Terapis pada payload tidak sesuai dengan penugasan pesanan.',
+            });
+          }
+        } else if (canonicalEventType === 'treatment.completed') {
+          if (!['completed', 'selesai'].includes(bStatusLower)) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Status pesanan belum selesai (Completed).',
+            });
+          }
+        } else if (canonicalEventType === 'treatment.started') {
+          if (
+            !['in progress', 'in_progress', 'ongoing', 'berlangsung', 'completed', 'selesai'].includes(
+              bStatusLower
+            ) &&
+            !authoritativeBooking.treatmentStartedAt &&
+            !authoritativeBooking.startedAt
+          ) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Sesi treatment belum dimulai pada data pesanan.',
+            });
+          }
+        } else if (canonicalEventType === 'therapist.arrived') {
+          if (
+            !['arrived', 'in progress', 'in_progress', 'completed', 'tiba'].includes(bStatusLower) &&
+            !authoritativeBooking.therapistArrivedAt &&
+            !authoritativeBooking.arrivedAt
+          ) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Status kedatangan terapis belum tercatat pada pesanan.',
+            });
+          }
+        } else if (canonicalEventType === 'therapist.departing') {
+          if (
+            !['on the way', 'on_the_way', 'departing', 'arrived', 'in progress', 'completed', 'confirmed'].includes(
+              bStatusLower
+            ) &&
+            !authoritativeBooking.therapistDepartingAt
+          ) {
+            return res.status(409).json({
+              success: false,
+              code: 'BOOKING_STATE_MISMATCH',
+              error: 'Status keberangkatan terapis tidak sesuai dengan pesanan.',
+            });
+          }
+        }
+
+        authoritativeTherapistId = bTherapistId || authoritativeTherapistId;
+        authoritativeTherapistName =
+          String(
+            authoritativeBooking.therapistName ||
+              authoritativeBooking.assignedTherapistName ||
+              authoritativeTherapistName ||
+              ''
+          ).trim();
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          authoritativeCustomerId,
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `booking:${authoritativeBookingId}:${canonicalEventType}:${bStatusLower}:${authoritativeTherapistId || 'none'}:${String(authoritativeBooking.date || '')}:${String(authoritativeBooking.time || '')}`;
+      } else if (rule.entityKind === 'payment') {
+        if (authoritativePaymentId) {
+          const pSnap = await adminDb.collection('payments').doc(authoritativePaymentId).get();
+          if (pSnap.exists) {
+            authoritativePayment = { id: pSnap.id, ...(pSnap.data() as any) };
+          }
+        }
+        if (!authoritativePayment && authoritativeBookingId) {
+          const pByBooking = await adminDb
+            .collection('payments')
+            .where('bookingId', '==', authoritativeBookingId)
+            .limit(5)
+            .get();
+          if (!pByBooking.empty) {
+            authoritativePayment = {
+              id: pByBooking.docs[0].id,
+              ...(pByBooking.docs[0].data() as any),
+            };
+            authoritativePaymentId = authoritativePayment.id;
+          }
+        }
+        if (!authoritativeBooking && authoritativePayment?.bookingId) {
+          authoritativeBookingId = String(authoritativePayment.bookingId).trim();
+          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
+          if (bSnap.exists) {
+            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
+          }
+        }
+        if (!authoritativeBooking && !authoritativePayment) {
+          return res.status(404).json({
+            success: false,
+            code: 'PAYMENT_SOURCE_NOT_FOUND',
+            error: 'Data pembayaran atau pesanan tidak ditemukan.',
+          });
+        }
+
+        const payStatus = String(
+          authoritativePayment?.status || authoritativeBooking?.paymentStatus || ''
+        )
+          .trim()
+          .toUpperCase();
+
+        if (canonicalEventType === 'payment.verified') {
+          if (!['PAID', 'VERIFIED', 'SETTLED', 'COMPLETED', 'DP_PAID'].includes(payStatus)) {
+            return res.status(409).json({
+              success: false,
+              code: 'PAYMENT_STATE_MISMATCH',
+              error: 'Pembayaran belum berstatus terverifikasi/lunas.',
+            });
+          }
+        } else if (canonicalEventType === 'payment.rejected') {
+          if (!['REJECTED', 'PAYMENT_REJECTED', 'FAILED', 'UNPAID'].includes(payStatus)) {
+            return res.status(409).json({
+              success: false,
+              code: 'PAYMENT_STATE_MISMATCH',
+              error: 'Pembayaran belum berstatus ditolak.',
+            });
+          }
+        } else if (canonicalEventType === 'payment.expired') {
+          if (!['EXPIRED', 'CANCELLED'].includes(payStatus)) {
+            return res.status(409).json({
+              success: false,
+              code: 'PAYMENT_STATE_MISMATCH',
+              error: 'Pembayaran belum berstatus kedaluwarsa.',
+            });
+          }
+        } else if (canonicalEventType === 'payment.proof_uploaded') {
+          const hasProof = Boolean(
+            authoritativePayment?.proofUrl ||
+              authoritativePayment?.proofFileName ||
+              authoritativeBooking?.paymentProofUrl ||
+              ['WAITING_VERIFICATION', 'PENDING_VERIFICATION', 'PROOF_UPLOADED', 'PAID', 'VERIFIED'].includes(
+                payStatus
+              )
+          );
+          if (!hasProof) {
+            return res.status(409).json({
+              success: false,
+              code: 'PAYMENT_PROOF_MISSING',
+              error: 'Bukti pembayaran belum tercatat pada sistem.',
+            });
+          }
+        } else if (canonicalEventType === 'payment.refund_completed') {
+          let refundCompleted = ['REFUNDED', 'PARTIALLY_REFUNDED', 'COMPLETED_MANUAL'].includes(
+            payStatus
+          );
+          if (!refundCompleted && rawPayload.caseId) {
+            const cSnap = await adminDb
+              .collection('booking_cases')
+              .doc(String(rawPayload.caseId).trim())
+              .get();
+            if (
+              cSnap.exists &&
+              String((cSnap.data() as any)?.recovery?.manualRefund?.status || '')
+                .trim()
+                .toUpperCase() === 'COMPLETED_MANUAL'
+            ) {
+              refundCompleted = true;
+            }
+          }
+          if (!refundCompleted) {
+            return res.status(409).json({
+              success: false,
+              code: 'REFUND_NOT_COMPLETED',
+              error: 'Status pengembalian dana belum selesai.',
+            });
+          }
+        }
+
+        authoritativeTherapistId = String(
+          authoritativeBooking?.therapistId ||
+            authoritativeBooking?.assignedTherapistId ||
+            authoritativeTherapistId ||
+            ''
+        ).trim();
+        authoritativeTherapistName = String(
+          authoritativeBooking?.therapistName ||
+            authoritativeBooking?.assignedTherapistName ||
+            authoritativeTherapistName ||
+            ''
+        ).trim();
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          authoritativeCustomerId || String(authoritativePayment?.customerId || ''),
+          authoritativeBooking || authoritativePayment
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `payment:${authoritativePaymentId || authoritativeBookingId}:${canonicalEventType}:${payStatus}`;
+      } else if (rule.entityKind === 'roster') {
+        const targetTherapistId = String(rawPayload.therapistId || '').trim();
+        const rosterDate = String(rawPayload.date || '').trim();
+        const rosterId =
+          String(rawPayload.rosterId || '').trim() ||
+          (targetTherapistId && rosterDate ? `${targetTherapistId}_${rosterDate}` : '');
+        if (!targetTherapistId) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_ROSTER_TARGET',
+            error: 'ID terapis wajib disertakan untuk notifikasi jadwal.',
+          });
+        }
+        let rosterDocExists = false;
+        let rosterUpdatedAt = '';
+        if (rosterId) {
+          const rSnap = await adminDb.collection('therapist_rosters').doc(rosterId).get();
+          if (rSnap.exists) {
+            const rData = rSnap.data() as any;
+            if (String(rData?.therapistId || targetTherapistId).trim() === targetTherapistId) {
+              rosterDocExists = true;
+              rosterUpdatedAt = String(rData?.updatedAt || rData?.status || '').trim();
+              if (!authoritativeTherapistName && rData?.therapistName) {
+                authoritativeTherapistName = String(rData.therapistName).trim();
+              }
+            }
+          }
+        }
+        if (!rosterDocExists) {
+          const tSnap = await adminDb.collection('therapists').doc(targetTherapistId).get();
+          if (!tSnap.exists) {
+            return res.status(404).json({
+              success: false,
+              code: 'ROSTER_OR_THERAPIST_NOT_FOUND',
+              error: 'Data jadwal atau terapis tidak ditemukan.',
+            });
+          }
+          const tData = tSnap.data() as any;
+          if (!authoritativeTherapistName && tData?.name) {
+            authoritativeTherapistName = String(tData.name).trim();
+          }
+          rosterUpdatedAt = String(tData?.updatedAt || rosterDate || 'default').trim();
+        }
+        authoritativeTherapistId = targetTherapistId;
+        entityReferenceKey = `roster:${rosterId || targetTherapistId}:${rosterDate}:${String(rawPayload.changeSummary || rosterUpdatedAt).slice(0, 80)}`;
+      } else if (rule.entityKind === 'loyalty_tx') {
+        const txId = String(
+          rawPayload.transactionId || rawPayload.loyaltyTransactionId || ''
+        ).trim();
+        let txData: any = null;
+        if (txId) {
+          const txSnap = await adminDb.collection('loyalty_transactions').doc(txId).get();
+          if (txSnap.exists) {
+            txData = { id: txSnap.id, ...(txSnap.data() as any) };
+          }
+        }
+        if (!txData && authoritativeBookingId) {
+          const expectedTxType =
+            canonicalEventType === 'loyalty.points_earned' ? 'earn' : 'redeem';
+          const txQuery = await adminDb
+            .collection('loyalty_transactions')
+            .where('bookingId', '==', authoritativeBookingId)
+            .where('transactionType', '==', expectedTxType)
+            .limit(1)
+            .get();
+          if (!txQuery.empty) {
+            txData = { id: txQuery.docs[0].id, ...(txQuery.docs[0].data() as any) };
+          }
+        }
+        if (!txData) {
+          return res.status(404).json({
+            success: false,
+            code: 'LOYALTY_TRANSACTION_NOT_FOUND',
+            error: 'Transaksi poin loyalitas tidak ditemukan pada buku besar.',
+          });
+        }
+        const expectedType = canonicalEventType === 'loyalty.points_earned' ? 'earn' : 'redeem';
+        const actualType = String(txData.transactionType || txData.type || '')
+          .trim()
+          .toLowerCase();
+        if (
+          (expectedType === 'earn' && !actualType.startsWith('earn')) ||
+          (expectedType === 'redeem' && !actualType.startsWith('redeem'))
+        ) {
+          return res.status(409).json({
+            success: false,
+            code: 'LOYALTY_TRANSACTION_TYPE_MISMATCH',
+            error: 'Tipe transaksi loyalitas tidak sesuai dengan event notifikasi.',
+          });
+        }
+        const txCustomerId = String(txData.customerId || '').trim();
+        if (authoritativeCustomerId && txCustomerId && authoritativeCustomerId !== txCustomerId) {
+          return res.status(409).json({
+            success: false,
+            code: 'LOYALTY_CUSTOMER_MISMATCH',
+            error: 'Pelanggan pada transaksi poin tidak sesuai.',
+          });
+        }
+        authoritativeCustomerId = txCustomerId || authoritativeCustomerId;
+        if (!authoritativeBooking && txData.bookingId) {
+          authoritativeBookingId = String(txData.bookingId).trim();
+          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
+          if (bSnap.exists) {
+            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
+          }
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          authoritativeCustomerId,
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName =
+          custResolved.customerName || String(txData.customerName || authoritativeCustomerName);
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `loyalty_tx:${txData.id}:${canonicalEventType}`;
+      } else if (rule.entityKind === 'tier_upgrade') {
+        if (!authoritativeCustomerId) {
+          return res.status(400).json({
+            success: false,
+            code: 'MISSING_CUSTOMER_ID',
+            error: 'customerId wajib disertakan untuk notifikasi kenaikan tier.',
+          });
+        }
+        const accSnap = await adminDb
+          .collection('loyalty_accounts')
+          .doc(authoritativeCustomerId)
+          .get();
+        if (!accSnap.exists) {
+          return res.status(404).json({
+            success: false,
+            code: 'LOYALTY_ACCOUNT_NOT_FOUND',
+            error: 'Akun loyalitas pelanggan tidak ditemukan.',
+          });
+        }
+        const accData = accSnap.data() as any;
+        const requestedTierName = String(
+          rawPayload.newTierName || rawPayload.tierName || rawPayload.newTier || ''
+        )
+          .trim()
+          .toLowerCase();
+        const requestedTierId = String(rawPayload.newTierId || rawPayload.newTier || '')
+          .trim()
+          .toLowerCase();
+        const actualTierName = String(accData?.currentTierName || '').trim().toLowerCase();
+        const actualTierId = String(accData?.currentTierId || '').trim().toLowerCase();
+        if (
+          (requestedTierName &&
+            actualTierName &&
+            requestedTierName !== actualTierName &&
+            requestedTierName !== actualTierId) ||
+          (requestedTierId &&
+            actualTierId &&
+            requestedTierId !== actualTierId &&
+            requestedTierId !== actualTierName)
+        ) {
+          return res.status(409).json({
+            success: false,
+            code: 'TIER_UPGRADE_MISMATCH',
+            error: 'Tier pada akun loyalitas tidak sesuai dengan notifikasi yang diminta.',
+          });
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          authoritativeCustomerId,
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName =
+          custResolved.customerName || String(accData?.customerName || authoritativeCustomerName);
+        authoritativeCustomerPhone =
+          custResolved.customerPhone ||
+          String(accData?.customerWhatsApp || accData?.customerPhone || authoritativeCustomerPhone);
+        entityReferenceKey = `tier_upgrade:${authoritativeCustomerId}:${actualTierId || actualTierName}:${String(accData?.tierStartedAt || '')}`;
+      } else if (rule.entityKind === 'voucher') {
+        const cvId = String(rawPayload.customerVoucherId || rawPayload.voucherId || '').trim();
+        let cvData: any = null;
+        if (cvId) {
+          const cvSnap = await adminDb.collection('customer_vouchers').doc(cvId).get();
+          if (cvSnap.exists) {
+            cvData = { id: cvSnap.id, ...(cvSnap.data() as any) };
+          }
+        }
+        if (!cvData && authoritativeCustomerId) {
+          const cvQuery = await adminDb
+            .collection('customer_vouchers')
+            .where('customerId', '==', authoritativeCustomerId)
+            .limit(10)
+            .get();
+          if (!cvQuery.empty) {
+            const matched = cvQuery.docs
+              .map((d) => ({ id: d.id, ...(d.data() as any) }))
+              .find(
+                (v) =>
+                  (!rawPayload.voucherName || v.voucherName === rawPayload.voucherName) &&
+                  (!rawPayload.voucherCode || v.voucherCode === rawPayload.voucherCode)
+              );
+            cvData = matched || { id: cvQuery.docs[0].id, ...(cvQuery.docs[0].data() as any) };
+          }
+        }
+        if (!cvData) {
+          return res.status(404).json({
+            success: false,
+            code: 'CUSTOMER_VOUCHER_NOT_FOUND',
+            error: 'Data voucher pelanggan tidak ditemukan.',
+          });
+        }
+        if (
+          authoritativeCustomerId &&
+          cvData.customerId &&
+          String(cvData.customerId).trim() !== authoritativeCustomerId
+        ) {
+          return res.status(409).json({
+            success: false,
+            code: 'VOUCHER_CUSTOMER_MISMATCH',
+            error: 'Pemilik voucher tidak sesuai dengan pelanggan pada notifikasi.',
+          });
+        }
+        authoritativeCustomerId = String(cvData.customerId || authoritativeCustomerId).trim();
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          authoritativeCustomerId,
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `voucher:${cvData.id}:${authoritativeCustomerId}`;
+      } else if (rule.entityKind === 'referral') {
+        const refId = String(rawPayload.referralId || '').trim();
+        let refData: any = null;
+        if (refId) {
+          const refSnap = await adminDb.collection('referrals').doc(refId).get();
+          if (refSnap.exists) {
+            refData = { id: refSnap.id, ...(refSnap.data() as any) };
+          }
+        }
+        if (!refData && authoritativeCustomerId) {
+          const refQuery = await adminDb
+            .collection('referrals')
+            .where('referrerCustomerId', '==', authoritativeCustomerId)
+            .limit(5)
+            .get();
+          if (!refQuery.empty) {
+            refData = { id: refQuery.docs[0].id, ...(refQuery.docs[0].data() as any) };
+          }
+        }
+        if (
+          !refData ||
+          !['rewarded', 'qualified'].includes(String(refData.status || '').trim().toLowerCase())
+        ) {
+          return res.status(404).json({
+            success: false,
+            code: 'QUALIFIED_REFERRAL_NOT_FOUND',
+            error: 'Data kualifikasi referral tidak ditemukan atau belum berstatus rewarded.',
+          });
+        }
+        authoritativeCustomerId = String(
+          refData.referrerCustomerId || authoritativeCustomerId
+        ).trim();
+        if (!authoritativeBooking && refData.firstBookingId) {
+          authoritativeBookingId = String(refData.firstBookingId).trim();
+          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
+          if (bSnap.exists) {
+            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
+          }
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(authoritativeCustomerId);
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName =
+          custResolved.customerName ||
+          String(refData.referrerName || authoritativeCustomerName || '');
+        authoritativeCustomerPhone =
+          custResolved.customerPhone ||
+          String(refData.referrerPhone || authoritativeCustomerPhone || '');
+        entityReferenceKey = `referral:${refData.id}:${authoritativeCustomerId}`;
+      } else if (rule.entityKind === 'birthday') {
+        if (!authoritativeCustomerId) {
+          return res.status(400).json({
+            success: false,
+            code: 'MISSING_CUSTOMER_ID',
+            error: 'customerId wajib diisi untuk notifikasi hadiah ulang tahun.',
+          });
+        }
+        const currentYear = Number(rawPayload.year) || new Date().getFullYear();
+        const accSnap = await adminDb
+          .collection('loyalty_accounts')
+          .doc(authoritativeCustomerId)
+          .get();
+        const txId = String(
+          rawPayload.transactionId || rawPayload.loyaltyTransactionId || ''
+        ).trim();
+        let verifiedBirthdayReward = false;
+        if (
+          accSnap.exists &&
+          Number((accSnap.data() as any)?.birthdayBenefitUsedYear) === currentYear
+        ) {
+          verifiedBirthdayReward = true;
+        }
+        if (!verifiedBirthdayReward && txId) {
+          const txSnap = await adminDb.collection('loyalty_transactions').doc(txId).get();
+          if (
+            txSnap.exists &&
+            String((txSnap.data() as any)?.customerId || '').trim() === authoritativeCustomerId &&
+            String((txSnap.data() as any)?.transactionType || '').includes('birthday')
+          ) {
+            verifiedBirthdayReward = true;
+          }
+        }
+        if (!verifiedBirthdayReward) {
+          return res.status(409).json({
+            success: false,
+            code: 'BIRTHDAY_REWARD_NOT_RECORDED',
+            error: 'Klaim hadiah ulang tahun belum tercatat pada sistem.',
+          });
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(authoritativeCustomerId);
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `birthday:${authoritativeCustomerId}:${currentYear}`;
+      } else if (rule.entityKind === 'case') {
+        const caseId = String(rawPayload.caseId || rawPayload.id || '').trim();
+        let caseDocData: any = null;
+        if (caseId) {
+          const cSnap = await adminDb.collection('booking_cases').doc(caseId).get();
+          if (cSnap.exists) {
+            caseDocData = { id: cSnap.id, ...(cSnap.data() as any) };
+          } else {
+            const cSnapAlt = await adminDb.collection('cases').doc(caseId).get();
+            if (cSnapAlt.exists) {
+              caseDocData = { id: cSnapAlt.id, ...(cSnapAlt.data() as any) };
+            }
+          }
+        }
+        if (!caseDocData && !authoritativeBooking) {
+          return res.status(404).json({
+            success: false,
+            code: 'CASE_NOT_FOUND',
+            error: 'Data kasus layanan tidak ditemukan.',
+          });
+        }
+        if (!authoritativeBooking && caseDocData?.bookingId) {
+          authoritativeBookingId = String(caseDocData.bookingId).trim();
+          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
+          if (bSnap.exists) {
+            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
+          }
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          String(caseDocData?.customerId || authoritativeCustomerId || ''),
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `case:${caseDocData?.id || caseId || authoritativeBookingId}:${canonicalEventType}`;
+      } else if (rule.entityKind === 'review') {
+        const reviewId = String(rawPayload.reviewId || rawPayload.id || '').trim();
+        let reviewDocData: any = null;
+        if (reviewId) {
+          const rSnap = await adminDb.collection('reviews').doc(reviewId).get();
+          if (rSnap.exists) {
+            reviewDocData = { id: rSnap.id, ...(rSnap.data() as any) };
+          }
+        }
+        if (!reviewDocData && !authoritativeBooking) {
+          return res.status(404).json({
+            success: false,
+            code: 'REVIEW_NOT_FOUND',
+            error: 'Data ulasan pelanggan tidak ditemukan.',
+          });
+        }
+        const custResolved = await resolveCanonicalCustomerIdentity(
+          String(reviewDocData?.customerId || authoritativeCustomerId || ''),
+          authoritativeBooking
+        );
+        authoritativeCustomerId = custResolved.customerId;
+        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
+        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
+        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
+        entityReferenceKey = `review:${reviewDocData?.id || reviewId || authoritativeBookingId}:${canonicalEventType}`;
+      } else {
+        entityReferenceKey = `system:${canonicalEventType}:${String(rawPayload.date || new Date().toISOString().slice(0, 10))}`;
+      }
+
+      // 2. Verify Caller Authorization for this event & entity
+      let callerAuthorized = false;
+      if (caller.isStaff && caller.staffRole) {
+        if (rule.allowedStaffRoles.includes(caller.staffRole)) {
+          callerAuthorized = true;
+        } else if (rule.allowAssignedTherapist && caller.staffRole === 'therapist') {
+          if (authoritativeBooking && isBookingAssignedToTherapistCaller(authoritativeBooking, caller)) {
+            callerAuthorized = true;
+          }
+        }
+      }
+      if (!callerAuthorized && rule.allowCustomerOwner) {
+        if (authoritativeBooking && isBookingOwnedByCaller(authoritativeBooking, caller)) {
+          callerAuthorized = true;
+        } else if (
+          authoritativeCustomerAuthUid &&
+          authoritativeCustomerAuthUid === caller.uid
+        ) {
+          callerAuthorized = true;
+        } else if (
+          !authoritativeCustomerAuthUid &&
+          authoritativeCustomerId &&
+          caller.customerIds.has(authoritativeCustomerId)
+        ) {
+          callerAuthorized = true;
+        }
+      }
+
+      if (!callerAuthorized) {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_EVENT_EMITTER',
+          error: 'Anda tidak memiliki wewenang untuk memicu event notifikasi ini.',
+        });
+      }
+
+      // 3. Deterministic Deduplication Key & Idempotency Check
+      const clientIdempotencyKey =
+        typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey.trim() : '';
+      const rawDedupeBasis = clientIdempotencyKey
+        ? `${canonicalEventType}:${entityReferenceKey}:${clientIdempotencyKey}`
+        : `${canonicalEventType}:${entityReferenceKey}`;
+      const dedupeHash = createHash('sha256').update(rawDedupeBasis).digest('hex').slice(0, 32);
+      const deduplicationKey = `s7e_${canonicalEventType.replace(/[^a-zA-Z0-9]/g, '_')}_${dedupeHash}`;
+      const eventId = `evt_${dedupeHash}`;
+
+      const existingEventSnap = await adminDb.collection('notification_events').doc(eventId).get();
+      if (existingEventSnap.exists) {
+        return res.json({
+          success: true,
+          isIdempotent: true,
+          event: existingEventSnap.data(),
+        });
+      }
+
+      // Also check by deduplicationKey query in case of legacy doc ID
+      const existingByKeySnap = await adminDb
+        .collection('notification_events')
+        .where('deduplicationKey', '==', deduplicationKey)
+        .limit(1)
+        .get();
+      if (!existingByKeySnap.empty) {
+        return res.json({
+          success: true,
+          isIdempotent: true,
+          event: existingByKeySnap.docs[0].data(),
+        });
+      }
+
+      // 4. Load Notification Settings & Resolve Canonical Recipients
+      let settings: any = {
+        inAppEnabled: true,
+        pushEnabled: true,
+        whatsappEnabled: false,
+        emailEnabled: false,
+        quietHoursEnabled: false,
+      };
+      try {
+        const sSnapDefault = await adminDb
+          .collection('notification_settings')
+          .doc('default')
+          .get();
+        if (sSnapDefault.exists) {
+          settings = { ...settings, ...(sSnapDefault.data() as any) };
+        } else {
+          const sSnapLegacy = await adminDb
+            .collection('notification_settings')
+            .doc('default_settings')
+            .get();
+          if (sSnapLegacy.exists) {
+            settings = { ...settings, ...(sSnapLegacy.data() as any) };
+          }
+        }
+      } catch {}
+
+      const eventRuleOverride = settings?.eventRules?.[canonicalEventType];
+      if (eventRuleOverride && eventRuleOverride.enabled === false) {
+        return res.json({
+          success: true,
+          skipped: true,
+          event: {
+            id: eventId,
+            type: canonicalEventType,
+            createdAt: new Date().toISOString(),
+            deduplicationKey,
+          },
+        });
+      }
+
+      const targetRoles: Stage7ERecipientRole[] = Array.isArray(eventRuleOverride?.roles) &&
+        eventRuleOverride.roles.length > 0
+        ? eventRuleOverride.roles
+        : rule.defaultRoles;
+      const priority: Stage7EPriority = eventRuleOverride?.priority || rule.defaultPriority;
+
+      // Resolve therapist auth UID if therapist is among recipients
+      let resolvedTherapistAuthUid = '';
+      if (authoritativeTherapistId) {
+        try {
+          const tSnap = await adminDb
+            .collection('therapists')
+            .doc(authoritativeTherapistId)
+            .get();
+          if (tSnap.exists) {
+            const tData = tSnap.data() as any;
+            resolvedTherapistAuthUid = String(
+              tData?.authUserId || tData?.authUid || ''
+            ).trim();
+            if (!authoritativeTherapistName && tData?.name) {
+              authoritativeTherapistName = String(tData.name).trim();
+            }
+          }
+        } catch {}
+      }
+
+      const canonicalPayload: Record<string, any> = {
+        ...rawPayload,
+        bookingId: authoritativeBookingId || rawPayload.bookingId,
+        bookingCode:
+          authoritativeBooking?.bookingCode || rawPayload.bookingCode || undefined,
+        serviceName:
+          authoritativeBooking?.serviceName || rawPayload.serviceName || undefined,
+        date: authoritativeBooking?.date || rawPayload.date || undefined,
+        time: authoritativeBooking?.time || rawPayload.time || undefined,
+        customerId: authoritativeCustomerId || undefined,
+        customerAuthUid: authoritativeCustomerAuthUid || undefined,
+        customerName: authoritativeCustomerName || undefined,
+        customerWhatsApp: authoritativeCustomerPhone || undefined,
+        therapistId: authoritativeTherapistId || undefined,
+        therapistName: authoritativeTherapistName || undefined,
+      };
+
+      const now = new Date().toISOString();
+      const eventRecord = {
+        id: eventId,
+        type: canonicalEventType,
+        bookingId: canonicalPayload.bookingId,
+        bookingCode: canonicalPayload.bookingCode,
+        customerId: authoritativeCustomerId || undefined,
+        customerName: authoritativeCustomerName || undefined,
+        therapistId: authoritativeTherapistId || undefined,
+        therapistName: authoritativeTherapistName || undefined,
+        actorId: caller.staffMasterId || caller.uid,
+        actorName:
+          caller.staffName ||
+          (typeof req.body?.actor?.name === 'string' ? req.body.actor.name : undefined),
+        actorRole: caller.isStaff ? caller.staffRole : 'customer',
+        priority,
+        targetRoles,
+        payload: canonicalPayload,
+        createdAt: now,
+        deduplicationKey,
+      };
+
+      await adminDb
+        .collection('notification_events')
+        .doc(eventId)
+        .set(JSON.parse(JSON.stringify(eventRecord)));
+
+      // 5. Fan out to Canonical Recipients and Record Truthful Deliveries
+      const uniqueRoles = Array.from(new Set(targetRoles));
+      for (const recipientRole of uniqueRoles) {
+        let recipientId = '';
+        let recipientUserId = '';
+        let recipientName = '';
+        let recipientContact = '';
+
+        if (recipientRole === 'customer') {
+          recipientId = authoritativeCustomerId || authoritativeCustomerAuthUid;
+          recipientUserId = authoritativeCustomerAuthUid || authoritativeCustomerId;
+          recipientName = authoritativeCustomerName || 'Pelanggan';
+          recipientContact = authoritativeCustomerPhone || '';
+          if (!recipientId) continue;
+        } else if (recipientRole === 'therapist') {
+          recipientId = authoritativeTherapistId;
+          recipientUserId = resolvedTherapistAuthUid || authoritativeTherapistId;
+          recipientName = authoritativeTherapistName || 'Terapis';
+          if (!recipientId) continue;
+        } else {
+          recipientId = recipientRole;
+          recipientUserId = recipientRole;
+          recipientName =
+            recipientRole === 'supervisor'
+              ? 'Supervisor Operasional'
+              : recipientRole === 'manager'
+                ? 'Manager / Owner'
+                : recipientRole === 'css'
+                  ? 'Customer Service Support'
+                  : 'Administrator';
+        }
+
+        const code = String(canonicalPayload.bookingCode || canonicalPayload.bookingId || 'BOOKING');
+        const cName = String(canonicalPayload.customerName || 'Pelanggan');
+        const tName = String(canonicalPayload.therapistName || 'Terapis Senzu');
+        const sName = String(canonicalPayload.serviceName || 'Refleksi & Massage');
+        const sched = String(
+          canonicalPayload.scheduleAt ||
+            canonicalPayload.scheduleDate ||
+            (canonicalPayload.date
+              ? `${canonicalPayload.date} ${canonicalPayload.time || ''}`.trim()
+              : 'Jadwal Pesanan')
+        );
+
+        const buildStage7ETemplateMessage = (
+          evtType: string,
+          role: string,
+          p: Record<string, any>
+        ): { title: string; message: string; actionUrl: string; actionLabel?: string } => {
+          switch (evtType) {
+            case 'booking.created':
+              if (role === 'customer') {
+                return {
+                  title: 'Reservasi Senzu Home Diterima',
+                  message: `Pesanan #${code} (${sName}) berhasil dibuat. Silakan lakukan pembayaran agar dapat diproses.`,
+                  actionUrl: `/track/${code}`,
+                };
+              }
+              return {
+                title: 'Booking Baru Diterima',
+                message: `Order #${code} dari ${cName} (${sName}) menunggu verifikasi pembayaran.`,
+                actionUrl: role === 'css' ? `/css?booking=${code}` : `/reconciliation?booking=${code}`,
+              };
+            case 'booking.confirmed':
+              return {
+                title: 'Reservasi Dikonfirmasi',
+                message: `Pesanan #${code} (${sName}) pada ${sched} telah dikonfirmasi.`,
+                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
+              };
+            case 'booking.assigned':
+            case 'therapist.assigned':
+              if (role === 'therapist') {
+                return {
+                  title: 'Tugas Treatment Baru Ditugaskan',
+                  message: `Anda mendapat tugas baru #${code} (${cName}, ${sName}) jadwal ${sched}. Segera konfirmasi.`,
+                  actionUrl: `/therapist?booking=${code}`,
+                };
+              }
+              if (role === 'customer') {
+                return {
+                  title: 'Terapis Senzu Telah Ditugaskan',
+                  message: `Terapis ${tName} telah ditugaskan untuk reservasi #${code}.`,
+                  actionUrl: `/track/${code}`,
+                };
+              }
+              return {
+                title: 'Terapis Ditugaskan',
+                message: `Order #${code} telah ditugaskan ke ${tName}.`,
+                actionUrl: `/supervisor?booking=${code}`,
+              };
+            case 'booking.reassigned':
+            case 'therapist.reassigned':
+              if (role === 'therapist') {
+                return {
+                  title: 'Tugas Treatment Dialihkan',
+                  message: `Anda ditugaskan menggantikan order #${code} (${cName}, ${sName}).`,
+                  actionUrl: `/therapist?booking=${code}`,
+                };
+              }
+              return {
+                title: 'Pembaruan Terapis Pesanan',
+                message: `Terapis untuk pesanan #${code} diperbarui menjadi ${tName}.`,
+                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
+              };
+            case 'booking.cancelled':
+              return {
+                title: 'Pesanan Dibatalkan',
+                message: `Pesanan #${code} (${sName}) telah dibatalkan.${p.cancelReason ? ` Alasan: ${p.cancelReason}` : ''}`,
+                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
+              };
+            case 'payment.proof_uploaded':
+              if (role === 'customer') {
+                return {
+                  title: 'Bukti Pembayaran Diterima',
+                  message: `Bukti transfer Anda untuk pesanan #${code} sedang diverifikasi oleh staf CSS kami.`,
+                  actionUrl: `/track/${code}`,
+                };
+              }
+              return {
+                title: 'Bukti Pembayaran Diunggah',
+                message: `Customer ${cName} mengunggah bukti bayar untuk pesanan #${code}. Siap diverifikasi.`,
+                actionUrl: `/reconciliation?booking=${code}`,
+              };
+            case 'payment.verified':
+              if (role === 'customer') {
+                return {
+                  title: 'Pembayaran Terverifikasi Lunas',
+                  message: `Pembayaran pesanan #${code} telah terverifikasi. Tim Senzu segera menugaskan terapis profesional.`,
+                  actionUrl: `/track/${code}`,
+                };
+              }
+              return {
+                title: 'Pembayaran Lunas — Siap Ditugaskan',
+                message: `Order #${code} (${cName}, ${sName}) lunas. Silakan tugaskan terapis.`,
+                actionUrl: role === 'supervisor' ? `/supervisor?booking=${code}` : `/reconciliation?booking=${code}`,
+              };
+            case 'payment.rejected':
+              return {
+                title: 'Bukti Pembayaran Ditolak',
+                message: `Bukti pembayaran untuk #${code} belum sesuai: ${p.rejectionReason || 'Nominal tidak cocok'}.`,
+                actionUrl: role === 'customer' ? `/track/${code}` : `/reconciliation?booking=${code}`,
+              };
+            case 'payment.expired':
+              return {
+                title: 'Waktu Pembayaran Berakhir',
+                message: `Batas waktu pembayaran pesanan #${code} telah berakhir.`,
+                actionUrl: `/track/${code}`,
+              };
+            case 'therapist.shift_updated':
+              return {
+                title: String(p.title || 'Pembaruan Jadwal Kerja'),
+                message: String(
+                  p.message ||
+                    `Halo ${tName}, jadwal kerja Anda untuk tanggal ${p.date || '-'} telah diperbarui oleh Supervisor (${p.actorName || 'Supervisor'}): ${p.changeSummary || 'Pembaruan shift'}.`
+                ),
+                actionUrl: `/therapist`,
+              };
+            case 'loyalty.points_earned':
+              return {
+                title: 'Senzu Points Bertambah!',
+                message: `Selamat! Anda memperoleh +${p.pointsEarned || 0} Senzu Points dari layanan ${sName}.`,
+                actionUrl: `/portal?tab=wallet`,
+              };
+            case 'loyalty.points_redeemed':
+              return {
+                title: 'Senzu Points Ditukarkan',
+                message: `${p.pointsRedeemed || 0} Senzu Points berhasil ditukarkan untuk potongan Rp ${Number(p.discountAmount || 0).toLocaleString('id-ID')}.`,
+                actionUrl: `/portal?tab=wallet`,
+              };
+            case 'membership.tier_upgraded':
+              return {
+                title: `Selamat! Naik ke Tier ${p.newTierName || p.tierName || 'Baru'}`,
+                message: `Status keanggotaan Senzu Home Anda telah naik ke tier ${p.newTierName || p.tierName || 'Baru'}.`,
+                actionUrl: role === 'customer' ? `/portal?tab=wallet` : `/loyalty`,
+              };
+            case 'voucher.issued':
+              return {
+                title: 'Voucher Spesial Untuk Anda!',
+                message: `Voucher "${p.voucherName || p.voucherTitle || 'Senzu Voucher'}" telah ditambahkan ke dompet reward Anda.`,
+                actionUrl: `/portal?tab=wallet`,
+              };
+            case 'referral.qualified':
+              return {
+                title: 'Bonus Referral Berhasil Diklaim!',
+                message: `Teman Anda (${p.referredCustomerName || 'Pelanggan'}) telah menyelesaikan treatment perdananya! Anda mendapatkan bonus ${p.pointsReward || p.pointsAwarded || 0} Senzu Points.`,
+                actionUrl: `/portal?tab=wallet`,
+              };
+            case 'birthday.reward_issued':
+              return {
+                title: 'Selamat Ulang Tahun dari Senzu Home!',
+                message: `Selamat ulang tahun! Kami memberikan hadiah spesial ${p.pointsReward || p.bonusPoints || 0} Senzu Points ke akun Anda.`,
+                actionUrl: `/portal?tab=wallet`,
+              };
+            default:
+              return {
+                title: String(p.title || `Notifikasi Senzu Home`),
+                message: String(p.message || `Pembaruan status untuk pesanan #${code}.`),
+                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor`,
+              };
+          }
+        };
+
+        const template = buildStage7ETemplateMessage(
+          canonicalEventType,
+          recipientRole,
+          canonicalPayload
+        );
+        const safeRecipientKey = recipientId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+
+        // In-App Notification & Delivery
+        if (settings.inAppEnabled !== false) {
+          const notifId = `notif_${eventId}_${recipientRole}_${safeRecipientKey}`;
+          const inAppDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_inapp`;
+          const notifDoc: Record<string, any> = {
+            id: notifId,
+            eventId,
+            eventType: canonicalEventType,
+            recipientRole,
+            recipientId,
+            recipientUserId: recipientUserId || recipientId,
+            bookingId: canonicalPayload.bookingId,
+            bookingCode: canonicalPayload.bookingCode,
+            customerId: authoritativeCustomerId || undefined,
+            customerAuthUid:
+              recipientRole === 'customer'
+                ? authoritativeCustomerAuthUid || undefined
+                : undefined,
+            therapistId: authoritativeTherapistId || undefined,
+            title: template.title,
+            message: template.message,
+            channel: 'in_app',
+            priority,
+            read: false,
+            readAt: null,
+            actionUrl: template.actionUrl,
+            actionLabel: template.actionLabel,
+            metadata: canonicalPayload,
+            createdAt: now,
+          };
+
+          await adminDb
+            .collection('notifications')
+            .doc(notifId)
+            .set(JSON.parse(JSON.stringify(notifDoc)));
+
+          await adminDb
+            .collection('notification_deliveries')
+            .doc(inAppDeliveryId)
+            .set(
+              JSON.parse(
+                JSON.stringify({
+                  id: inAppDeliveryId,
+                  eventId,
+                  eventType: canonicalEventType,
+                  bookingId: canonicalPayload.bookingId,
+                  bookingCode: canonicalPayload.bookingCode,
+                  recipientRole,
+                  recipientId,
+                  recipientName,
+                  channel: 'in_app',
+                  status: 'delivered',
+                  attemptCount: 1,
+                  providerResponse: 'Written to Firestore notifications collection',
+                  sentAt: now,
+                  deliveredAt: now,
+                  createdAt: now,
+                })
+              )
+            );
+        }
+
+        // Push Delivery (Truthful status: sent only on real FCM delivery, skipped/failed otherwise)
+        if (settings.pushEnabled !== false) {
+          const pushDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_push`;
+          let pushStatus: 'sent' | 'failed' | 'skipped' = 'skipped';
+          let pushProviderResponse = 'No active push devices registered for recipient';
+          let pushErrorMsg: string | undefined;
+
+          try {
+            const devSnap = await adminDb
+              .collection('notification_devices')
+              .where('role', '==', recipientRole)
+              .get();
+            const candidateIds = new Set<string>(
+              [recipientId, recipientUserId].filter(Boolean)
+            );
+            const tokens: string[] = [];
+            devSnap.docs.forEach((docSnap) => {
+              const d = docSnap.data() as any;
+              if (d?.enabled === false) return;
+              if (
+                recipientRole === 'therapist' ||
+                recipientRole === 'customer'
+              ) {
+                const dUid = String(d?.userId || '').trim();
+                const dAuth = String(d?.authUid || '').trim();
+                if (!candidateIds.has(dUid) && !candidateIds.has(dAuth)) return;
+              }
+              if (typeof d?.token === 'string' && d.token.trim()) {
+                tokens.push(d.token.trim());
+              }
+            });
+
+            if (tokens.length === 0) {
+              pushStatus = 'skipped';
+              pushProviderResponse = 'No registered device tokens found for recipient';
+            } else if (!adminMessaging) {
+              pushStatus = 'skipped';
+              pushProviderResponse = 'FCM adminMessaging not configured on server';
+            } else {
+              try {
+                const resPush = await adminMessaging.sendEachForMulticast({
+                  tokens,
+                  notification: {
+                    title: template.title,
+                    body: template.message,
+                  },
+                  data: {
+                    eventId,
+                    eventType: canonicalEventType,
+                    bookingId: String(canonicalPayload.bookingId || ''),
+                    actionUrl: String(template.actionUrl || '/'),
+                  },
+                });
+                if (resPush && resPush.successCount > 0) {
+                  pushStatus = 'sent';
+                  pushProviderResponse = `FCM multicast sent (${resPush.successCount}/${tokens.length})`;
+                } else {
+                  pushStatus = 'failed';
+                  pushErrorMsg = 'FCM multicast returned 0 successful deliveries';
+                  pushProviderResponse = pushErrorMsg;
+                }
+              } catch (fcmErr: any) {
+                pushStatus = 'failed';
+                pushErrorMsg = fcmErr?.message || String(fcmErr);
+                pushProviderResponse = `FCM error: ${pushErrorMsg}`;
+              }
+            }
+          } catch (devErr: any) {
+            pushStatus = 'failed';
+            pushErrorMsg = devErr?.message || String(devErr);
+            pushProviderResponse = `Device query error: ${pushErrorMsg}`;
+          }
+
+          await adminDb
+            .collection('notification_deliveries')
+            .doc(pushDeliveryId)
+            .set(
+              JSON.parse(
+                JSON.stringify({
+                  id: pushDeliveryId,
+                  eventId,
+                  eventType: canonicalEventType,
+                  bookingId: canonicalPayload.bookingId,
+                  bookingCode: canonicalPayload.bookingCode,
+                  recipientRole,
+                  recipientId,
+                  recipientName,
+                  channel: 'push',
+                  status: pushStatus,
+                  attemptCount: pushStatus === 'skipped' ? 0 : 1,
+                  providerResponse: pushProviderResponse,
+                  errorMessage: pushErrorMsg,
+                  sentAt: pushStatus === 'sent' ? now : undefined,
+                  failedAt: pushStatus === 'failed' ? now : undefined,
+                  createdAt: now,
+                })
+              )
+            );
+        }
+
+        // External WhatsApp / Email: never mark 'sent' unless real gateway confirms
+        if (settings.whatsappEnabled && recipientContact) {
+          const waDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_wa`;
+          const hasWebhook =
+            typeof settings.whatsappWebhookUrl === 'string' &&
+            settings.whatsappWebhookUrl.trim().startsWith('https://');
+          await adminDb
+            .collection('notification_deliveries')
+            .doc(waDeliveryId)
+            .set(
+              JSON.parse(
+                JSON.stringify({
+                  id: waDeliveryId,
+                  eventId,
+                  eventType: canonicalEventType,
+                  bookingId: canonicalPayload.bookingId,
+                  bookingCode: canonicalPayload.bookingCode,
+                  recipientRole,
+                  recipientId,
+                  recipientName,
+                  recipientContact,
+                  channel: 'whatsapp',
+                  status: 'skipped',
+                  attemptCount: 0,
+                  providerResponse: hasWebhook
+                    ? 'External WhatsApp gateway dispatch disabled in server-only mode'
+                    : 'WhatsApp webhook not configured; skipped',
+                  createdAt: now,
+                })
+              )
+            );
+        }
+      }
+
+      return res.json({
+        success: true,
+        isIdempotent: false,
+        event: eventRecord,
+      });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'NOTIFICATION_EMIT_ERROR',
+        error: err?.message || 'Gagal memproses event notifikasi.',
+      });
+    }
+  });
+
+  app.post('/api/notifications/mark-read', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+      const caller = await resolveStage7ECaller(req);
+      const notificationId =
+        typeof req.body?.notificationId === 'string' ? req.body.notificationId.trim() : '';
+      if (!notificationId) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_NOTIFICATION_ID',
+          error: 'ID notifikasi wajib diisi.',
+        });
+      }
+
+      const notifRef = adminDb.collection('notifications').doc(notificationId);
+      const snap = await notifRef.get();
+      if (!snap.exists) {
+        return res.status(404).json({
+          success: false,
+          code: 'NOTIFICATION_NOT_FOUND',
+          error: 'Notifikasi tidak ditemukan.',
+        });
+      }
+
+      const authorized = await isStage7ECallerAuthorizedForNotification(snap.data() as any, caller);
+      if (!authorized) {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+          error: 'Anda tidak memiliki akses ke notifikasi ini.',
+        });
+      }
+
+      const now = new Date().toISOString();
+      await notifRef.update({
+        read: true,
+        readAt: now,
+      });
+
+      return res.json({ success: true, notificationId, readAt: now });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'NOTIFICATION_MARK_READ_ERROR',
+        error: err?.message || 'Gagal menandai notifikasi telah dibaca.',
+      });
+    }
+  });
+
+  app.post('/api/notifications/mark-all-read', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+      const caller = await resolveStage7ECaller(req);
+      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
+      const requestedUserId =
+        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+
+      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_RECIPIENT_ROLE',
+          error: 'Role notifikasi tidak valid.',
+        });
+      }
+
+      if (role === 'therapist') {
+        if (!caller.isStaff || caller.staffRole !== 'therapist') {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Hanya terapis pemilik yang dapat menandai notifikasi terapis.',
+          });
+        }
+        if (requestedUserId && !caller.therapistIds.has(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Tidak dapat memodifikasi notifikasi terapis lain.',
+          });
+        }
+      } else if (['supervisor', 'manager', 'admin', 'css'].includes(role)) {
+        if (!caller.isStaff) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Akses staf diperlukan.',
+          });
+        }
+      } else if (role === 'customer' && requestedUserId) {
+        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Tidak dapat memodifikasi notifikasi pelanggan lain.',
+          });
+        }
+      }
+
+      const snap = await adminDb
+        .collection('notifications')
+        .where('recipientRole', '==', role)
+        .where('read', '==', false)
+        .get();
+
+      const now = new Date().toISOString();
+      const batch = adminDb.batch();
+      let updatedCount = 0;
+
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data() as any;
+        const ok = await isStage7ECallerAuthorizedForNotification(data, caller);
+        if (!ok) continue;
+        batch.update(docSnap.ref, { read: true, readAt: now });
+        updatedCount++;
+      }
+
+      if (updatedCount > 0) {
+        await batch.commit();
+      }
+
+      return res.json({ success: true, updatedCount });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'NOTIFICATION_MARK_ALL_READ_ERROR',
+        error: err?.message || 'Gagal menandai semua notifikasi.',
+      });
+    }
+  });
+
+  app.post('/api/notifications/delete', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+      const caller = await resolveStage7ECaller(req);
+      const notificationId =
+        typeof req.body?.notificationId === 'string' ? req.body.notificationId.trim() : '';
+      if (!notificationId) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_NOTIFICATION_ID',
+          error: 'ID notifikasi wajib diisi.',
+        });
+      }
+
+      const notifRef = adminDb.collection('notifications').doc(notificationId);
+      const snap = await notifRef.get();
+      if (!snap.exists) {
+        return res.status(404).json({
+          success: false,
+          code: 'NOTIFICATION_NOT_FOUND',
+          error: 'Notifikasi tidak ditemukan.',
+        });
+      }
+
+      const authorized = await isStage7ECallerAuthorizedForNotification(snap.data() as any, caller);
+      if (!authorized) {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+          error: 'Anda tidak memiliki akses untuk menghapus notifikasi ini.',
+        });
+      }
+
+      await notifRef.delete();
+      return res.json({ success: true, notificationId });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'NOTIFICATION_DELETE_ERROR',
+        error: err?.message || 'Gagal menghapus notifikasi.',
+      });
+    }
+  });
+
+  app.post('/api/notifications/clear-read', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+      const caller = await resolveStage7ECaller(req);
+      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
+      const requestedUserId =
+        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+
+      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_RECIPIENT_ROLE',
+          error: 'Role notifikasi tidak valid.',
+        });
+      }
+
+      if (role === 'therapist') {
+        if (!caller.isStaff || caller.staffRole !== 'therapist') {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Hanya terapis pemilik yang dapat menghapus notifikasi terapis.',
+          });
+        }
+        if (requestedUserId && !caller.therapistIds.has(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Tidak dapat menghapus notifikasi terapis lain.',
+          });
+        }
+      } else if (['supervisor', 'manager', 'admin', 'css'].includes(role)) {
+        if (!caller.isStaff) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Akses staf diperlukan.',
+          });
+        }
+      } else if (role === 'customer' && requestedUserId) {
+        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
+            error: 'Tidak dapat menghapus notifikasi pelanggan lain.',
+          });
+        }
+      }
+
+      const snap = await adminDb
+        .collection('notifications')
+        .where('recipientRole', '==', role)
+        .where('read', '==', true)
+        .get();
+
+      const batch = adminDb.batch();
+      let deletedCount = 0;
+
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data() as any;
+        const ok = await isStage7ECallerAuthorizedForNotification(data, caller);
+        if (!ok) continue;
+        batch.delete(docSnap.ref);
+        deletedCount++;
+      }
+
+      if (deletedCount > 0) {
+        await batch.commit();
+      }
+
+      return res.json({ success: true, deletedCount });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'NOTIFICATION_CLEAR_READ_ERROR',
+        error: err?.message || 'Gagal membersihkan notifikasi.',
+      });
+    }
+  });
+
+  app.post('/api/notifications/devices/register', async (req, res) => {
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) {
+        return res.status(500).json({
+          success: false,
+          code: 'SERVER_UNAVAILABLE',
+          error: 'Database server tidak tersedia.',
+        });
+      }
+      const caller = await resolveStage7ECaller(req);
+      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
+      const requestedUserId =
+        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      const platform =
+        req.body?.platform === 'android' ||
+        req.body?.platform === 'ios' ||
+        req.body?.platform === 'web'
+          ? req.body.platform
+          : 'pwa';
+
+      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_DEVICE_ROLE',
+          error: 'Role perangkat tidak valid.',
+        });
+      }
+      if (!rawToken || rawToken.length < 10 || rawToken.length > 4096) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_DEVICE_TOKEN',
+          error: 'Token perangkat tidak valid.',
+        });
+      }
+      if (!requestedUserId || requestedUserId.toLowerCase() === 'guest') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_DEVICE_OWNER',
+          error: 'Identitas pemilik perangkat tidak valid.',
+        });
+      }
+
+      if (role === 'admin' || role === 'manager') {
+        if (!caller.isStaff || (caller.staffRole !== 'admin' && caller.staffRole !== 'manager')) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_ROLE',
+            error: 'Hanya Manager/Admin aktif yang dapat mendaftarkan perangkat role ini.',
+          });
+        }
+        if (
+          !['admin', 'manager', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)
+        ) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_OWNER',
+            error: 'Identitas pemilik perangkat tidak sesuai.',
+          });
+        }
+      } else if (role === 'supervisor') {
+        if (
+          !caller.isStaff ||
+          !['supervisor', 'manager', 'admin'].includes(caller.staffRole || '')
+        ) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_ROLE',
+            error: 'Hanya Supervisor aktif yang dapat mendaftarkan perangkat role ini.',
+          });
+        }
+        if (!['supervisor', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_OWNER',
+            error: 'Identitas pemilik perangkat tidak sesuai.',
+          });
+        }
+      } else if (role === 'css') {
+        if (!caller.isStaff || !['css', 'manager', 'admin'].includes(caller.staffRole || '')) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_ROLE',
+            error: 'Hanya CSS aktif yang dapat mendaftarkan perangkat role ini.',
+          });
+        }
+        if (!['css', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_OWNER',
+            error: 'Identitas pemilik perangkat tidak sesuai.',
+          });
+        }
+      } else if (role === 'therapist') {
+        if (
+          !caller.isStaff ||
+          caller.staffRole !== 'therapist' ||
+          !caller.therapistIds.has(requestedUserId)
+        ) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_OWNER',
+            error: 'Terapis hanya dapat mendaftarkan perangkat miliknya sendiri.',
+          });
+        }
+      } else if (role === 'customer') {
+        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
+          return res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_DEVICE_OWNER',
+            error: 'Pelanggan hanya dapat mendaftarkan perangkat miliknya sendiri.',
+          });
+        }
+      }
+
+      const safeTokenKey = rawToken.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+      const deviceId = `dev_${role}_${requestedUserId}_${safeTokenKey}`;
+      const devRef = adminDb.collection('notification_devices').doc(deviceId);
+      const existingSnap = await devRef.get();
+      if (existingSnap.exists) {
+        const existingAuthUid = String(existingSnap.data()?.authUid || '').trim();
+        if (existingAuthUid && existingAuthUid !== caller.uid) {
+          return res.status(403).json({
+            success: false,
+            code: 'DEVICE_OWNERSHIP_CONFLICT',
+            error: 'Perangkat telah terdaftar pada akun lain.',
+          });
+        }
+      }
+
+      const now = new Date().toISOString();
+      const deviceRecord = {
+        id: deviceId,
+        userId: requestedUserId,
+        authUid: caller.uid,
+        role,
+        token: rawToken,
+        platform,
+        enabled: true,
+        userAgent:
+          typeof req.body?.userAgent === 'string' ? req.body.userAgent.slice(0, 512) : undefined,
+        createdAt: existingSnap.exists
+          ? String(existingSnap.data()?.createdAt || now)
+          : now,
+        lastActiveAt: now,
+      };
+
+      await devRef.set(JSON.parse(JSON.stringify(deviceRecord)), { merge: true });
+      return res.json({ success: true, device: deviceRecord });
+    } catch (err: any) {
+      const status =
+        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+      return res.status(status).json({
+        success: false,
+        code: err?.code || 'DEVICE_REGISTER_ERROR',
+        error: err?.message || 'Gagal mendaftarkan perangkat notifikasi.',
       });
     }
   });

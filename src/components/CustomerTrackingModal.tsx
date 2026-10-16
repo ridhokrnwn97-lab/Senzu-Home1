@@ -33,6 +33,7 @@ import { Booking, BookingStatus, BookingStatusHistory, AppSettings } from '../ty
 import {
   trackBookingByCodeAndPhone,
   getBookingByCode,
+  getBookingStatusHistory,
   subscribeToBookingById,
   subscribeToBookingStatusHistory
 } from '../lib/dbService';
@@ -45,6 +46,7 @@ import { CustomerLiveMap } from './CustomerLiveMap';
 import { getPaymentStatusBadgeStyle } from '../lib/paymentService';
 import { useCustomerServiceWhatsApp } from '../lib/supportWhatsApp';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
+import { auth } from '../lib/firebase';
 import { BookingChatModal } from './chat/BookingChatModal';
 import { ChatButtonWithBadge } from './chat/ChatButtonWithBadge';
 
@@ -171,10 +173,146 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
   allBookings = [],
 }) => {
   const { firebaseUser, currentCustomer, isCustomerAuthenticated, isCustomerPreviewMode } = useCustomerAuth();
+
+  const activeAuthUid = useMemo(() => {
+    if (isCustomerPreviewMode || !isCustomerAuthenticated || !firebaseUser) return '';
+    const uid = typeof firebaseUser.uid === 'string' ? firebaseUser.uid.trim() : '';
+    if (!uid || firebaseUser.uid !== uid || uid.includes('/') || /[\x00-\x1F\x7F\s]/.test(uid)) {
+      return '';
+    }
+    const liveAuthUser = auth?.currentUser;
+    if (liveAuthUser !== null && liveAuthUser !== undefined) {
+      const liveUid = typeof liveAuthUser.uid === 'string' ? liveAuthUser.uid.trim() : '';
+      if (!liveUid || liveUid !== uid) {
+        return '';
+      }
+    }
+    if (
+      currentCustomer?.authUserId &&
+      currentCustomer.authUserId.trim() !== '' &&
+      currentCustomer.authUserId.trim() !== uid
+    ) {
+      return '';
+    }
+    const acctStatus =
+      typeof (currentCustomer as any)?.accountStatus === 'string'
+        ? String((currentCustomer as any).accountStatus).trim().toUpperCase()
+        : '';
+    const profStatus =
+      typeof (currentCustomer as any)?.status === 'string'
+        ? String((currentCustomer as any).status).trim().toUpperCase()
+        : '';
+    if (
+      acctStatus === 'DISABLED' ||
+      acctStatus === 'INACTIVE' ||
+      acctStatus === 'NOT_REGISTERED' ||
+      [
+        'DISABLED',
+        'INACTIVE',
+        'ARCHIVED',
+        'BLOCKED',
+        'DELETED',
+        'DELETION_REQUESTED',
+      ].includes(profStatus)
+    ) {
+      return '';
+    }
+    return uid;
+  }, [
+    isCustomerPreviewMode,
+    isCustomerAuthenticated,
+    firebaseUser,
+    currentCustomer,
+  ]);
+
+  const normalizeModalTrackingPhone = (raw: unknown): string => {
+    if (typeof raw !== 'string') return '';
+    const trimmed = raw.trim();
+    if (trimmed.length < 8 || trimmed.length > 30) return '';
+    if (!/^\+?[0-9][0-9\s\-]{6,28}[0-9]$/.test(trimmed)) return '';
+    if (/--/.test(trimmed)) return '';
+    const hasLeadingPlus = trimmed.startsWith('+');
+    const digits = trimmed.replace(/^\+/, '').replace(/[\s\-]/g, '');
+    if (!/^[0-9]{8,20}$/.test(digits)) return '';
+    if (hasLeadingPlus) {
+      if (digits.startsWith('0')) return '';
+      return digits;
+    }
+    if (digits.startsWith('00')) return '';
+    if (digits.startsWith('0')) {
+      return `62${digits.slice(1)}`;
+    }
+    if (digits.startsWith('8')) {
+      return `62${digits}`;
+    }
+    return digits;
+  };
+
+  const doesBookingBelongToUid = (booking: Booking | null | undefined, uid: string): boolean => {
+    if (!booking || !uid) return false;
+    const rawBooking = booking as unknown as Record<string, unknown>;
+    for (const rawField of [
+      rawBooking.customerAuthUid,
+      rawBooking.authUserId,
+      rawBooking.customerUid,
+      rawBooking.userId,
+      rawBooking.uid,
+    ]) {
+      if (rawField !== undefined && rawField !== null && rawField !== '') {
+        if (typeof rawField !== 'string' || rawField.trim() !== rawField || rawField !== uid) {
+          return false;
+        }
+      }
+    }
+    const custAuthUid =
+      typeof booking.customerAuthUid === 'string' ? booking.customerAuthUid.trim() : '';
+    const authUserId =
+      typeof booking.authUserId === 'string' ? booking.authUserId.trim() : '';
+    if (custAuthUid !== uid && authUserId !== uid) return false;
+
+    const rawCustId = rawBooking.customerId;
+    if (rawCustId !== undefined && rawCustId !== null && rawCustId !== '') {
+      if (typeof rawCustId !== 'string' || rawCustId.trim() !== rawCustId) return false;
+      if (
+        rawCustId.startsWith('cust_u_') &&
+        rawCustId !== `cust_u_${uid}` &&
+        rawCustId !== `cust_u_${uid.slice(0, 10)}`
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const sanitizeOwnerRealtimeBooking = (
+    rawBooking: Booking,
+    expectedId: string,
+    expectedCode: string
+  ): Booking => {
+    const clone: Record<string, any> = { ...(rawBooking as unknown as Record<string, any>) };
+    delete clone.internalNotes;
+    delete clone.escalation;
+    delete clone.cssOwnerId;
+    delete clone.cssOwnerName;
+    delete clone.unreachableCount;
+    delete clone.lastContactAttemptAt;
+    delete clone.nextFollowUpAt;
+    delete clone.guestAccessTokenHash;
+    delete clone.issueReport;
+    delete clone.requiresAdminConfirmation;
+    delete clone.isReassigned;
+    delete clone.reassignedFromTherapistId;
+    delete clone.referredByCustomerId;
+    delete clone.referralCodeUsed;
+    clone.id = expectedId;
+    clone.bookingCode = expectedCode;
+    return clone as Booking;
+  };
+
   const [bookingCode, setBookingCode] = useState(initialCode);
   const [phone, setPhone] = useState(() => {
-    if (isCustomerPreviewMode) return '';
-    return (isCustomerAuthenticated ? currentCustomer?.phone : '') || localStorage.getItem('senzu_customer_phone') || '';
+    if (isCustomerPreviewMode || !isCustomerAuthenticated) return '';
+    return currentCustomer?.phone || '';
   });
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -186,6 +324,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
   const [trackingData, setTrackingData] = useState<{
     booking: Booking;
     history: BookingStatusHistory[];
+    accessLevel?: 'staff' | 'therapist' | 'owner' | 'guest';
   } | null>(null);
 
   const [existingReview, setExistingReview] = useState<CustomerReview | null>(null);
@@ -202,12 +341,41 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
     unavailableNotice: csUnavailableNotice,
   } = useCustomerServiceWhatsApp();
 
-  // Realtime Subscriptions Refs
+  // Realtime Subscriptions, Generation & Session Continuity Refs
   const unsubBookingRef = useRef<(() => void) | null>(null);
   const unsubHistoryRef = useRef<(() => void) | null>(null);
+  const lookupAbortRef = useRef<AbortController | null>(null);
+  const requestGenRef = useRef<number>(0);
+  const trackedSessionKeyRef = useRef<string>('');
+  const trackedBookingIdRef = useRef<string>('');
+  const verifiedPhoneRef = useRef<string>('');
+  const activeAuthUidRef = useRef<string>(activeAuthUid);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const isPreviewModeRef = useRef<boolean>(isCustomerPreviewMode);
 
-  // Cleanup subscriptions on unmount or when modal closes
+  activeAuthUidRef.current = activeAuthUid;
+  isOpenRef.current = isOpen;
+  isPreviewModeRef.current = isCustomerPreviewMode;
+
+  const isCurrentSessionMatching = (expectedUid: string): boolean => {
+    if (!isOpenRef.current || isPreviewModeRef.current) return false;
+    if (activeAuthUidRef.current !== expectedUid) return false;
+    const liveUid =
+      auth?.currentUser && typeof auth.currentUser.uid === 'string'
+        ? auth.currentUser.uid.trim()
+        : '';
+    if (expectedUid) {
+      return !auth?.currentUser || liveUid === expectedUid;
+    }
+    return liveUid === '';
+  };
+
+  // Cleanup subscriptions and in-flight requests on unmount or when modal closes
   const cleanupSubscriptions = () => {
+    if (lookupAbortRef.current) {
+      lookupAbortRef.current.abort();
+      lookupAbortRef.current = null;
+    }
     if (unsubBookingRef.current) {
       unsubBookingRef.current();
       unsubBookingRef.current = null;
@@ -218,9 +386,74 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
     }
   };
 
+  const resetActiveTrackingState = () => {
+    requestGenRef.current += 1;
+    cleanupSubscriptions();
+    trackedSessionKeyRef.current = '';
+    trackedBookingIdRef.current = '';
+    verifiedPhoneRef.current = '';
+    setTrackingData(null);
+    setExistingReview(null);
+    setIsReviewModalOpen(false);
+    setIsChatModalOpen(false);
+    setShowReceipt(false);
+  };
+
   useEffect(() => {
-    return () => cleanupSubscriptions();
+    return () => {
+      requestGenRef.current += 1;
+      cleanupSubscriptions();
+    };
   }, []);
+
+  // Session & preview-mode guard: immediately purge tracking state if auth UID or preview mode changes
+  useEffect(() => {
+    if (!isOpen) {
+      resetActiveTrackingState();
+      setIsLoading(false);
+      setErrorMsg('');
+      if (!activeAuthUid) {
+        setPhone('');
+      }
+      return;
+    }
+    if (isCustomerPreviewMode) {
+      resetActiveTrackingState();
+      setIsLoading(false);
+      setPhone('');
+      return;
+    }
+    const currentSessionKey = activeAuthUid ? `uid:${activeAuthUid}` : 'guest';
+    if (
+      trackedSessionKeyRef.current &&
+      trackedSessionKeyRef.current !== currentSessionKey
+    ) {
+      resetActiveTrackingState();
+      setIsLoading(false);
+      if (!activeAuthUid) {
+        setPhone('');
+      }
+      setShowManualSearch(true);
+      return;
+    }
+    if (
+      trackingData &&
+      trackingData.accessLevel === 'owner' &&
+      (!activeAuthUid || !doesBookingBelongToUid(trackingData.booking, activeAuthUid))
+    ) {
+      resetActiveTrackingState();
+      setShowManualSearch(true);
+      return;
+    }
+    if (
+      trackingData &&
+      trackingData.accessLevel === 'guest' &&
+      (Boolean(activeAuthUid) || !verifiedPhoneRef.current)
+    ) {
+      resetActiveTrackingState();
+      setShowManualSearch(true);
+    }
+  }, [isOpen, isCustomerPreviewMode, activeAuthUid, trackingData]);
 
   // Update code when initialCode prop changes
   useEffect(() => {
@@ -237,96 +470,270 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
       return;
     }
 
-    const targetCode = (initialCode || bookingCode || '').trim().toUpperCase();
-    if (!targetCode) {
-      // If no code, keep search form visible
+    if (isCustomerPreviewMode) {
+      resetActiveTrackingState();
       setShowManualSearch(true);
       return;
     }
+
+    const targetCode = (initialCode || bookingCode || '').trim().toUpperCase();
+    if (!targetCode || /^BK_/i.test(targetCode) || !/^[A-Z0-9_-]{3,64}$/.test(targetCode)) {
+      setShowManualSearch(true);
+      return;
+    }
+
+    const sessionUidSnapshot = activeAuthUid;
+    if (!sessionUidSnapshot) {
+      // Unauthenticated guests must explicitly submit booking code + WhatsApp number in the manual search form
+      setShowManualSearch(true);
+      return;
+    }
+
+    const myGen = ++requestGenRef.current;
+    if (lookupAbortRef.current) {
+      lookupAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
+
+    const isStillCurrent = () =>
+      requestGenRef.current === myGen &&
+      !controller.signal.aborted &&
+      isCurrentSessionMatching(sessionUidSnapshot);
 
     const autoFetch = async () => {
       setIsLoading(true);
       setErrorMsg('');
 
       try {
-        // 1. Check if found in allBookings first
         const matchedBooking = allBookings.find(
-          (b) => b.bookingCode.toUpperCase() === targetCode
+          (b) =>
+            b.bookingCode.toUpperCase() === targetCode &&
+            doesBookingBelongToUid(b, sessionUidSnapshot)
         );
 
-        if (matchedBooking) {
-          setupRealtimeListeners(matchedBooking);
+        // Always verify access via authoritative backend read (never trust client allBookings alone)
+        const verifiedBooking = await getBookingByCode(targetCode, {
+          ...(matchedBooking?.id ? { bookingId: matchedBooking.id } : {}),
+          signal: controller.signal,
+        });
+        if (!isStillCurrent()) return;
+
+        if (verifiedBooking && doesBookingBelongToUid(verifiedBooking, sessionUidSnapshot)) {
+          const initialHist = await getBookingStatusHistory(verifiedBooking.bookingCode, {
+            bookingId: verifiedBooking.id,
+            signal: controller.signal,
+          });
+          if (!isStillCurrent()) return;
+          setupRealtimeListeners(verifiedBooking, initialHist, 'owner', '', myGen);
           return;
         }
 
-        // 2. Fetch directly by code from Firestore
-        const fetchedBooking = await getBookingByCode(targetCode);
-        if (fetchedBooking) {
-          setupRealtimeListeners(fetchedBooking);
-          return;
-        }
-
-        // 3. If phone is saved in localStorage, try trackBookingByCodeAndPhone
-        const savedPhone = phone || localStorage.getItem('senzu_customer_phone') || '';
-        if (savedPhone) {
-          const result = await trackBookingByCodeAndPhone(targetCode, savedPhone);
-          if (result) {
-            setupRealtimeListeners(result.booking, result.history);
+        const ownerPhone = normalizeModalTrackingPhone(currentCustomer?.phone || phone);
+        if (ownerPhone) {
+          const result = await trackBookingByCodeAndPhone(targetCode, ownerPhone, {
+            signal: controller.signal,
+          });
+          if (!isStillCurrent()) return;
+          if (
+            result &&
+            result.accessLevel === 'owner' &&
+            doesBookingBelongToUid(result.booking, sessionUidSnapshot)
+          ) {
+            setupRealtimeListeners(
+              result.booking,
+              result.history,
+              'owner',
+              ownerPhone,
+              myGen
+            );
             return;
           }
         }
 
-        // If not found automatically, open manual search form
-        setShowManualSearch(true);
+        if (isStillCurrent()) {
+          setShowManualSearch(true);
+        }
       } catch (err) {
-        console.warn('Auto tracking lookup notice:', err);
-        setShowManualSearch(true);
+        if (isStillCurrent()) {
+          console.warn('Auto tracking lookup notice:', err);
+          setShowManualSearch(true);
+        }
       } finally {
-        setIsLoading(false);
+        if (requestGenRef.current === myGen) {
+          setIsLoading(false);
+        }
       }
     };
 
-    autoFetch();
-  }, [isOpen, initialCode]);
+    void autoFetch();
+
+    return () => {
+      controller.abort();
+    };
+  }, [isOpen, initialCode, activeAuthUid, isCustomerPreviewMode]);
 
   // Setup real-time listeners for booking & history
   const setupRealtimeListeners = (
     initialBooking: Booking,
-    initialHist: BookingStatusHistory[] = []
+    initialHist: BookingStatusHistory[] = [],
+    accessMode?: 'staff' | 'therapist' | 'owner' | 'guest',
+    verifiedPhone = '',
+    callerGen?: number
   ) => {
     cleanupSubscriptions();
 
+    const activeGen =
+      typeof callerGen === 'number' && callerGen === requestGenRef.current
+        ? callerGen
+        : ++requestGenRef.current;
+
+    const currentUid = activeAuthUidRef.current;
+    const cleanPhone = normalizeModalTrackingPhone(verifiedPhone);
+
+    const isOwnerSession = Boolean(
+      currentUid &&
+        isCurrentSessionMatching(currentUid) &&
+        accessMode === 'owner' &&
+        doesBookingBelongToUid(initialBooking, currentUid)
+    );
+    const isGuestSession = Boolean(
+      !currentUid &&
+        isCurrentSessionMatching('') &&
+        accessMode === 'guest' &&
+        cleanPhone
+    );
+
+    if (!isOwnerSession && !isGuestSession) {
+      resetActiveTrackingState();
+      setShowManualSearch(true);
+      return;
+    }
+
+    const resolvedAccessLevel: 'owner' | 'guest' = isOwnerSession ? 'owner' : 'guest';
+    const sessionKey = isOwnerSession ? `uid:${currentUid}` : 'guest';
+    const expectedUid = isOwnerSession ? currentUid : '';
+    const bookingIdSnapshot = initialBooking.id;
+    const bookingCodeSnapshot = initialBooking.bookingCode;
+
+    trackedSessionKeyRef.current = sessionKey;
+    trackedBookingIdRef.current = bookingIdSnapshot;
+    verifiedPhoneRef.current = isGuestSession ? cleanPhone : '';
+    setExistingReview(null);
+
+    const safeInitialBooking = isOwnerSession
+      ? sanitizeOwnerRealtimeBooking(initialBooking, bookingIdSnapshot, bookingCodeSnapshot)
+      : initialBooking;
+
     setTrackingData({
-      booking: initialBooking,
+      booking: safeInitialBooking,
       history: initialHist,
+      accessLevel: resolvedAccessLevel,
     });
     setShowManualSearch(false);
 
-    // If completed, fetch review
-    if (initialBooking.status === 'Completed') {
-      getReviewByBookingId(initialBooking.id)
-        .then((rev) => setExistingReview(rev))
+    const isSubscriptionStillValid = () =>
+      requestGenRef.current === activeGen &&
+      trackedSessionKeyRef.current === sessionKey &&
+      trackedBookingIdRef.current === bookingIdSnapshot &&
+      isCurrentSessionMatching(expectedUid);
+
+    // Only authenticated customer owners may read customer_reviews or open direct Firestore booking doc listener
+    if (isOwnerSession && safeInitialBooking.status === 'Completed') {
+      getReviewByBookingId(bookingIdSnapshot)
+        .then((rev) => {
+          if (isSubscriptionStillValid()) {
+            setExistingReview(rev);
+          }
+        })
         .catch(() => {});
     }
 
-    // Subscribe to live booking document changes
-    unsubBookingRef.current = subscribeToBookingById(initialBooking.id, (updatedBooking) => {
-      if (updatedBooking) {
-        setTrackingData((prev) => (prev ? { ...prev, booking: updatedBooking } : null));
+    if (isOwnerSession) {
+      unsubBookingRef.current = subscribeToBookingById(bookingIdSnapshot, (updatedBooking) => {
+        if (!isSubscriptionStillValid()) {
+          cleanupSubscriptions();
+          return;
+        }
+        if (
+          !updatedBooking ||
+          (updatedBooking.id && updatedBooking.id !== bookingIdSnapshot) ||
+          (updatedBooking.bookingCode &&
+            String(updatedBooking.bookingCode).trim().toUpperCase() !==
+              bookingCodeSnapshot.trim().toUpperCase()) ||
+          !doesBookingBelongToUid(updatedBooking, expectedUid)
+        ) {
+          resetActiveTrackingState();
+          setShowManualSearch(true);
+          setErrorMsg('Sesi akses pesanan telah berakhir. Silakan lacak kembali reservasi Anda.');
+          return;
+        }
+        const safeUpdated = sanitizeOwnerRealtimeBooking(
+          updatedBooking,
+          bookingIdSnapshot,
+          bookingCodeSnapshot
+        );
+        setTrackingData((prev) =>
+          prev && isSubscriptionStillValid()
+            ? { ...prev, booking: safeUpdated, accessLevel: 'owner' }
+            : prev
+        );
 
-        if (updatedBooking.status === 'Completed') {
-          getReviewByBookingId(updatedBooking.id)
-            .then((rev) => setExistingReview(rev))
+        if (safeUpdated.status === 'Completed') {
+          getReviewByBookingId(bookingIdSnapshot)
+            .then((rev) => {
+              if (isSubscriptionStillValid()) {
+                setExistingReview(rev);
+              }
+            })
             .catch(() => {});
         }
-      }
-    });
+      });
+    }
 
-    // Subscribe to live status history changes
+    // Subscribe to authoritative status history updates (and guest booking updates when unauthenticated)
     unsubHistoryRef.current = subscribeToBookingStatusHistory(
-      initialBooking.bookingCode,
+      bookingCodeSnapshot,
       (updatedHistory) => {
-        setTrackingData((prev) => (prev ? { ...prev, history: updatedHistory } : null));
+        if (!isSubscriptionStillValid()) return;
+        setTrackingData((prev) =>
+          prev && isSubscriptionStillValid() ? { ...prev, history: updatedHistory } : prev
+        );
+      },
+      {
+        bookingId: bookingIdSnapshot,
+        phone: resolvedAccessLevel === 'guest' ? cleanPhone : undefined,
+        onBookingUpdate:
+          resolvedAccessLevel === 'guest'
+            ? (updatedGuestBooking) => {
+                if (!isSubscriptionStillValid()) return;
+                if (
+                  updatedGuestBooking.id !== bookingIdSnapshot ||
+                  String(updatedGuestBooking.bookingCode || '').trim().toUpperCase() !==
+                    bookingCodeSnapshot.trim().toUpperCase()
+                ) {
+                  resetActiveTrackingState();
+                  setShowManualSearch(true);
+                  return;
+                }
+                setTrackingData((prev) =>
+                  prev && isSubscriptionStillValid()
+                    ? { ...prev, booking: updatedGuestBooking, accessLevel: 'guest' }
+                    : prev
+                );
+              }
+            : undefined,
+        onError: (err) => {
+          if (!isSubscriptionStillValid()) return;
+          if (err.status === 401 || err.status === 403 || err.status === 404 || err.status === 409) {
+            resetActiveTrackingState();
+            setShowManualSearch(true);
+            setErrorMsg(
+              err.message ||
+                'Sesi pelacakan berakhir atau akses ditolak. Silakan masukkan kembali data reservasi Anda.'
+            );
+          }
+        },
       }
     );
   };
@@ -385,41 +792,111 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    cleanupSubscriptions();
-    setTrackingData(null);
-    setExistingReview(null);
+    resetActiveTrackingState();
 
-    const cleanCode = bookingCode.trim().toUpperCase();
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    const trimmedCode = bookingCode.trim();
+    const cleanCode = trimmedCode.toUpperCase();
+    const canonicalPhone = normalizeModalTrackingPhone(phone);
 
-    if (!cleanCode) {
-      setErrorMsg('Masukkan Kode Booking Anda (contoh: SH-260907-XXXXX)');
+    if (
+      !cleanCode ||
+      /^BK_/i.test(cleanCode) ||
+      cleanCode.length < 3 ||
+      cleanCode.length > 64 ||
+      !/^[A-Z0-9_-]+$/.test(cleanCode)
+    ) {
+      setErrorMsg('Masukkan Kode Booking Anda yang valid (contoh: SH-260907-XXXXX)');
       return;
     }
-    if (!cleanPhone || cleanPhone.length < 8) {
-      setErrorMsg('Masukkan minimal 8 digit Nomor WhatsApp yang Anda gunakan saat pemesanan.');
+    if (!canonicalPhone) {
+      setErrorMsg('Masukkan minimal 8 digit Nomor WhatsApp valid yang Anda gunakan saat pemesanan.');
       return;
     }
+
+    const sessionUidSnapshot = activeAuthUid;
+    if (!isCurrentSessionMatching(sessionUidSnapshot)) {
+      setErrorMsg('Sesi autentikasi sedang diperbarui. Silakan coba kembali.');
+      return;
+    }
+
+    const myGen = ++requestGenRef.current;
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
+
+    const isStillCurrent = () =>
+      requestGenRef.current === myGen &&
+      !controller.signal.aborted &&
+      isCurrentSessionMatching(sessionUidSnapshot);
 
     setIsLoading(true);
     try {
-      const result = await trackBookingByCodeAndPhone(cleanCode, cleanPhone);
+      let backendErrorMessage = '';
+      const result = await trackBookingByCodeAndPhone(cleanCode, phone.trim(), {
+        signal: controller.signal,
+        onError: (err) => {
+          if (!sessionUidSnapshot) {
+            if (err.status === 429 || err.status === 503 || err.status === 400) {
+              backendErrorMessage = err.message;
+            } else {
+              backendErrorMessage =
+                'Data reservasi tidak ditemukan. Pastikan Kode Booking dan Nomor WhatsApp sesuai.';
+            }
+          } else if (err.message) {
+            backendErrorMessage = err.message;
+          }
+        },
+      });
+
+      if (!isStillCurrent()) return;
+
       if (!result) {
-        setErrorMsg('Data reservasi tidak ditemukan. Pastikan Kode Booking dan Nomor WhatsApp sesuai.');
-      } else {
+        setErrorMsg(
+          backendErrorMessage ||
+            'Data reservasi tidak ditemukan. Pastikan Kode Booking dan Nomor WhatsApp sesuai.'
+        );
+        return;
+      }
+
+      if (sessionUidSnapshot) {
+        if (
+          result.accessLevel !== 'owner' ||
+          !doesBookingBelongToUid(result.booking, sessionUidSnapshot)
+        ) {
+          setErrorMsg(
+            'Akses ke pesanan ini ditolak. Pastikan Anda menggunakan akun pemilik pesanan.'
+          );
+          return;
+        }
         if (!isCustomerPreviewMode) {
-          localStorage.setItem('senzu_customer_phone', cleanPhone);
           localStorage.setItem('senzu_last_booking_code', cleanCode);
         }
-        setupRealtimeListeners(result.booking, result.history);
+        setupRealtimeListeners(result.booking, result.history, 'owner', canonicalPhone, myGen);
+      } else {
+        if (result.accessLevel !== 'guest') {
+          setErrorMsg(
+            'Data reservasi tidak ditemukan. Pastikan Kode Booking dan Nomor WhatsApp sesuai.'
+          );
+          return;
+        }
+        setupRealtimeListeners(result.booking, result.history, 'guest', canonicalPhone, myGen);
       }
     } catch (err) {
+      if (!isStillCurrent()) return;
       console.error('Tracking query error:', err);
       setErrorMsg('Gagal memuat status. Silakan periksa koneksi internet Anda dan coba kembali.');
     } finally {
-      setIsLoading(false);
+      if (requestGenRef.current === myGen) {
+        setIsLoading(false);
+      }
     }
   };
+
+  const isAuthorizedCustomerOwner = Boolean(
+    trackingData &&
+      activeAuthUid &&
+      trackingData.accessLevel === 'owner' &&
+      doesBookingBelongToUid(trackingData.booking, activeAuthUid)
+  );
 
   const handleCopyBookingCode = () => {
     if (!trackingData?.booking.bookingCode) return;
@@ -683,8 +1160,14 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     <div className="space-y-1 text-slate-600">
                       <div><strong className="text-slate-900">Pelanggan:</strong> {trackingData.booking.customerName}</div>
                       <div><strong className="text-slate-900">WhatsApp:</strong> {trackingData.booking.customerWhatsApp}</div>
-                      <div><strong className="text-slate-900">Alamat:</strong> {trackingData.booking.address} ({trackingData.booking.area})</div>
-                      {trackingData.booking.addressNotes && (
+                      <div>
+                        <strong className="text-slate-900">Alamat:</strong> {trackingData.booking.address}
+                        {trackingData.booking.area &&
+                        !String(trackingData.booking.address || '').includes(trackingData.booking.area)
+                          ? ` (${trackingData.booking.area})`
+                          : ''}
+                      </div>
+                      {isAuthorizedCustomerOwner && trackingData.booking.addressNotes && (
                         <div><strong className="text-slate-900">Patokan:</strong> {trackingData.booking.addressNotes}</div>
                       )}
                     </div>
@@ -772,7 +1255,8 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     </div>
                   </div>
 
-                  {trackingData.booking.status === 'Menunggu Pembayaran' ? (
+                  {isAuthorizedCustomerOwner &&
+                  trackingData.booking.status === 'Menunggu Pembayaran' ? (
                     <div className="pt-2">
                       <PendingPaymentCard
                         booking={trackingData.booking}
@@ -840,13 +1324,15 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                         Preferensi Terapis: <strong className="text-slate-900">{trackingData.booking.genderPreference}</strong>
                       </span>
                       <div className="flex items-center gap-2">
-                        <ChatButtonWithBadge
-                          booking={trackingData.booking}
-                          userRole="customer"
-                          onOpenChat={() => setIsChatModalOpen(true)}
-                          variant="button"
-                          label="Chat Terapis"
-                        />
+                        {isAuthorizedCustomerOwner && (
+                          <ChatButtonWithBadge
+                            booking={trackingData.booking}
+                            userRole="customer"
+                            onOpenChat={() => setIsChatModalOpen(true)}
+                            variant="button"
+                            label="Chat Terapis"
+                          />
+                        )}
                         <a
                           href={conciergeWaUrl}
                           target="_blank"
@@ -909,11 +1395,20 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
               {/* ------------------------------------------------------------- */}
               {trackingData.booking.status === 'On The Way' && (
                 <div className="space-y-4">
-                  <CustomerLiveMap
-                    booking={trackingData.booking}
-                    settings={settings}
-                    onNearbyChange={(near) => setIsNearby(near)}
-                  />
+                  {isAuthorizedCustomerOwner ? (
+                    <CustomerLiveMap
+                      booking={trackingData.booking}
+                      settings={settings}
+                      onNearbyChange={(near) => setIsNearby(near)}
+                    />
+                  ) : (
+                    <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-4 text-xs text-slate-600 flex items-center gap-2.5">
+                      <ShieldCheck className="w-4 h-4 text-[#082A4F] flex-shrink-0" />
+                      <span>
+                        Demi privasi lokasi pelanggan, peta GPS langsung hanya ditampilkan pada sesi akun pemilik pesanan. Status perjalanan terapis tetap diperbarui secara otomatis.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Therapist Driver Info Card */}
                   <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 flex items-center justify-between gap-3 shadow-xs">
@@ -935,13 +1430,15 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <ChatButtonWithBadge
-                        booking={trackingData.booking}
-                        userRole="customer"
-                        onOpenChat={() => setIsChatModalOpen(true)}
-                        variant="button"
-                        label="Chat Terapis"
-                      />
+                      {isAuthorizedCustomerOwner && (
+                        <ChatButtonWithBadge
+                          booking={trackingData.booking}
+                          userRole="customer"
+                          onOpenChat={() => setIsChatModalOpen(true)}
+                          variant="button"
+                          label="Chat Terapis"
+                        />
+                      )}
                       <a
                         href={conciergeWaUrl}
                         target="_blank"
@@ -1085,39 +1582,41 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     Terima kasih telah mempercayakan waktu relaksasi Anda bersama Senzu Home. Semoga tubuh Anda kembali bugar dan segar!
                   </p>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
-                    {/* Repeat Order Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onRepeatBooking) {
-                          onRepeatBooking(trackingData.booking);
-                          onClose();
-                        }
-                      }}
-                      className="flex-1 px-4 py-3 min-h-[44px] rounded-2xl bg-[#082A4F] hover:bg-[#0C3866] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
-                    >
-                      <Repeat className="w-4 h-4 text-[#D4AF37]" />
-                      <span>Pesan Ulang (Repeat Order)</span>
-                    </button>
-
-                    {/* Review Rating Button */}
-                    {existingReview ? (
-                      <div className="px-4 py-3 rounded-2xl bg-white border border-amber-200 text-xs font-bold text-amber-900 flex items-center justify-center gap-1.5 shadow-2xs">
-                        <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                        <span>Rating Anda: {existingReview.overallRating}.0★</span>
-                      </div>
-                    ) : (
+                  {isAuthorizedCustomerOwner && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                      {/* Repeat Order Button */}
                       <button
                         type="button"
-                        onClick={() => setIsReviewModalOpen(true)}
-                        className="px-4 py-3 min-h-[44px] rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                        onClick={() => {
+                          if (onRepeatBooking) {
+                            onRepeatBooking(trackingData.booking);
+                            onClose();
+                          }
+                        }}
+                        className="flex-1 px-4 py-3 min-h-[44px] rounded-2xl bg-[#082A4F] hover:bg-[#0C3866] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
                       >
-                        <Star className="w-4 h-4 fill-[#082A4F] text-[#082A4F]" />
-                        <span>Beri Ulasan Terapis (1-5★)</span>
+                        <Repeat className="w-4 h-4 text-[#D4AF37]" />
+                        <span>Pesan Ulang (Repeat Order)</span>
                       </button>
-                    )}
-                  </div>
+
+                      {/* Review Rating Button */}
+                      {existingReview ? (
+                        <div className="px-4 py-3 rounded-2xl bg-white border border-amber-200 text-xs font-bold text-amber-900 flex items-center justify-center gap-1.5 shadow-2xs">
+                          <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                          <span>Rating Anda: {existingReview.overallRating}.0★</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setIsReviewModalOpen(true)}
+                          className="px-4 py-3 min-h-[44px] rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                        >
+                          <Star className="w-4 h-4 fill-[#082A4F] text-[#082A4F]" />
+                          <span>Beri Ulasan Terapis (1-5★)</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1193,7 +1692,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
       </div>
 
       {/* Customer Review Modal */}
-      {isReviewModalOpen && trackingData?.booking && (
+      {isAuthorizedCustomerOwner && isReviewModalOpen && trackingData?.booking && (
         <CustomerReviewModal
           isOpen={true}
           onClose={() => setIsReviewModalOpen(false)}
@@ -1207,13 +1706,13 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
       )}
 
       {/* Realtime Booking Chat Modal */}
-      {isChatModalOpen && trackingData?.booking && (
+      {isAuthorizedCustomerOwner && isChatModalOpen && trackingData?.booking && activeAuthUid && (
         <BookingChatModal
           isOpen={true}
           onClose={() => setIsChatModalOpen(false)}
           booking={trackingData.booking}
           currentUserRole="customer"
-          currentAuthUid={firebaseUser?.uid || trackingData.booking.customerAuthUid || trackingData.booking.authUserId || ''}
+          currentAuthUid={activeAuthUid}
           currentDisplayName={trackingData.booking.customerName || 'Customer'}
         />
       )}

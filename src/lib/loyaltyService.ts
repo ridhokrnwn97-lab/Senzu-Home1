@@ -14,7 +14,7 @@ import {
   runTransaction,
   deleteDoc,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import {
   CustomerLoyaltyAccount,
   LoyaltyTransaction,
@@ -341,9 +341,12 @@ export async function evaluateAndUpgradeCustomerTier(
       customerId,
       customerName: account.customerName,
       customerWhatsApp: account.customerWhatsApp,
+      newTierId: eligibleTier.id,
       newTierName: eligibleTier.name,
+      previousTierId: currentTier?.id,
       previousTierName: currentTier.name,
       earningMultiplier: eligibleTier.earningMultiplier,
+      tierStartedAt: now,
     }, { id: 'system', role: 'system' }).catch(() => {});
 
     return eligibleTier;
@@ -419,7 +422,7 @@ export async function processBookingLoyaltyEarning(booking: Booking): Promise<{
   }
 
   // Record ledger transaction
-  await recordLoyaltyTransaction({
+  const { transaction: earnTx } = await recordLoyaltyTransaction({
     customerId: account.customerId,
     customerName: account.customerName,
     bookingId: booking.id,
@@ -467,10 +470,13 @@ export async function processBookingLoyaltyEarning(booking: Booking): Promise<{
     customerId: account.customerId,
     customerName: account.customerName,
     customerWhatsApp: account.customerWhatsApp,
+    bookingId: booking.id,
     bookingCode: booking.bookingCode,
     pointsEarned: finalPoints,
     newBalance: account.pointsBalance + finalPoints,
     serviceName: booking.serviceName,
+    transactionId: earnTx.id,
+    loyaltyTransactionId: earnTx.id,
   }, { id: 'system', role: 'system' }).catch(() => {});
 
   return { pointsEarned: finalPoints, reason: 'Earned' };
@@ -487,7 +493,7 @@ export async function redeemPointsForBooking(params: {
 }): Promise<void> {
   if (params.points <= 0) return;
 
-  await recordLoyaltyTransaction({
+  const { transaction: redeemTx } = await recordLoyaltyTransaction({
     customerId: params.customerId,
     bookingId: params.bookingId,
     bookingCode: params.bookingCode,
@@ -504,9 +510,12 @@ export async function redeemPointsForBooking(params: {
 
   emitEvent('loyalty.points_redeemed', {
     customerId: params.customerId,
+    bookingId: params.bookingId,
     bookingCode: params.bookingCode,
     pointsRedeemed: params.points,
     discountAmount: params.discountRp,
+    transactionId: redeemTx.id,
+    loyaltyTransactionId: redeemTx.id,
   }, { id: 'customer', role: 'customer' }).catch(() => {});
 }
 
@@ -628,270 +637,224 @@ export async function getVoucherByCode(code: string): Promise<Voucher | null> {
   return null;
 }
 
-export async function validatePromoCodeForBooking(params: {
-  promoCode: string;
-  servicePrice: number;
-  serviceId?: string;
-  serviceCategory?: string;
-  serviceDuration?: number;
-  customerId?: string;
-  customerAuthUid?: string;
-  customerWhatsApp?: string;
-  customerEmail?: string;
-  homeServiceFee?: number;
-}): Promise<PromoValidationResult> {
-  const code = (params.promoCode || '').trim().toUpperCase();
+export async function validatePromoCodeForBooking(
+  paramsOrCode:
+    | string
+    | {
+        promoCode: string;
+        servicePrice: number;
+        serviceId?: string;
+        serviceCategory?: string;
+        serviceCategoryId?: string;
+        serviceDuration?: number;
+        customerId?: string;
+        customerAuthUid?: string;
+        customerWhatsApp?: string;
+        customerEmail?: string;
+        homeServiceFee?: number;
+        latitude?: number;
+        longitude?: number;
+        distanceKm?: number;
+        customerVoucherId?: string;
+        selectedCustomerVoucher?: { id?: string } | null;
+        pointsToRedeem?: number;
+        pointsRedeemed?: number;
+        checkoutAttemptId?: string;
+      },
+  contextArg?: {
+    servicePrice: number;
+    serviceId?: string;
+    serviceCategory?: string;
+    serviceCategoryId?: string;
+    serviceDuration?: number;
+    customerId?: string;
+    customerAuthUid?: string;
+    customerWhatsApp?: string;
+    customerEmail?: string;
+    homeServiceFee?: number;
+    latitude?: number;
+    longitude?: number;
+    distanceKm?: number;
+    customerVoucherId?: string;
+    selectedCustomerVoucher?: { id?: string } | null;
+    pointsToRedeem?: number;
+    pointsRedeemed?: number;
+    checkoutAttemptId?: string;
+  }
+): Promise<PromoValidationResult> {
+  const rawParams =
+    typeof paramsOrCode === 'string'
+      ? {
+          ...(contextArg || { servicePrice: 0 }),
+          promoCode: paramsOrCode,
+        }
+      : paramsOrCode;
+
+  const params = {
+    ...rawParams,
+    customerVoucherId:
+      rawParams?.customerVoucherId || rawParams?.selectedCustomerVoucher?.id,
+    pointsToRedeem:
+      rawParams?.pointsToRedeem ?? rawParams?.pointsRedeemed,
+  };
+
+  const code = typeof params?.promoCode === 'string' ? params.promoCode.trim().toUpperCase() : '';
   if (!code) {
     return { valid: false, errorMessage: 'Harap masukkan kode promo.' };
   }
+  if (!/^[A-Z0-9_-]{1,64}$/.test(code)) {
+    return { valid: false, errorMessage: 'Format kode promo tidak valid.' };
+  }
 
-  // 1. Authoritative Backend Validation First
+  const currentUser = auth?.currentUser;
+  const initialUid = typeof currentUser?.uid === 'string' ? currentUser.uid.trim() : '';
+  if (!currentUser || !initialUid || typeof currentUser.getIdToken !== 'function') {
+    return {
+      valid: false,
+      errorMessage: 'Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.',
+    };
+  }
+
+  if (
+    params.customerAuthUid !== undefined &&
+    params.customerAuthUid !== null &&
+    String(params.customerAuthUid).trim() !== '' &&
+    String(params.customerAuthUid).trim() !== initialUid
+  ) {
+    return {
+      valid: false,
+      errorMessage: 'Sesi login pelanggan tidak sesuai dengan identitas pemesanan.',
+    };
+  }
+
+  let idToken = '';
   try {
-    const apiRes = await fetch('/api/vouchers/validate', {
+    const rawToken = await currentUser.getIdToken();
+    idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  } catch {
+    return {
+      valid: false,
+      errorMessage: 'Gagal mengambil token autentikasi pelanggan. Silakan login kembali.',
+    };
+  }
+
+  if (!idToken) {
+    return {
+      valid: false,
+      errorMessage: 'Token autentikasi pelanggan tidak tersedia. Silakan login kembali.',
+    };
+  }
+
+  const activeUserAfterToken = auth?.currentUser;
+  if (!activeUserAfterToken || activeUserAfterToken.uid !== initialUid) {
+    return {
+      valid: false,
+      errorMessage: 'Sesi pengguna berubah sebelum validasi voucher dikirim.',
+      ...({errorCode: 'SESSION_CHANGED', retryable: false} as any),
+    };
+  }
+
+  let apiRes: Response;
+  try {
+    apiRes = await fetch('/api/vouchers/validate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
       body: JSON.stringify({
+        code,
         promoCode: code,
-        servicePrice: params.servicePrice,
         serviceId: params.serviceId,
+        servicePrice: params.servicePrice,
         serviceCategory: params.serviceCategory,
+        serviceCategoryId: (params as any).serviceCategoryId,
         serviceDuration: params.serviceDuration,
         customerId: params.customerId,
-        customerAuthUid: params.customerAuthUid,
+        customerAuthUid: initialUid,
         customerWhatsApp: params.customerWhatsApp,
         customerEmail: params.customerEmail,
         homeServiceFee: params.homeServiceFee,
+        latitude: params.latitude,
+        longitude: params.longitude,
+        distanceKm: params.distanceKm,
+        customerVoucherId: params.customerVoucherId,
+        pointsToRedeem: params.pointsToRedeem,
+        checkoutAttemptId: params.checkoutAttemptId,
       }),
     });
-    if (apiRes.ok) {
-      const result = await apiRes.json();
-      return result;
-    }
-  } catch (apiErr) {
-    console.warn('API voucher validation notice, falling back to direct Firestore ledger:', apiErr);
+  } catch {
+    return {
+      valid: false,
+      errorMessage: 'Gagal menghubungi server validasi voucher. Silakan periksa koneksi Anda.',
+      ...({ errorCode: 'NETWORK_ERROR', retryable: true } as any),
+    };
   }
 
-  // 2. Resilient Client-Side Check against Firestore Master Catalog & Redemption Ledger
-  let voucher: Voucher | null = null;
+  let result: any = null;
   try {
-    const q = query(collection(db, 'vouchers'), where('code', '==', code));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      voucher = snap.docs[0].data() as Voucher;
-    } else if (code === 'SENZUWELCOME') {
-      voucher = await ensureSenzuWelcomeVoucherExists();
-    }
-  } catch (err) {
-    console.warn('Error fetching promo by code:', err);
-  }
-
-  if (!voucher) {
-    return { valid: false, errorMessage: 'Kode promo tidak ditemukan.' };
-  }
-
-  if (voucher.enabled === false) {
-    return { valid: false, errorMessage: 'Voucher sedang tidak aktif.' };
-  }
-
-  const now = new Date().toISOString();
-  if (voucher.validFrom && voucher.validFrom > now) {
-    return { valid: false, errorMessage: 'Promo ini belum dapat digunakan (periode belum dimulai).' };
-  }
-  if (voucher.validUntil && voucher.validUntil < now) {
-    return { valid: false, errorMessage: 'Voucher sudah tidak berlaku.' };
-  }
-
-  if (voucher.usageLimitTotal && voucher.usageLimitTotal > 0) {
-    if ((voucher.currentUsageCount || 0) >= voucher.usageLimitTotal) {
-      return { valid: false, errorMessage: 'Kuota promo sudah habis.' };
-    }
-  }
-
-  const minSpend = voucher.minimumSpend || voucher.minimumTreatmentPrice || 0;
-  if (params.servicePrice < minSpend) {
+    result = await apiRes.json();
+  } catch {
     return {
       valid: false,
-      errorMessage: `Minimum transaksi untuk promo ini adalah Rp ${minSpend.toLocaleString('id-ID')}.`,
+      errorMessage: 'Respons server validasi voucher tidak valid.',
+      ...({ errorCode: 'MALFORMED_RESPONSE', status: apiRes?.status, retryable: true } as any),
     };
   }
 
-  if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
-    if (params.serviceId && !voucher.applicableServiceIds.includes(params.serviceId)) {
-      return { valid: false, errorMessage: 'Promo tidak berlaku untuk layanan yang dipilih.' };
-    }
-  }
-
-  if (voucher.applicableCategoryIds && voucher.applicableCategoryIds.length > 0) {
-    if (params.serviceCategory && !voucher.applicableCategoryIds.includes(params.serviceCategory)) {
-      return { valid: false, errorMessage: 'Promo tidak berlaku untuk kategori layanan ini.' };
-    }
-  }
-
-  if (voucher.minimumTreatmentDuration && params.serviceDuration && params.serviceDuration < voucher.minimumTreatmentDuration) {
+  const activeUserAfterFetch = auth?.currentUser;
+  if (!activeUserAfterFetch || activeUserAfterFetch.uid !== initialUid) {
     return {
       valid: false,
-      errorMessage: `Promo memerlukan durasi treatment minimal ${voucher.minimumTreatmentDuration} menit.`,
+      errorMessage: 'Sesi pengguna berubah saat memvalidasi kode promo.',
+      ...({errorCode: 'SESSION_CHANGED', retryable: false} as any),
     };
   }
 
-  const { cleanDigits: phoneClean } = normalizeIndonesianPhone(params.customerWhatsApp || '');
-  const custId = params.customerId || (phoneClean ? `cust_${phoneClean}` : '');
-  const authUid = params.customerAuthUid || '';
-
-  // 3. Authoritative Usage Limit Per Customer check
-  const usageLimitPerCust = voucher.usageLimitPerCustomer ?? (code === 'SENZUWELCOME' ? 1 : 0);
-  if (usageLimitPerCust > 0) {
-    try {
-      // A. Check deterministic lock documents
-      let lockFound = false;
-      if (authUid) {
-        const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${code}_uid_${authUid}`));
-        if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-          lockFound = true;
-        }
-      }
-      if (!lockFound && phoneClean) {
-        const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${code}_phone_${phoneClean}`));
-        if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-          lockFound = true;
-        }
-      }
-      if (!lockFound && custId) {
-        const lockSnap = await getDoc(doc(db, 'voucher_redemptions', `vlock_${code}_cust_${custId}`));
-        if (lockSnap.exists() && lockSnap.data()?.status !== 'cancelled' && lockSnap.data()?.status !== 'batal') {
-          lockFound = true;
-        }
-      }
-
-      if (lockFound) {
-        return {
-          valid: false,
-          errorMessage: `Voucher ${voucher.code || code} sudah pernah digunakan pada akun ini.`,
-        };
-      }
-
-      // B. Check voucher_redemptions ledger
-      const redSnap = await getDocs(query(collection(db, 'voucher_redemptions'), where('voucherCode', '==', code)));
-      let redCount = 0;
-      for (const d of redSnap.docs) {
-        const r = d.data() as any;
-        if (r.status === 'cancelled' || r.status === 'batal') continue;
-        let matched = false;
-        if (authUid && r.customerAuthUid === authUid) matched = true;
-        if (phoneClean) {
-          const rPhoneClean = (r.customerPhone || '').replace(/[^0-9]/g, '');
-          const rNormClean = (r.normalizedPhone || '').replace(/[^0-9]/g, '');
-          if (rPhoneClean && (rPhoneClean.includes(phoneClean) || phoneClean.includes(rPhoneClean))) matched = true;
-          if (rNormClean && (rNormClean.includes(phoneClean) || phoneClean.includes(rNormClean))) matched = true;
-        }
-        if (custId && r.customerId === custId) matched = true;
-        if (matched) redCount++;
-      }
-
-      if (redCount >= usageLimitPerCust) {
-        return {
-          valid: false,
-          errorMessage: `Voucher ${voucher.code || code} sudah pernah digunakan pada akun ini.`,
-        };
-      }
-
-      // C. Check bookings collection directly
-      const bookingsSnap = await getDocs(collection(db, 'bookings'));
-      let bookingsUsed = 0;
-      for (const bDoc of bookingsSnap.docs) {
-        const b = bDoc.data() as Booking;
-        const bCode = (b.promoCode || b.voucherCode || '').trim().toUpperCase();
-        if (bCode !== code && b.voucherId !== voucher.id && b.promoId !== voucher.id) continue;
-        const bStatus = (b.status || '').toLowerCase();
-        if (bStatus === 'cancelled' || bStatus === 'batal') continue;
-
-        let matched = false;
-        if (authUid && b.authUserId === authUid) matched = true;
-        if (phoneClean) {
-          const bPhoneClean = (b.customerWhatsApp || '').replace(/[^0-9]/g, '');
-          if (bPhoneClean && (bPhoneClean.includes(phoneClean) || phoneClean.includes(bPhoneClean))) matched = true;
-        }
-        if (custId && b.customerId === custId) matched = true;
-        if (matched) bookingsUsed++;
-      }
-
-      if (bookingsUsed >= usageLimitPerCust) {
-        return {
-          valid: false,
-          errorMessage: `Voucher ${voucher.code || code} sudah pernah digunakan pada akun ini.`,
-        };
-      }
-    } catch (e) {
-      console.warn('Could not check usage history for promo validation:', e);
-    }
-  }
-
-  // 4. First Order Only / New Customer check
-  if (voucher.firstOrderOnly || voucher.newCustomerOnly) {
-    try {
-      const bookingsSnap = await getDocs(collection(db, 'bookings'));
-      let hasPreviousBookings = false;
-      for (const bDoc of bookingsSnap.docs) {
-        const b = bDoc.data() as Booking;
-        const s = (b.status || '').toLowerCase();
-        if (s === 'cancelled' || s === 'batal' || s === 'menunggu pembayaran') continue;
-
-        let matched = false;
-        if (authUid && b.authUserId === authUid) matched = true;
-        if (phoneClean) {
-          const bPhoneClean = (b.customerWhatsApp || '').replace(/[^0-9]/g, '');
-          if (bPhoneClean && (bPhoneClean.includes(phoneClean) || phoneClean.includes(bPhoneClean))) matched = true;
-        }
-        if (custId && b.customerId === custId) matched = true;
-        if (matched) {
-          hasPreviousBookings = true;
-          break;
-        }
-      }
-
-      if (!hasPreviousBookings && custId) {
-        const custDoc = await getDoc(doc(db, 'customers', custId));
-        if (custDoc.exists()) {
-          const cData = custDoc.data() as any;
-          if ((cData.completedBookings || 0) > 0 || (cData.totalBookings || 0) > 0) {
-            hasPreviousBookings = true;
-          }
-        }
-      }
-
-      if (hasPreviousBookings) {
-        return {
-          valid: false,
-          errorMessage: 'Voucher ini khusus untuk pesanan pertama.',
-        };
-      }
-    } catch (e) {
-      console.warn('Could not check first order history:', e);
-    }
-  }
-
-  // 5. Compute Discount
-  let discountAmount = 0;
-  if (voucher.voucherType === 'fixed_discount' || (voucher.voucherType as any) === 'FIXED_AMOUNT') {
-    discountAmount = Math.min(voucher.value, params.servicePrice);
-  } else if (
-    voucher.voucherType === 'percentage_discount' ||
-    voucher.voucherType === 'percentage' ||
-    (voucher.voucherType as any) === 'PERCENTAGE'
+  if (
+    !apiRes.ok ||
+    !result ||
+    result.valid !== true ||
+    !result.voucher ||
+    typeof result.voucher.id !== 'string' ||
+    !result.voucher.id.trim() ||
+    typeof result.discountAmount !== 'number' ||
+    !Number.isFinite(result.discountAmount) ||
+    (result.discountAmount <= 0 && !(result.discountAmount === 0
+      && result.pricingBreakdown?.promoDiscountAmount === 0
+      && typeof result.pricingBreakdown?.voucherDiscountAmount === 'number'
+      && result.pricingBreakdown.voucherDiscountAmount > 0))
   ) {
-    let disc = Math.floor((params.servicePrice * voucher.value) / 100);
-    if (voucher.maximumDiscount && voucher.maximumDiscount > 0) {
-      disc = Math.min(disc, voucher.maximumDiscount);
-    }
-    discountAmount = Math.min(disc, params.servicePrice);
-  } else if (voucher.voucherType === 'free_home_service_fee') {
-    discountAmount = params.homeServiceFee || 0;
+    const errCode =
+      typeof result?.code === 'string' && result.code.trim()
+        ? result.code.trim()
+        : !apiRes.ok
+          ? `HTTP_${apiRes.status}`
+          : 'VOUCHER_INVALID';
+    const isRetryable =
+      apiRes.status === 503 ||
+      errCode === 'VOUCHER_VALIDATION_UNAVAILABLE' ||
+      errCode === 'AUTH_SERVICE_UNAVAILABLE';
+    const errMsg =
+      typeof result?.errorMessage === 'string' && result.errorMessage.trim()
+        ? result.errorMessage.trim()
+        : typeof result?.error === 'string' && result.error.trim()
+          ? result.error.trim()
+          : typeof result?.message === 'string' && result.message.trim()
+            ? result.message.trim()
+            : 'Kode promo tidak valid atau tidak dapat digunakan.';
+    return {
+      valid: false,
+      errorMessage: errMsg,
+      ...({ errorCode: errCode, status: apiRes.status, retryable: isRetryable } as any),
+    };
   }
 
   return {
     valid: true,
-    voucher,
-    discountAmount,
+    voucher: result.voucher as Voucher,
+    discountAmount: result.discountAmount,
+    ...(result.pricingBreakdown ? ({ pricingBreakdown: result.pricingBreakdown } as any) : {}),
   };
 }
 
@@ -905,102 +868,115 @@ export async function recordVoucherRedemption(params: {
   customerPhone?: string;
   discountAmount?: number;
 }): Promise<void> {
-  const code = (params.voucherCode || '').trim().toUpperCase();
-  if (!code || !params.bookingId) return;
-
-  // 1. Try server endpoint first
-  try {
-    const res = await fetch('/api/vouchers/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+  const code = typeof params?.voucherCode === 'string' ? params.voucherCode.trim().toUpperCase() : '';
+  const bookingId = typeof params?.bookingId === 'string' ? params.bookingId.trim() : '';
+  if (!code || !bookingId) {
+    throw Object.assign(new Error('Data voucher atau booking tidak lengkap.'), {
+      code: 'INVALID_VOUCHER_REDEMPTION_INPUT',
     });
-    if (res.ok) return;
-  } catch (err) {
-    console.warn('API voucher redeem notice, fallback to direct Firestore:', err);
   }
 
-  // 2. Direct Firestore fallback
+  const currentUser = auth?.currentUser;
+  const initialUid = typeof currentUser?.uid === 'string' ? currentUser.uid.trim() : '';
+  if (!currentUser || !initialUid || typeof currentUser.getIdToken !== 'function') {
+    throw Object.assign(new Error('Sesi login pelanggan diperlukan untuk menukarkan voucher.'), {
+      code: 'AUTH_REQUIRED',
+    });
+  }
+
+  if (
+    params.customerAuthUid !== undefined &&
+    params.customerAuthUid !== null &&
+    String(params.customerAuthUid).trim() !== '' &&
+    String(params.customerAuthUid).trim() !== initialUid
+  ) {
+    throw Object.assign(new Error('Sesi login tidak sesuai dengan identitas pemesanan.'), {
+      code: 'SESSION_CHANGED',
+    });
+  }
+
+  let idToken = '';
   try {
-    const { cleanDigits } = normalizeIndonesianPhone(params.customerPhone || '');
-    const authUid = (params.customerAuthUid || '').trim();
-    const custId = (params.customerId || '').trim() || (cleanDigits ? `cust_${cleanDigits}` : '');
-    const targetVoucherId = params.voucherId || (code === 'SENZUWELCOME' ? 'vch_senzuwelcome' : `vch_${code.toLowerCase()}`);
-    const now = new Date().toISOString();
-    const redDocId = `vred_${code}_${params.bookingId}`;
+    const rawToken = await currentUser.getIdToken();
+    idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  } catch {
+    throw Object.assign(new Error('Gagal mengambil token autentikasi pelanggan.'), {
+      code: 'AUTH_TOKEN_UNAVAILABLE',
+    });
+  }
 
-    await setDoc(
-      doc(db, 'voucher_redemptions', redDocId),
-      cleanFirestoreData({
-        id: redDocId,
-        voucherId: targetVoucherId,
+  if (!idToken) {
+    throw Object.assign(new Error('Token autentikasi pelanggan tidak tersedia.'), {
+      code: 'AUTH_TOKEN_UNAVAILABLE',
+    });
+  }
+
+  const activeUserAfterToken = auth?.currentUser;
+  if (!activeUserAfterToken || activeUserAfterToken.uid !== initialUid) {
+    throw Object.assign(new Error('Sesi pengguna berubah sebelum permintaan penukaran dikirim.'), {
+      code: 'SESSION_CHANGED',
+    });
+  }
+
+  let res: Response;
+  try {
+    res = await fetch('/api/vouchers/redeem', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
         voucherCode: code,
-        customerId: custId,
-        customerAuthUid: authUid || null,
-        customerPhone: params.customerPhone || null,
-        normalizedPhone: cleanDigits ? `+${cleanDigits}` : null,
-        bookingId: params.bookingId,
-        bookingCode: params.bookingCode || '',
-        discountAmount: params.discountAmount || 0,
-        redeemedAt: now,
-        status: 'active',
-        source: 'client_submission',
-        updatedAt: now,
+        bookingId,
       }),
-      { merge: true }
-    );
+    });
+  } catch {
+    throw Object.assign(new Error('Gagal menghubungi server penukaran voucher.'), {
+      code: 'NETWORK_ERROR',
+    });
+  }
 
-    if (authUid) {
-      await setDoc(
-        doc(db, 'voucher_redemptions', `vlock_${code}_uid_${authUid}`),
-        cleanFirestoreData({
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerAuthUid: authUid,
-          bookingId: params.bookingId,
-          bookingCode: params.bookingCode || '',
-          redeemedAt: now,
-          status: 'active',
-        }),
-        { merge: true }
-      );
-    }
-    if (cleanDigits) {
-      await setDoc(
-        doc(db, 'voucher_redemptions', `vlock_${code}_phone_${cleanDigits}`),
-        cleanFirestoreData({
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerPhone: cleanDigits,
-          bookingId: params.bookingId,
-          bookingCode: params.bookingCode || '',
-          redeemedAt: now,
-          status: 'active',
-        }),
-        { merge: true }
-      );
-    }
-    if (custId) {
-      await setDoc(
-        doc(db, 'voucher_redemptions', `vlock_${code}_cust_${custId}`),
-        cleanFirestoreData({
-          voucherCode: code,
-          voucherId: targetVoucherId,
-          customerId: custId,
-          bookingId: params.bookingId,
-          bookingCode: params.bookingCode || '',
-          redeemedAt: now,
-          status: 'active',
-        }),
-        { merge: true }
-      );
-    }
+  let payload: any = null;
+  try {
+    payload = await res.json();
+  } catch {
+    throw Object.assign(new Error('Respons server penukaran voucher tidak valid.'), {
+      code: 'MALFORMED_RESPONSE',
+      status: res?.status,
+    });
+  }
 
-    if (targetVoucherId) {
-      await recordVoucherUsage(targetVoucherId);
-    }
-  } catch (err) {
-    console.warn('Error recording voucher redemption in client:', err);
+  const activeUserAfterFetch = auth?.currentUser;
+  if (!activeUserAfterFetch || activeUserAfterFetch.uid !== initialUid) {
+    throw Object.assign(new Error('Sesi pengguna berubah saat memproses penukaran voucher.'), {
+      code: 'SESSION_CHANGED',
+    });
+  }
+
+  if (
+    !res.ok ||
+    !payload ||
+    payload.success !== true ||
+    typeof payload.redemptionId !== 'string' ||
+    !payload.redemptionId.trim()
+  ) {
+    const errCode =
+      typeof payload?.code === 'string' && payload.code
+        ? payload.code
+        : !res.ok
+          ? `HTTP_${res.status}`
+          : 'VOUCHER_REDEMPTION_FAILED';
+    const errMsg =
+      typeof payload?.error === 'string' && payload.error
+        ? payload.error
+        : typeof payload?.message === 'string' && payload.message
+          ? payload.message
+          : 'Penukaran voucher ditolak oleh server.';
+    throw Object.assign(new Error(errMsg), {
+      code: errCode,
+      status: res.status,
+    });
   }
 }
 
@@ -1102,6 +1078,9 @@ export async function issueVoucherToCustomer(params: {
   // Emit Notification
   emitEvent('voucher.issued', {
     customerId: params.customerId,
+    customerVoucherId: cvId,
+    voucherId: params.voucher.id,
+    voucherCode: params.voucher.code,
     voucherName: params.voucher.name,
     discountValue: params.voucher.value,
     voucherType: params.voucher.voucherType,
@@ -1213,7 +1192,7 @@ export async function checkAndQualifyReferral(
 
   // Reward referrer with bonus points
   if (settings.referrerRewardPoints > 0) {
-    await recordLoyaltyTransaction({
+    const { transaction: refTx } = await recordLoyaltyTransaction({
       customerId: referrer.customerId,
       customerName: referrer.customerName,
       bookingId: booking.id,
@@ -1236,8 +1215,14 @@ export async function checkAndQualifyReferral(
     emitEvent('referral.qualified', {
       customerId: referrer.customerId,
       referrerName: referrer.customerName,
+      referredCustomerId: customerAccount.customerId,
       referredCustomerName: customerAccount.customerName,
       pointsReward: settings.referrerRewardPoints,
+      referralId,
+      bookingId: booking.id,
+      bookingCode: booking.bookingCode,
+      transactionId: refTx.id,
+      loyaltyTransactionId: refTx.id,
     }, { id: 'system', role: 'system' }).catch(() => {});
   }
 }
@@ -1283,7 +1268,7 @@ export async function checkAndIssueBirthdayReward(
 
   // Check validity window (default 30 days)
   if (diffDays <= settings.birthdayValidityDays) {
-    await recordLoyaltyTransaction({
+    const { transaction: bdayTx } = await recordLoyaltyTransaction({
       customerId,
       customerName: account.customerName,
       transactionType: 'birthday_bonus',
@@ -1304,6 +1289,10 @@ export async function checkAndIssueBirthdayReward(
       customerId,
       customerName: account.customerName,
       pointsReward: settings.birthdayRewardPoints,
+      year: currentYear,
+      referenceId: `${customerId}_${currentYear}`,
+      transactionId: bdayTx.id,
+      loyaltyTransactionId: bdayTx.id,
     }, { id: 'system', role: 'system' }).catch(() => {});
 
     return true;
