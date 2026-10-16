@@ -83,7 +83,7 @@ import {
   unregisterNotificationDevice,
 } from './lib/chatNotificationManager';
 import { isChatEligibleForBooking } from './lib/chatService';
-import { db } from './lib/firebase';
+import { db, auth } from './lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 function MainApp() {
@@ -239,50 +239,19 @@ function MainApp() {
 
   // Realtime notification badge listener
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    if (currentUser) {
-      const role = currentUser.role as any;
-      const canonicalStaffId =
-        role === 'therapist'
-          ? currentUser.therapistId || (currentUser as any)?.staffUserId || (currentUser as any)?.id || currentUser.uid || ''
-          : (currentUser as any)?.id || (currentUser as any)?.staffUserId || currentUser.uid || role;
-      if (role === 'therapist' && !canonicalStaffId) {
-        setUnreadNotifCount(0);
-        return;
-      }
-      unsubscribe = subscribeToRoleNotifications(
-        role,
-        canonicalStaffId,
-        (notifs) => {
-          const unread = notifs.filter((n) => !n.read).length;
-          setUnreadNotifCount(unread);
-        }
-      );
-    } else if (firebaseUser?.uid || currentCustomer?.id) {
-      unsubscribe = subscribeToCustomerNotifications(
-        {
-          customerId: currentCustomer?.id || firebaseUser?.uid || '',
-          customerAuthUid: firebaseUser?.uid || undefined,
-          bookingCode: initialTrackCode || undefined,
-        },
-        (notifs) => {
-          const unread = notifs.filter((n) => !n.read).length;
-          setUnreadNotifCount(unread);
-        }
-      );
-    } else {
-      setUnreadNotifCount(0);
-    }
-
-    return () => {
-      if (unsubscribe) unsubscribe();
+    const session = auth.currentUser;
+    const uid = session?.uid;
+    let live = true;
+    setUnreadNotifCount(0);
+    if (!uid) return;
+    const receive = (notifs: any[]) => {
+      if (live && auth.currentUser === session && auth.currentUser?.uid === uid) setUnreadNotifCount(notifs.filter(n => !n.read).length);
     };
-  }, [
-    currentUser,
-    firebaseUser?.uid,
-    currentCustomer?.id,
-    initialTrackCode,
-  ]);
+    const unsubscribe = currentUser
+      ? subscribeToRoleNotifications(currentUser.role as any, currentUser.uid || uid, receive)
+      : subscribeToCustomerNotifications({ customerAuthUid: uid }, receive);
+    return () => { live = false; unsubscribe(); setUnreadNotifCount(0); };
+  }, [currentUser, firebaseUser?.uid, currentCustomer?.id]);
 
   // Load initial data and subscriptions with Phase 6 & Phase 7 Privacy & Data Minimization
   useEffect(() => {

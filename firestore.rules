@@ -730,80 +730,7 @@ service cloud.firestore {
     // =============================================================
 
     match /notifications/{notifId} {
-      function isTherapistRecipientMatch(val) {
-        let role = getStaffRole();
-        let staffId = currentStaffMasterId(role);
-        let staff = get(/databases/$(database)/documents/staff_users/$(staffId)).data;
-        let candidates = [
-          request.auth.uid,
-          role.get('therapistId', ''),
-          role.get('staffId', ''),
-          role.get('staffUserId', ''),
-          staffId,
-          staff.get('therapistId', ''),
-          staff.get('id', ''),
-          staff.get('uid', '')
-        ];
-        return val is string && val.size() > 0 && val in candidates;
-      }
-
-      function isCustomerNotificationOwner(data) {
-        let hasCanonicalUid = ('customerAuthUid' in data && data.customerAuthUid is string && data.customerAuthUid.size() > 0)
-          || ('authUserId' in data && data.authUserId is string && data.authUserId.size() > 0);
-        let canonicalUidMatches = (!('customerAuthUid' in data) || data.customerAuthUid == null || data.customerAuthUid == '' || data.customerAuthUid == request.auth.uid)
-          && (!('authUserId' in data) || data.authUserId == null || data.authUserId == '' || data.authUserId == request.auth.uid)
-          && (data.get('customerAuthUid', '') == request.auth.uid || data.get('authUserId', '') == request.auth.uid);
-        return isSignedIn() && (
-          hasCanonicalUid ? canonicalUidMatches : (
-            (data.get('recipientUserId', '') == request.auth.uid) ||
-            (data.get('recipientId', '') == request.auth.uid) ||
-            (data.get('customerId', '') is string && data.get('customerId', '').size() > 0 && isCustomer(data.customerId)) ||
-            (data.get('recipientId', '') is string && data.get('recipientId', '').size() > 0 && isCustomer(data.recipientId)) ||
-            (data.get('bookingId', '') is string && data.get('bookingId', '').size() > 0
-              && exists(/databases/$(database)/documents/bookings/$(data.bookingId))
-              && isBookingCustomer(get(/databases/$(database)/documents/bookings/$(data.bookingId)).data))
-          )
-        );
-      }
-
-      function isNotificationRecipient(data) {
-        let recRole = data.get('recipientRole', data.get('targetRole', ''));
-        return isSignedIn() && (
-          (isManager() && (
-            recRole in ['admin', 'manager', 'supervisor', 'css'] ||
-            data.get('recipientId', '') in ['admin', 'manager', 'supervisor', 'css', request.auth.uid] ||
-            data.get('recipientUserId', '') == request.auth.uid
-          )) ||
-          (isSupervisor() && (
-            recRole == 'supervisor' ||
-            data.get('recipientId', '') in ['supervisor', request.auth.uid] ||
-            data.get('recipientUserId', '') == request.auth.uid
-          )) ||
-          (isCSS() && (
-            recRole in ['css', 'supervisor'] ||
-            data.get('recipientId', '') in ['css', request.auth.uid] ||
-            data.get('recipientUserId', '') == request.auth.uid
-          )) ||
-          (isTherapist() && recRole == 'therapist' && (
-            isTherapistRecipientMatch(data.get('recipientId', '')) ||
-            isTherapistRecipientMatch(data.get('recipientUserId', '')) ||
-            isTherapistRecipientMatch(data.get('therapistId', '')) ||
-            isTherapistRecipientMatch(data.get('targetUserId', ''))
-          )) ||
-          (recRole == 'customer' && isCustomerNotificationOwner(data))
-        );
-      }
-
-      allow read: if isNotificationRecipient(resource.data);
-      allow create: if false;
-      allow update: if isNotificationRecipient(resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt', 'updatedAt'])
-        && request.resource.data.read is bool
-        && (
-          (request.resource.data.read == true && request.resource.data.readAt is string && request.resource.data.readAt.size() > 0) ||
-          (request.resource.data.read == false && (!('readAt' in request.resource.data) || request.resource.data.readAt == null))
-        );
-      allow delete: if isNotificationRecipient(resource.data);
+      allow read, create, update, delete: if false;
     }
 
     match /notification_settings/{settingId} {
@@ -812,46 +739,7 @@ service cloud.firestore {
     }
 
     match /notification_devices/{deviceId} {
-      function isDeviceRegistrationOwner(data) {
-        let role = data.get('role', '');
-        let uid = data.get('userId', '');
-        let staffRoleDoc = hasStaffRoleDoc() ? getStaffRole() : {};
-        let staffMasterId = hasStaffRoleDoc() ? currentStaffMasterId(staffRoleDoc) : '';
-        return isSignedIn()
-          && data.get('token', '') is string
-          && data.token.size() >= 10
-          && data.token.size() <= 4096
-          && (!('authUid' in data) || data.authUid == null || data.authUid == '' || data.authUid == request.auth.uid)
-          && (
-            (role in ['admin', 'manager'] && isManager() && uid in ['admin', 'manager', request.auth.uid, staffMasterId]) ||
-            (role == 'supervisor' && isSupervisor() && uid in ['supervisor', request.auth.uid, staffMasterId]) ||
-            (role == 'css' && isCSS() && uid in ['css', request.auth.uid, staffMasterId]) ||
-            (role == 'therapist' && isTherapist() && uid is string && uid.size() > 0 && (
-              uid == request.auth.uid ||
-              uid == getStaffTherapistId() ||
-              uid == staffMasterId ||
-              uid == staffRoleDoc.get('staffId', '') ||
-              uid == staffRoleDoc.get('staffUserId', '')
-            )) ||
-            (role == 'customer' && uid is string && uid.size() > 0 && isCustomer(uid))
-          );
-      }
-
-      allow read: if isOperationalStaff() || (isSignedIn() && (
-        resource.data.get('authUid', '') == request.auth.uid ||
-        resource.data.get('userId', '') == request.auth.uid ||
-        (resource.data.get('role', '') == 'customer' && resource.data.get('userId', '') is string && isCustomer(resource.data.userId)) ||
-        (resource.data.get('role', '') == 'therapist' && isTherapist() && resource.data.get('userId', '') == getStaffTherapistId())
-      ));
-      allow create, update: if isDeviceRegistrationOwner(request.resource.data)
-        && (resource == null || isOperationalStaff()
-          || resource.data.get('authUid', '') in ['', null, request.auth.uid]
-          || resource.data.get('userId', '') == request.resource.data.get('userId', ''));
-      allow delete: if isOperationalStaff() || (isSignedIn() && (
-        resource.data.get('authUid', '') == request.auth.uid ||
-        resource.data.get('userId', '') == request.auth.uid ||
-        (resource.data.get('role', '') == 'customer' && resource.data.get('userId', '') is string && isCustomer(resource.data.userId))
-      ));
+      allow read, write: if false;
     }
 
     match /notification_events/{eventId} {

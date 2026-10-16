@@ -1,3 +1,4 @@
+import { auth } from '../lib/firebase';
 import React, { useState, useEffect } from 'react';
 import {
   Bell,
@@ -31,7 +32,6 @@ import {
   markAllNotificationsAsRead,
   deleteNotification,
   clearReadNotifications,
-  registerDeviceToken,
 } from '../lib/notificationService';
 import { playNotificationSound } from '../lib/notificationChannels';
 
@@ -84,48 +84,21 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
     }
   }, []);
 
-  // Realtime subscription
+  // Private inbox subscription; clear state on close and identity changes.
   useEffect(() => {
+    let live = true;
+    setNotifications([]);
     if (!isOpen) return;
-
-    let unsubscribe: (() => void) | undefined;
-    if (role === 'customer') {
-      if (!resolvedCustomerId && !customerAuthUid) {
-        setNotifications([]);
-        return;
-      }
-      unsubscribe = subscribeToCustomerNotifications(
-        {
-          customerId: resolvedCustomerId || customerAuthUid || '',
-          customerAuthUid,
-          bookingCode: customerBookingCode || undefined,
-        },
-        (list) => {
-          setNotifications(list);
-        }
-      );
-    } else {
-      if (role === 'therapist' && !resolvedTherapistId) {
-        setNotifications([]);
-        return;
-      }
-      unsubscribe = subscribeToRoleNotifications(role, resolvedRecipientId, (list) => {
-        setNotifications(list);
-      });
-    }
-
-    return () => {
-      if (unsubscribe) unsubscribe();
+    const session = auth.currentUser;
+    if (!session?.uid) return;
+    const receive = (items: InAppNotification[]) => {
+      if (live && auth.currentUser === session) setNotifications(items);
     };
-  }, [
-    isOpen,
-    role,
-    resolvedRecipientId,
-    resolvedTherapistId,
-    resolvedCustomerId,
-    customerAuthUid,
-    customerBookingCode,
-  ]);
+    const unsubscribe = role === 'customer'
+      ? subscribeToCustomerNotifications({ customerAuthUid: session.uid }, receive)
+      : subscribeToRoleNotifications(role, session.uid, receive);
+    return () => { live = false; unsubscribe(); setNotifications([]); };
+  }, [isOpen, role, resolvedRecipientId, resolvedTherapistId, resolvedCustomerId, customerAuthUid, customerBookingCode]);
 
   if (!isOpen) return null;
 
@@ -140,46 +113,21 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
 
   const handleEnablePush = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      alert('Browser ini tidak mendukung Web Push Notification.');
+      alert('Browser ini tidak mendukung notifikasi lokal.');
       return;
     }
-
-    const pushOwnerId =
-      role === 'customer'
-        ? resolvedCustomerId || customerAuthUid
-        : role === 'therapist'
-          ? resolvedTherapistId
-          : resolvedRecipientId;
-    if (!pushOwnerId) {
-      return;
-    }
-
+    const session = auth.currentUser;
+    if (!session?.uid) return;
     setIsRequestingPush(true);
     try {
       const permission = await Notification.requestPermission();
+      if (auth.currentUser !== session) return;
       setPushStatus(permission);
       if (permission === 'granted') {
-        const dummyToken = `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        await registerDeviceToken({
-          userId: pushOwnerId,
-          role: role,
-          token: dummyToken,
-          platform: 'pwa',
-        });
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then((reg) => {
-            reg.showNotification('Senzu Home Palembang', {
-              body: 'Push notifikasi berhasil diaktifkan untuk perangkat ini.',
-              icon: '/icon.svg',
-            });
-          });
-        }
+        alert('Izin notifikasi browser telah aktif. Push dari server belum terkonfigurasi; token FCM perangkat belum tersedia.');
       }
-    } catch (err) {
-      console.warn('Push request error:', err);
-    } finally {
-      setIsRequestingPush(false);
-    }
+    } catch (error) { console.warn('Notification permission request failed:', error); }
+    finally { if (auth.currentUser === session) setIsRequestingPush(false); }
   };
 
   const handleActionClick = (notif: InAppNotification) => {
