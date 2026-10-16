@@ -49,6 +49,7 @@ import { CompanySettingsCard } from '../admin/CompanySettingsCard';
 import { BranchSettingsCard } from '../admin/BranchSettingsCard';
 import { ServiceMasterCard } from '../admin/ServiceMasterCard';
 import { BusinessSettingsCard } from '../admin/BusinessSettingsCard';
+import { MetaAdsSettingsCard } from '../admin/MetaAdsSettingsCard';
 import { AreaMasterCard } from './AreaMasterCard';
 import { PaymentMasterCard } from './PaymentMasterCard';
 import { StaffMasterCard } from './StaffMasterCard';
@@ -582,11 +583,14 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
 
           {/* Sub-module 7: Operational Settings */}
           {activeMasterSubTab === 'operational' && (
-            <OperationalSettingsCard
-              currentUser={currentUser}
-              onRefresh={handleGlobalRefresh}
-              isReadOnly={!isManagerOrAdmin}
-            />
+            <div className="space-y-6">
+              <OperationalSettingsCard
+                currentUser={currentUser}
+                onRefresh={handleGlobalRefresh}
+                isReadOnly={!isManagerOrAdmin}
+              />
+              <MetaAdsSettingsCard currentUser={currentUser} />
+            </div>
           )}
 
           {/* Sub-module 8: Notifications */}
