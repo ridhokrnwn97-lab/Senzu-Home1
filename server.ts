@@ -1,5 +1,7 @@
 import { registerPaymentAcceptance, assertPaymentLink } from './src/server/paymentAcceptance.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
+import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
+import { DEFAULT_NOTIFICATION_SETTINGS } from './src/types/notification.ts';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -17333,527 +17335,19 @@ async function startServer() {
 
   // Authoritative Chat Notification Dispatcher (Stage 7E hardened)
   async function dispatchAuthoritativeChatNotification(params: {
-    bookingId: string;
-    messageId: string;
-    senderType?: 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
-  }): Promise<{
-    dispatched: boolean;
-    isIdempotent?: boolean;
-    notificationId?: string | null;
-    deliveryId?: string | null;
-    pushDeliveryId?: string | null;
-  }> {
-    const bookingId = typeof params?.bookingId === 'string' ? params.bookingId.trim() : '';
-    const messageId = typeof params?.messageId === 'string' ? params.messageId.trim() : '';
-    if (!bookingId || !messageId || !adminDb) {
-      return { dispatched: false };
-    }
-
-    try {
-      const bookingDoc = await adminDb.collection('bookings').doc(bookingId).get();
-      if (!bookingDoc.exists) return { dispatched: false };
-
-      const booking = bookingDoc.data() as any;
-      const rawStatus = String(booking.status || '').toLowerCase().trim();
-      const rawPayStatus = String(booking.paymentStatus || '').toLowerCase().trim();
-      const isTerminal =
-        ['completed', 'cancelled', 'rescheduled', 'rejected', 'dibatalkan', 'selesai', 'expired'].includes(rawStatus) ||
-        ['expired', 'refunded', 'payment_rejected'].includes(rawPayStatus);
-
-      if (isTerminal) return { dispatched: false };
-
-      const chatDoc = await adminDb.collection('booking_chats').doc(bookingId).get();
-      if (chatDoc.exists && String(chatDoc.data()?.status || '').toLowerCase().trim() === 'closed') {
-        return { dispatched: false };
-      }
-
-      const messageRef = adminDb
-        .collection('booking_chats')
-        .doc(bookingId)
-        .collection('messages')
-        .doc(messageId);
-      const messageSnap = await messageRef.get();
-      if (!messageSnap.exists) {
-        return { dispatched: false };
-      }
-      const persistedMsg = messageSnap.data() as any;
-      if (String(persistedMsg?.bookingId || bookingId).trim() !== bookingId) {
-        return { dispatched: false };
-      }
-
-      const authoritativeSenderType = String(
-        persistedMsg?.senderType || params.senderType || ''
-      )
-        .toUpperCase()
-        .trim() as 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
-      if (!['CUSTOMER', 'THERAPIST', 'SYSTEM'].includes(authoritativeSenderType)) {
-        return { dispatched: false };
-      }
-
-      const safeBookingKey = bookingId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
-      const safeMsgKey = messageId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-      const notifDispatchId = `chat_notif_${safeBookingKey}_${safeMsgKey}`;
-      const legacyDispatchId = `chat_notif_${messageId}`;
-      const dispatchRef = adminDb.collection('chat_notification_dispatches').doc(notifDispatchId);
-      const legacyDispatchRef = adminDb.collection('chat_notification_dispatches').doc(legacyDispatchId);
-
-      const [existingDispatch, existingLegacy] = await Promise.all([
-        dispatchRef.get(),
-        notifDispatchId !== legacyDispatchId ? legacyDispatchRef.get() : Promise.resolve(null),
-      ]);
-      if (existingDispatch.exists || (existingLegacy && existingLegacy.exists)) {
-        const existingData = (existingDispatch.exists ? existingDispatch.data() : existingLegacy?.data()) as any;
-        return {
-          dispatched: true,
-          isIdempotent: true,
-          notificationId: existingData?.notificationId || null,
-          deliveryId: existingData?.deliveryId || null,
-          pushDeliveryId: existingData?.pushDeliveryId || null,
-        };
-      }
-
-      const isCustomerSender = authoritativeSenderType === 'CUSTOMER';
-      const recipientRole: 'therapist' | 'customer' = isCustomerSender ? 'therapist' : 'customer';
-      const therapistBusinessId = String(
-        booking.therapistId || booking.assignedTherapistId || ''
-      ).trim();
-
-      let canonicalRecipientId = '';
-      let recipientAuthUid = '';
-      const deviceCandidateUserIds = new Set<string>();
-
-      if (isCustomerSender) {
-        if (!therapistBusinessId) {
-          return { dispatched: false };
-        }
-        canonicalRecipientId = therapistBusinessId;
-        deviceCandidateUserIds.add(therapistBusinessId);
-        try {
-          const tDoc = await adminDb.collection('therapists').doc(therapistBusinessId).get();
-          if (tDoc.exists) {
-            const tData = tDoc.data() as any;
-            const tUid = String(tData?.authUserId || tData?.authUid || '').trim();
-            if (tUid) {
-              recipientAuthUid = tUid;
-              deviceCandidateUserIds.add(tUid);
-            }
-          }
-        } catch {}
-        if (!recipientAuthUid) {
-          try {
-            const srSnap = await adminDb
-              .collection('staff_roles')
-              .where('therapistId', '==', therapistBusinessId)
-              .limit(1)
-              .get();
-            if (!srSnap.empty) {
-              recipientAuthUid = srSnap.docs[0].id;
-              deviceCandidateUserIds.add(recipientAuthUid);
-            }
-          } catch {}
-        }
-        if (booking.therapistAuthUid) {
-          const bTAuth = String(booking.therapistAuthUid).trim();
-          if (bTAuth) {
-            if (!recipientAuthUid) recipientAuthUid = bTAuth;
-            deviceCandidateUserIds.add(bTAuth);
-          }
-        }
-      } else {
-        const bCustAuthUid = String(booking.customerAuthUid || '').trim();
-        const bAuthUserId = String(booking.authUserId || '').trim();
-        if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
-          return { dispatched: false };
-        }
-        recipientAuthUid = bCustAuthUid || bAuthUserId;
-        const bCustomerId = String(booking.customerId || '').trim();
-        if (!recipientAuthUid && bCustomerId) {
-          try {
-            const cSnap = await adminDb.collection('customers').doc(bCustomerId).get();
-            if (cSnap.exists) {
-              const cData = cSnap.data() as any;
-              const cAuth = String(cData?.authUserId || cData?.customerAuthUid || '').trim();
-              if (cAuth) recipientAuthUid = cAuth;
-            }
-          } catch {}
-        }
-        canonicalRecipientId = bCustomerId || recipientAuthUid;
-        if (canonicalRecipientId) deviceCandidateUserIds.add(canonicalRecipientId);
-        if (recipientAuthUid) deviceCandidateUserIds.add(recipientAuthUid);
-      }
-
-      if (!canonicalRecipientId) {
-        return { dispatched: false };
-      }
-
-      const notifTitle = 'Senzu Home';
-      const notifBody = isCustomerSender
-        ? 'Pesan baru dari customer.'
-        : 'Pesan baru dari terapis Anda.';
-      const now = new Date().toISOString();
-      const notifId = `inapp_${safeBookingKey}_${safeMsgKey}`;
-      const inAppDeliveryId = `del_${notifDispatchId}_inapp`;
-      const pushDeliveryId = `del_${notifDispatchId}_push`;
-      const actionUrl = `/?openChat=${encodeURIComponent(bookingId)}`;
-
-      const eventRecord = {
-        id: notifDispatchId,
-        type: 'chat.message_received',
-        bookingId,
-        bookingCode: booking.bookingCode || '',
-        customerId: booking.customerId || recipientAuthUid || undefined,
-        customerName: booking.customerName || undefined,
-        therapistId: therapistBusinessId || undefined,
-        therapistName: booking.therapistName || booking.assignedTherapistName || undefined,
-        actorId: String(persistedMsg.senderUid || '').trim() || 'system',
-        actorRole: authoritativeSenderType.toLowerCase(),
-        priority: 'HIGH',
-        targetRoles: [recipientRole],
-        payload: {
-          bookingId,
-          bookingCode: booking.bookingCode || '',
-          messageId,
-          senderType: authoritativeSenderType,
-          recipientRole,
-          recipientId: canonicalRecipientId,
-        },
-        createdAt: now,
-        deduplicationKey: `chat:${bookingId}:${messageId}`,
-      };
-
-      const notifDoc: Record<string, any> = {
-        id: notifId,
-        eventId: notifDispatchId,
-        eventType: 'chat.message_received',
-        recipientRole,
-        recipientId: canonicalRecipientId,
-        recipientUserId: recipientAuthUid || canonicalRecipientId,
-        bookingId,
-        bookingCode: booking.bookingCode || '',
-        customerId: booking.customerId || (recipientRole === 'customer' ? canonicalRecipientId : undefined),
-        customerAuthUid: recipientRole === 'customer' ? recipientAuthUid || undefined : undefined,
-        therapistId: therapistBusinessId || undefined,
-        title: notifTitle,
-        message: notifBody,
-        channel: 'in_app',
-        priority: 'HIGH',
-        read: false,
-        readAt: null,
-        actionUrl,
-        metadata: {
-          bookingId,
-          messageId,
-          senderType: authoritativeSenderType,
-        },
-        createdAt: now,
-      };
-
-      await adminDb.collection('notification_events').doc(notifDispatchId).set(
-        JSON.parse(JSON.stringify(eventRecord))
-      );
-      await adminDb.collection('notifications').doc(notifId).set(
-        JSON.parse(JSON.stringify(notifDoc))
-      );
-      await adminDb.collection('notification_deliveries').doc(inAppDeliveryId).set({
-        id: inAppDeliveryId,
-        eventId: notifDispatchId,
-        eventType: 'chat.message_received',
-        bookingId,
-        bookingCode: booking.bookingCode || '',
-        recipientRole,
-        recipientId: canonicalRecipientId,
-        recipientName: isCustomerSender
-          ? booking.therapistName || booking.assignedTherapistName || 'Terapis'
-          : booking.customerName || 'Pelanggan',
-        channel: 'in_app',
-        status: 'delivered',
-        attemptCount: 1,
-        providerResponse: 'Written to Firestore notifications collection',
-        sentAt: now,
-        deliveredAt: now,
-        createdAt: now,
-      });
-
-      // Truthful push delivery recording
-      let pushStatus: 'sent' | 'failed' | 'skipped' = 'skipped';
-      let pushProviderResponse = 'No active push devices registered for recipient';
-      let pushErrorMessage: string | undefined;
-
-      try {
-        const allDeviceSnaps = await adminDb
-          .collection('notification_devices')
-          .where('role', '==', recipientRole)
-          .get();
-        const pushTokens: string[] = [];
-        allDeviceSnaps.docs.forEach((snapDoc) => {
-          const d = snapDoc.data() as any;
-          if (d?.enabled === false) return;
-          const dUid = String(d?.userId || '').trim();
-          const dAuthUid = String(d?.authUid || '').trim();
-          if (
-            (dUid && deviceCandidateUserIds.has(dUid)) ||
-            (dAuthUid && deviceCandidateUserIds.has(dAuthUid))
-          ) {
-            if (typeof d?.token === 'string' && d.token.trim()) {
-              pushTokens.push(d.token.trim());
-            }
-          }
-        });
-
-        if (pushTokens.length === 0) {
-          pushStatus = 'skipped';
-          pushProviderResponse = 'No registered device tokens found for recipient';
-        } else if (!adminMessaging) {
-          pushStatus = 'skipped';
-          pushProviderResponse = 'FCM adminMessaging not configured in this environment';
-        } else {
-          try {
-            const multicastRes = await adminMessaging.sendEachForMulticast({
-              tokens: pushTokens,
-              notification: {
-                title: notifTitle,
-                body: notifBody,
-              },
-              data: {
-                bookingId,
-                messageId,
-                senderType: authoritativeSenderType,
-                actionUrl,
-              },
-            });
-            if (multicastRes && multicastRes.successCount > 0) {
-              pushStatus = 'sent';
-              pushProviderResponse = `FCM multicast sent (${multicastRes.successCount}/${pushTokens.length})`;
-            } else {
-              pushStatus = 'failed';
-              pushErrorMessage = 'FCM multicast returned 0 successful deliveries';
-              pushProviderResponse = pushErrorMessage;
-            }
-          } catch (fcmErr: any) {
-            pushStatus = 'failed';
-            pushErrorMessage = fcmErr?.message || String(fcmErr);
-            pushProviderResponse = `FCM error: ${pushErrorMessage}`;
-          }
-        }
-      } catch (deviceLookupErr: any) {
-        pushStatus = 'failed';
-        pushErrorMessage = deviceLookupErr?.message || String(deviceLookupErr);
-        pushProviderResponse = `Device lookup error: ${pushErrorMessage}`;
-      }
-
-      await adminDb.collection('notification_deliveries').doc(pushDeliveryId).set(
-        JSON.parse(
-          JSON.stringify({
-            id: pushDeliveryId,
-            eventId: notifDispatchId,
-            eventType: 'chat.message_received',
-            bookingId,
-            bookingCode: booking.bookingCode || '',
-            recipientRole,
-            recipientId: canonicalRecipientId,
-            channel: 'push',
-            status: pushStatus,
-            attemptCount: pushStatus === 'skipped' ? 0 : 1,
-            providerResponse: pushProviderResponse,
-            errorMessage: pushErrorMessage,
-            sentAt: pushStatus === 'sent' ? now : undefined,
-            failedAt: pushStatus === 'failed' ? now : undefined,
-            createdAt: now,
-          })
-        )
-      );
-
-      const dispatchRecord = {
-        id: notifDispatchId,
-        messageId,
-        bookingId,
-        bookingCode: booking.bookingCode || '',
-        senderType: authoritativeSenderType,
-        recipientRole,
-        recipientId: canonicalRecipientId,
-        recipientUserId: recipientAuthUid || canonicalRecipientId,
-        notificationId: notifId,
-        deliveryId: inAppDeliveryId,
-        pushDeliveryId,
-        pushStatus,
-        title: notifTitle,
-        body: notifBody,
-        createdAt: now,
-        dispatchedAt: now,
-      };
-      await dispatchRef.set(dispatchRecord);
-      if (legacyDispatchId !== notifDispatchId) {
-        await legacyDispatchRef.set(dispatchRecord);
-      }
-
-      return {
-        dispatched: true,
-        isIdempotent: false,
-        notificationId: notifId,
-        deliveryId: inAppDeliveryId,
-        pushDeliveryId,
-      };
-    } catch (err) {
-      console.warn('[ChatNotification] Dispatch error:', err);
-      return { dispatched: false };
-    }
+    bookingId: string; messageId: string; senderType?: 'CUSTOMER' | 'THERAPIST' | 'SYSTEM';
+  }): Promise<{ dispatched: boolean; isIdempotent?: boolean; notificationId?: string | null; deliveryId?: string | null; pushDeliveryId?: string | null }> {
+    try { return await s7DispatchChat(params.bookingId, params.messageId); }
+    catch { return { dispatched: false }; }
   }
 
-  app.post('/api/chat/notify', async (req, res) => {
-    try {
-      const bookingId = typeof req.body?.bookingId === 'string' ? req.body.bookingId.trim() : '';
-      const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId.trim() : '';
-      const requestedSenderType =
-        typeof req.body?.senderType === 'string' ? req.body.senderType.trim().toUpperCase() : '';
-      if (!bookingId || !messageId) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_CHAT_NOTIFY_INPUT',
-          message: 'Parameter tidak lengkap.',
-        });
-      }
-
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          message: 'Database server tidak tersedia.',
-        });
-      }
-
-      // Authoritative verification of caller via Bearer token
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({
-          success: false,
-          code: 'AUTH_REQUIRED',
-          message: 'Autentikasi diperlukan untuk mengirim notifikasi chat.',
-        });
-      }
-      const token = authHeader.split('Bearer ')[1]?.trim();
-      const verified = await verifyFirebaseIdToken(token);
-      if (!verified || !verified.uid) {
-        return res.status(401).json({
-          success: false,
-          code: 'AUTH_TOKEN_INVALID',
-          message: 'Sesi autentikasi tidak valid.',
-        });
-      }
-      const authUid = verified.uid;
-
-      const bookingDoc = await adminDb.collection('bookings').doc(bookingId).get();
-      if (!bookingDoc.exists) {
-        return res.status(404).json({
-          success: false,
-          code: 'BOOKING_NOT_FOUND',
-          message: 'Pesanan tidak ditemukan.',
-        });
-      }
-      const booking = bookingDoc.data() as any;
-
-      const participant = await resolveChatParticipant(authUid, booking);
-      if (!participant.authorized) {
-        return res.status(403).json({
-          success: false,
-          code: 'FORBIDDEN_CHAT_PARTICIPANT',
-          message: participant.error || 'Akses notifikasi chat ditolak.',
-        });
-      }
-
-      const rawStatus = String(booking.status || '').toLowerCase().trim();
-      const rawPayStatus = String(booking.paymentStatus || '').toLowerCase().trim();
-      const isTerminal =
-        ['completed', 'cancelled', 'rescheduled', 'rejected', 'dibatalkan', 'selesai', 'expired'].includes(rawStatus) ||
-        ['expired', 'refunded', 'payment_rejected'].includes(rawPayStatus);
-      if (isTerminal) {
-        return res.status(409).json({
-          success: false,
-          code: 'CHAT_CLOSED_TERMINAL_BOOKING',
-          message: 'Pesanan telah selesai atau dibatalkan, notifikasi chat tidak dapat dikirim.',
-        });
-      }
-
-      const chatDoc = await adminDb.collection('booking_chats').doc(bookingId).get();
-      if (chatDoc.exists && String(chatDoc.data()?.status || '').toLowerCase().trim() === 'closed') {
-        return res.status(409).json({
-          success: false,
-          code: 'CHAT_SESSION_CLOSED',
-          message: 'Sesi percakapan telah ditutup.',
-        });
-      }
-
-      const msgRef = adminDb
-        .collection('booking_chats')
-        .doc(bookingId)
-        .collection('messages')
-        .doc(messageId);
-      const msgSnap = await msgRef.get();
-      if (!msgSnap.exists) {
-        return res.status(404).json({
-          success: false,
-          code: 'CHAT_MESSAGE_NOT_FOUND',
-          message: 'Pesan chat tidak ditemukan.',
-        });
-      }
-      const msgData = msgSnap.data() as any;
-      if (String(msgData?.bookingId || bookingId).trim() !== bookingId) {
-        return res.status(409).json({
-          success: false,
-          code: 'CHAT_MESSAGE_MISMATCH',
-          message: 'Pesan tidak sesuai dengan pesanan ini.',
-        });
-      }
-
-      const persistedSenderType = String(msgData?.senderType || '').toUpperCase().trim();
-      const persistedSenderUid = String(msgData?.senderUid || '').trim();
-      if (!['CUSTOMER', 'THERAPIST', 'SYSTEM'].includes(persistedSenderType)) {
-        return res.status(409).json({
-          success: false,
-          code: 'INVALID_PERSISTED_SENDER',
-          message: 'Pengirim pesan tidak valid.',
-        });
-      }
-      if (requestedSenderType && requestedSenderType !== persistedSenderType) {
-        return res.status(403).json({
-          success: false,
-          code: 'SENDER_TYPE_MISMATCH',
-          message: 'Tipe pengirim tidak sesuai dengan catatan pesan.',
-        });
-      }
-
-      if (participant.role === 'customer') {
-        if (persistedSenderType !== 'CUSTOMER' || (persistedSenderUid && persistedSenderUid !== authUid)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_MESSAGE_SENDER',
-            message: 'Pelanggan hanya dapat memicu notifikasi untuk pesannya sendiri.',
-          });
-        }
-      } else if (participant.role === 'therapist') {
-        if (persistedSenderType !== 'THERAPIST' || (persistedSenderUid && persistedSenderUid !== authUid)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_MESSAGE_SENDER',
-            message: 'Terapis hanya dapat memicu notifikasi untuk pesannya sendiri.',
-          });
-        }
-      }
-
-      const result = await dispatchAuthoritativeChatNotification({
-        bookingId,
-        messageId,
-        senderType: persistedSenderType as 'CUSTOMER' | 'THERAPIST' | 'SYSTEM',
-      });
-      return res.json({
-        success: true,
-        isIdempotent: Boolean(result.isIdempotent),
-        notificationId: result.notificationId || null,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
+  app.post('/api/chat/notify', s7Route(async (req, uid) => {
+    const body = s7Body(req.body, ['bookingId', 'messageId', 'senderType']);
+    if (!s7Id(body.bookingId) || !s7Id(body.messageId) || (body.senderType !== undefined && !['CUSTOMER','THERAPIST','SYSTEM'].includes(body.senderType))) throw s7Error(400, 'INVALID_CHAT_NOTIFY_INPUT');
+    const caller: S7Caller = { uid, role: '', staffId: '', name: '', therapistIds: new Set() };
+    const result = await s7DispatchChat(body.bookingId, body.messageId, caller, body.senderType);
+    return { success: true, isIdempotent: result.isIdempotent === true, notificationId: result.notificationId };
+  }));
 
   // Scoped guards for notification-device endpoints only.
   const notificationDeviceRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -20429,2490 +19923,813 @@ async function startServer() {
   // ===========================================================================
   // STAGE 7E: PRIVATE NOTIFICATIONS, AUTHORITATIVE EVENTS & DELIVERY RECORDS
   // ===========================================================================
-
-  type Stage7ERecipientRole = 'customer' | 'therapist' | 'supervisor' | 'manager' | 'admin' | 'css';
-  type Stage7EPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
-
-  const STAGE7E_EVENT_ALIASES: Record<string, string> = {
-    SCHEDULE_CHANGED: 'therapist.shift_updated',
-    'therapist.off_updated': 'therapist.shift_updated',
-    'therapist.schedule_override': 'therapist.shift_updated',
-    'therapist.assigned': 'booking.assigned',
-    'therapist.reassigned': 'booking.reassigned',
-    'therapist.on_the_way': 'therapist.departing',
-    'booking.reminder': 'booking.Reminder',
-    'supervisor.unassigned_alert': 'booking.stale_unassigned',
-    'therapist.late_departure_alert': 'therapist.late_alert',
-    'therapist.not_accepted_alert': 'therapist.late_alert',
-    'tracking.location_stale': 'therapist.late_alert',
-    'loyalty.tier_upgraded': 'membership.tier_upgraded',
-    'loyalty.voucher_issued': 'voucher.issued',
-    'loyalty.referral_rewarded': 'referral.qualified',
-    'loyalty.birthday_reward': 'birthday.reward_issued',
+  type S7Caller = { uid: string; role: string; staffId: string; name: string; therapistIds: Set<string> };
+  type S7Source = { type: string; references: Record<string, any>; booking: any; bookingId: string; customerId: string; customerUid: string; therapistId: string; payload: Record<string, any>; version: string; entity: any; ownerUid: string };
+  const s7Operational = ['css', 'supervisor', 'manager', 'admin'];
+  const s7EventTypes = new Set<string>(["booking.created", "booking.confirmed", "booking.cancelled", "payment.proof_uploaded", "payment.verified", "payment.rejected", "payment.expired", "booking.ready_for_assignment", "therapist.assigned", "therapist.reassigned", "therapist.accepted", "therapist.on_the_way", "therapist.nearby", "therapist.arrived", "treatment.started", "treatment.completed", "tracking.location_stale", "booking.reminder", "supervisor.unassigned_alert", "therapist.not_accepted_alert", "therapist.late_departure_alert", "review.low_rating", "crm.task_due", "loyalty.points_earned", "loyalty.points_redeemed", "loyalty.points_expiring", "membership.tier_upgraded", "membership.tier_renewed", "voucher.issued", "voucher.expiring", "voucher.used", "referral.qualified", "birthday.reward_issued", "therapist.shift_updated", "therapist.off_updated", "therapist.schedule_override", "case.created", "case.assigned", "case.escalated", "case.high_severity", "case.waiting_customer", "case.waiting_manager", "case.resolved", "case.closed", "case.reopened", "recovery.proposed", "recovery.approved", "recovery.rejected", "recovery.completed"]);
+  const s7Rates = new Map<string, { count: number; until: number }>();
+  const s7GuestRates = new Map<string, { count: number; until: number }>();
+  const s7Text = (v: unknown, max = 160): string => typeof v === 'string' ? v.trim().slice(0, max) : '';
+  const s7Id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.:@-]{0,159}$/.test(v) && !/^\.+$/.test(v);
+  const s7Error = (statusCode: number, code: string, message = 'Permintaan notifikasi tidak dapat diproses.') => Object.assign(new Error(message), { statusCode, code });
+  const s7Json = (value: any): any => JSON.parse(JSON.stringify(value));
+  const s7Hash = (value: any): string => {
+    const sorted = (v: any): any => Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sorted(v[k])])) : v;
+    return createHash('sha256').update(JSON.stringify(sorted(s7Json(value)))).digest('hex');
   };
-
-  interface Stage7EEventRule {
-    canonicalType: string;
-    entityKind:
-      | 'booking'
-      | 'payment'
-      | 'roster'
-      | 'loyalty_tx'
-      | 'tier_upgrade'
-      | 'voucher'
-      | 'referral'
-      | 'birthday'
-      | 'case'
-      | 'review'
-      | 'chat'
-      | 'system';
-    allowedStaffRoles: string[];
-    allowCustomerOwner: boolean;
-    allowAssignedTherapist: boolean;
-    defaultRoles: Stage7ERecipientRole[];
-    defaultPriority: Stage7EPriority;
-  }
-
-  const STAGE7E_EVENT_RULES: Record<string, Stage7EEventRule> = {
-    'booking.created': {
-      canonicalType: 'booking.created',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'supervisor', 'manager'],
-      defaultPriority: 'NORMAL',
-    },
-    'booking.confirmed': {
-      canonicalType: 'booking.confirmed',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'supervisor'],
-      defaultPriority: 'NORMAL',
-    },
-    'booking.assigned': {
-      canonicalType: 'booking.assigned',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['therapist', 'customer', 'supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'booking.reassigned': {
-      canonicalType: 'booking.reassigned',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['therapist', 'customer', 'supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'booking.rescheduled': {
-      canonicalType: 'booking.rescheduled',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'therapist', 'supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'booking.cancelled': {
-      canonicalType: 'booking.cancelled',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'therapist', 'supervisor', 'manager'],
-      defaultPriority: 'CRITICAL',
-    },
-    'booking.Reminder': {
-      canonicalType: 'booking.Reminder',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'therapist'],
-      defaultPriority: 'HIGH',
-    },
-    'booking.stale_unassigned': {
-      canonicalType: 'booking.stale_unassigned',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['supervisor', 'manager'],
-      defaultPriority: 'CRITICAL',
-    },
-    'payment.pending': {
-      canonicalType: 'payment.pending',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer'],
-      defaultPriority: 'NORMAL',
-    },
-    'payment.proof_uploaded': {
-      canonicalType: 'payment.proof_uploaded',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'payment.verified': {
-      canonicalType: 'payment.verified',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'therapist', 'supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'payment.rejected': {
-      canonicalType: 'payment.rejected',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'payment.expired': {
-      canonicalType: 'payment.expired',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'payment.refund_requested': {
-      canonicalType: 'payment.refund_requested',
-      entityKind: 'payment',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['manager', 'supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'payment.refund_completed': {
-      canonicalType: 'payment.refund_completed',
-      entityKind: 'payment',
-      allowedStaffRoles: ['manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer', 'manager', 'supervisor'],
-      defaultPriority: 'NORMAL',
-    },
-    'therapist.accepted': {
-      canonicalType: 'therapist.accepted',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'supervisor'],
-      defaultPriority: 'NORMAL',
-    },
-    'therapist.departing': {
-      canonicalType: 'therapist.departing',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'therapist.nearby': {
-      canonicalType: 'therapist.nearby',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer'],
-      defaultPriority: 'HIGH',
-    },
-    'therapist.arrived': {
-      canonicalType: 'therapist.arrived',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'treatment.started': {
-      canonicalType: 'treatment.started',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'supervisor'],
-      defaultPriority: 'NORMAL',
-    },
-    'treatment.completed': {
-      canonicalType: 'treatment.completed',
-      entityKind: 'booking',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'supervisor', 'manager'],
-      defaultPriority: 'NORMAL',
-    },
-    'booking.ready_for_assignment': {
-      canonicalType: 'booking.ready_for_assignment',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['supervisor'],
-      defaultPriority: 'HIGH',
-    },
-    'therapist.late_alert': {
-      canonicalType: 'therapist.late_alert',
-      entityKind: 'booking',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['supervisor', 'manager', 'therapist'],
-      defaultPriority: 'CRITICAL',
-    },
-    'therapist.shift_updated': {
-      canonicalType: 'therapist.shift_updated',
-      entityKind: 'roster',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['therapist'],
-      defaultPriority: 'NORMAL',
-    },
-    'loyalty.points_earned': {
-      canonicalType: 'loyalty.points_earned',
-      entityKind: 'loyalty_tx',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer'],
-      defaultPriority: 'NORMAL',
-    },
-    'loyalty.points_redeemed': {
-      canonicalType: 'loyalty.points_redeemed',
-      entityKind: 'loyalty_tx',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer'],
-      defaultPriority: 'LOW',
-    },
-    'membership.tier_upgraded': {
-      canonicalType: 'membership.tier_upgraded',
-      entityKind: 'tier_upgrade',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'voucher.issued': {
-      canonicalType: 'voucher.issued',
-      entityKind: 'voucher',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer'],
-      defaultPriority: 'NORMAL',
-    },
-    'referral.qualified': {
-      canonicalType: 'referral.qualified',
-      entityKind: 'referral',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: true,
-      defaultRoles: ['customer'],
-      defaultPriority: 'NORMAL',
-    },
-    'birthday.reward_issued': {
-      canonicalType: 'birthday.reward_issued',
-      entityKind: 'birthday',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['customer'],
-      defaultPriority: 'NORMAL',
-    },
-    'system.daily_summary': {
-      canonicalType: 'system.daily_summary',
-      entityKind: 'system',
-      allowedStaffRoles: ['supervisor', 'manager', 'admin'],
-      allowCustomerOwner: false,
-      allowAssignedTherapist: false,
-      defaultRoles: ['manager', 'supervisor'],
-      defaultPriority: 'LOW',
-    },
-    'review.low_rating': {
-      canonicalType: 'review.low_rating',
-      entityKind: 'review',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: false,
-      defaultRoles: ['css', 'supervisor', 'manager'],
-      defaultPriority: 'HIGH',
-    },
-    'case.created': {
-      canonicalType: 'case.created',
-      entityKind: 'case',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: true,
-      defaultRoles: ['supervisor', 'manager', 'css'],
-      defaultPriority: 'HIGH',
-    },
-    'case.high_severity': {
-      canonicalType: 'case.high_severity',
-      entityKind: 'case',
-      allowedStaffRoles: ['css', 'supervisor', 'manager', 'admin'],
-      allowCustomerOwner: true,
-      allowAssignedTherapist: true,
-      defaultRoles: ['supervisor', 'manager', 'css'],
-      defaultPriority: 'CRITICAL',
-    },
+  const s7NewId = (prefix: string): string => `${prefix}_${randomInt(0, 281474976710655).toString(36)}${randomInt(0, 281474976710655).toString(36)}`;
+  const s7Date = (value: any): string => {
+    const raw = typeof value?.toDate === 'function' ? value.toDate() : value;
+    const date = raw instanceof Date ? raw : new Date(raw || NaN);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : '';
   };
-
-  interface Stage7ECallerContext {
-    uid: string;
-    email?: string;
-    isStaff: boolean;
-    staffRole?: 'admin' | 'manager' | 'supervisor' | 'css' | 'therapist';
-    staffMasterId?: string;
-    staffName?: string;
-    therapistIds: Set<string>;
-    customerIds: Set<string>;
+  const s7Disabled = (data: any): boolean => !data || data.isActive === false || data.loginEnabled === false ||
+    ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED', 'SUSPENDED', 'CLOSED'].includes(s7Text(data.status).toUpperCase()) || s7Text(data.loginAccountStatus).toUpperCase() === 'DINONAKTIFKAN';
+  const s7UidFields = (data: any, fields: string[]): string => {
+    const values: string[] = [];
+    for (const field of fields) {
+      const value = data?.[field];
+      if (value === undefined || value === null || value === '') continue;
+      if (!s7Id(value) || value.trim() !== value) throw s7Error(403, 'OWNER_UID_CONFLICT');
+      values.push(value);
+    }
+    if (new Set(values).size > 1) throw s7Error(403, 'OWNER_UID_CONFLICT');
+    return values[0] || '';
+  };
+  function s7Rate(map: Map<string, { count: number; until: number }>, key: string, max: number): void {
+    const now = Date.now();
+    for (const [k, value] of map) if (value.until <= now) map.delete(k);
+    const value = map.get(key);
+    if ((!value && map.size >= 5000) || (value && value.count >= max)) throw s7Error(429, 'RATE_LIMITED', 'Permintaan notifikasi terlalu sering. Silakan coba lagi.');
+    map.set(key, { count: (value?.count || 0) + 1, until: value?.until || now + 60000 });
   }
-
-  async function resolveStage7ECaller(req: express.Request): Promise<Stage7ECallerContext> {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
-      throw Object.assign(new Error('Autentikasi diperlukan.'), {
-        statusCode: 401,
-        code: 'AUTH_REQUIRED',
-      });
+  async function s7Verify(req: express.Request): Promise<string> {
+    const rawHeaders = Array.isArray(req.rawHeaders) ? req.rawHeaders : [];
+    const names = rawHeaders.filter((_: any, index: number) => index % 2 === 0).map((name: string) => name.toLowerCase());
+    if (names.filter((name: string) => name === 'authorization').length > 1 || names.includes('x-firebase-auth')) throw s7Error(401, 'AUTH_HEADER_INVALID');
+    const result = await verifyStage7dBearerToken(req);
+    if (!result.ok || !result.uid) throw s7Error(result.status || 401, result.code || 'AUTH_REQUIRED', 'Sesi autentikasi tidak valid atau layanan autentikasi belum tersedia.');
+    s7Rate(s7Rates, `uid:${result.uid}`, 120);
+    s7Rate(s7Rates, `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`, 600);
+    if (!adminDb) throw s7Error(503, 'NOTIFICATION_UNAVAILABLE');
+    return result.uid;
+  }
+  function s7Body(body: any, allowed: string[]): Record<string, any> {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !allowed.includes(k))) throw s7Error(400, 'INVALID_NOTIFICATION_PAYLOAD');
+    return body;
+  }
+  function s7References(raw: any): Record<string, any> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw s7Error(400, 'INVALID_EVENT_REFERENCES');
+    const result: Record<string, any> = {};
+    const ids = ['bookingId', 'bookingCode', 'paymentId', 'customerId', 'therapistId', 'transactionId', 'loyaltyTransactionId', 'customerVoucherId', 'voucherId', 'referralId', 'caseId', 'reviewId'];
+    for (const field of ids) if (raw[field] !== undefined && raw[field] !== null && raw[field] !== '') {
+      if (!s7Id(raw[field])) throw s7Error(400, 'INVALID_EVENT_REFERENCE');
+      result[field] = raw[field];
     }
-    const token = authHeader.slice('Bearer '.length).trim();
-    if (!token) {
-      throw Object.assign(new Error('Token autentikasi tidak ditemukan.'), {
-        statusCode: 401,
-        code: 'AUTH_REQUIRED',
-      });
+    if (result.transactionId && result.loyaltyTransactionId && result.transactionId !== result.loyaltyTransactionId) throw s7Error(400, 'REFERENCE_CONFLICT');
+    if (result.loyaltyTransactionId) { result.transactionId = result.loyaltyTransactionId; delete result.loyaltyTransactionId; }
+    if (raw.date !== undefined) {
+      if (typeof raw.date !== 'string' || !/^(?:\d{4}-\d{2}-\d{2}(?: s\/d \d{4}-\d{2}-\d{2})?|Jadwal Mingguan Rutin)$/.test(raw.date)) throw s7Error(400, 'INVALID_ROSTER_DATE');
+      result.date = raw.date;
     }
-    const verified = await verifyFirebaseIdToken(token);
-    if (!verified || !verified.uid) {
-      throw Object.assign(new Error('Sesi autentikasi tidak valid atau telah berakhir.'), {
-        statusCode: 401,
-        code: 'AUTH_TOKEN_INVALID',
-      });
+    if (raw.tierStartedAt !== undefined) {
+      if (!s7Date(raw.tierStartedAt) || typeof raw.tierStartedAt !== 'string') throw s7Error(400, 'INVALID_TIER_VERSION');
+      result.tierStartedAt = s7Date(raw.tierStartedAt);
     }
-
-    const uid = String(verified.uid).trim();
+    if (raw.year !== undefined) {
+      if (!Number.isInteger(raw.year) || raw.year < 2000 || raw.year > 2200) throw s7Error(400, 'INVALID_REWARD_YEAR');
+      result.year = raw.year;
+    }
+    return result;
+  }
+  function s7Reader(transaction: any): { doc: (collection: string, id: string) => Promise<any>; query: (query: any) => Promise<any> } {
+    const cache = new Map<string, Promise<any>>();
+    const queries: { query: any; promise: Promise<any> }[] = [];
+    return {
+      doc(collection: string, id: string) {
+        if (!s7Id(id)) throw s7Error(409, 'SOURCE_REFERENCE_INVALID');
+        const key = `${collection}/${id}`;
+        if (!cache.has(key)) cache.set(key, transaction.get(adminDb.collection(collection).doc(id)));
+        return cache.get(key)!;
+      },
+      query: query => {
+        const prior = queries.find(item => typeof query.isEqual === 'function' && query.isEqual(item.query));
+        if (prior) return prior.promise;
+        const promise = transaction.get(query); queries.push({ query, promise }); return promise;
+      },
+    };
+  }
+  async function s7Caller(read: ReturnType<typeof s7Reader>, uid: string): Promise<S7Caller> {
+    const [roleSnap, canonical, legacy, direct] = await Promise.all([
+      read.doc('staff_roles', uid), read.query(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+      read.query(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)), read.doc('staff_users', uid),
+    ]);
+    const matches = new Map<string, any>();
+    for (const item of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(item.id, item);
+    const role = roleSnap.exists ? roleSnap.data() : null;
+    for (const field of ['staffId', 'staffUserId']) if (s7Id(role?.[field]) && !matches.has(role[field])) {
+      const linked = await read.doc('staff_users', role[field]);
+      if (linked.exists) matches.set(linked.id, linked);
+    }
+    if (!role && !matches.size) return { uid, role: 'customer', staffId: '', name: 'Pelanggan', therapistIds: new Set() };
+    if (!role || matches.size !== 1) throw s7Error(403, 'STAFF_MAPPING_CONFLICT');
+    const masterSnap = [...matches.values()][0], master = masterSnap.data();
+    const masterUid = s7UidFields(master, ['authUserId', 'authUid']);
+    const roleUid = s7UidFields(role, ['authUserId', 'authUid']);
+    if ((masterUid && masterUid !== uid) || (!masterUid && masterSnap.id !== uid) || (roleUid && roleUid !== uid)) throw s7Error(403, 'STAFF_UID_MISMATCH');
+    if (s7Disabled(master) || s7Disabled(role) || role.isActive !== true) throw s7Error(403, 'STAFF_INACTIVE');
+    if (master.isStaffMaster === false || (master.sourceSystem && master.sourceSystem !== 'STAFF_MASTER')) throw s7Error(403, 'STAFF_MASTER_CONFLICT');
+    if (typeof master.role !== 'string' || role.role !== master.role || ![...s7Operational, 'therapist', 'staff'].includes(master.role)) throw s7Error(403, 'STAFF_ROLE_MISMATCH');
+    const aliases = new Set([uid, masterSnap.id]);
+    for (const alias of [master.id, master.uid]) if (alias !== undefined && alias !== null && alias !== '') {
+      if (!s7Id(alias)) throw s7Error(403, 'STAFF_MAPPING_CONFLICT'); aliases.add(alias);
+    }
+    for (const linked of [role.staffId, role.staffUserId]) if (linked !== undefined && linked !== null && linked !== '' && (!s7Id(linked) || !aliases.has(linked))) throw s7Error(403, 'STAFF_MAPPING_CONFLICT');
+    if (role.therapistId && master.therapistId && role.therapistId !== master.therapistId) throw s7Error(403, 'THERAPIST_MAPPING_CONFLICT');
     const therapistIds = new Set<string>();
-    const customerIds = new Set<string>([uid]);
-    let isStaff = false;
-    let staffRole: Stage7ECallerContext['staffRole'];
-    let staffMasterId: string | undefined;
-    let staffName: string | undefined;
-
-    if (adminDb) {
-      const roleSnap = await adminDb.collection('staff_roles').doc(uid).get();
-      if (roleSnap.exists) {
-        const roleData = roleSnap.data() as any;
-        const roleAuthUid = String(roleData?.authUserId || roleData?.authUid || '').trim();
-        if (roleAuthUid && roleAuthUid !== uid) {
-          throw Object.assign(new Error('Identitas peran staf tidak sesuai dengan sesi.'), {
-            statusCode: 403,
-            code: 'STAFF_UID_MISMATCH',
-          });
-        }
-        const roleDisabled =
-          roleData?.isActive !== true ||
-          roleData?.loginEnabled === false ||
-          ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED'].includes(
-            String(roleData?.status || '').trim().toUpperCase()
-          ) ||
-          String(roleData?.loginAccountStatus || '').trim().toUpperCase() === 'DINONAKTIFKAN';
-        if (roleDisabled) {
-          throw Object.assign(new Error('Akun staf sedang dinonaktifkan.'), {
-            statusCode: 403,
-            code: 'STAFF_ACCOUNT_DISABLED',
-          });
-        }
-
-        const candidateMasterId = String(
-          roleData?.staffId || roleData?.staffUserId || uid
-        ).trim();
-        const masterSnap = await adminDb.collection('staff_users').doc(candidateMasterId).get();
-        if (!masterSnap.exists) {
-          throw Object.assign(new Error('Data Staff Master tidak ditemukan.'), {
-            statusCode: 403,
-            code: 'STAFF_MASTER_MISSING',
-          });
-        }
-        const masterData = masterSnap.data() as any;
-        const masterAuthUid = String(masterData?.authUserId || masterData?.authUid || '').trim();
-        if ((masterAuthUid && masterAuthUid !== uid) || (!masterAuthUid && candidateMasterId !== uid)) {
-          throw Object.assign(new Error('Ikatan UID Staff Master tidak cocok.'), {
-            statusCode: 403,
-            code: 'STAFF_MASTER_UID_MISMATCH',
-          });
-        }
-        const masterDisabled =
-          masterData?.isActive === false ||
-          masterData?.loginEnabled === false ||
-          ['INACTIVE', 'DISABLED', 'ARCHIVED', 'DINONAKTIFKAN', 'DELETED', 'TERMINATED'].includes(
-            String(masterData?.status || '').trim().toUpperCase()
-          ) ||
-          String(masterData?.loginAccountStatus || '').trim().toUpperCase() === 'DINONAKTIFKAN';
-        if (masterDisabled) {
-          throw Object.assign(new Error('Data Staff Master telah dinonaktifkan.'), {
-            statusCode: 403,
-            code: 'STAFF_MASTER_DISABLED',
-          });
-        }
-
-        const rRole = String(roleData?.role || '').trim().toLowerCase();
-        const mRole = String(masterData?.role || '').trim().toLowerCase();
-        if (!rRole || rRole !== mRole || !['admin', 'manager', 'supervisor', 'css', 'therapist'].includes(rRole)) {
-          throw Object.assign(new Error('Peran staf tidak sinkron dengan Staff Master.'), {
-            statusCode: 403,
-            code: 'STAFF_ROLE_MISMATCH',
-          });
-        }
-
-        isStaff = true;
-        staffRole = rRole as Stage7ECallerContext['staffRole'];
-        staffMasterId = candidateMasterId;
-        staffName = String(masterData?.fullName || masterData?.name || roleData?.name || '').trim();
-
-        if (staffRole === 'therapist') {
-          for (const candidate of [
-            uid,
-            candidateMasterId,
-            roleData?.therapistId,
-            roleData?.staffId,
-            roleData?.staffUserId,
-            masterData?.therapistId,
-            masterData?.id,
-            masterData?.uid,
-          ]) {
-            const clean = typeof candidate === 'string' ? candidate.trim() : '';
-            if (clean) therapistIds.add(clean);
-          }
-          try {
-            const tSnap = await adminDb
-              .collection('therapists')
-              .where('authUserId', '==', uid)
-              .limit(5)
-              .get();
-            tSnap.docs.forEach((d) => therapistIds.add(d.id));
-          } catch {}
-        }
-      }
-
-      try {
-        const custDirect = await adminDb.collection('customers').doc(uid).get();
-        if (custDirect.exists) {
-          const cData = custDirect.data() as any;
-          const cAuth = String(cData?.authUserId || cData?.customerAuthUid || '').trim();
-          if (!cAuth || cAuth === uid) {
-            customerIds.add(uid);
-            if (typeof cData?.id === 'string' && cData.id.trim()) {
-              customerIds.add(cData.id.trim());
-            }
-          }
-        }
-        const custByAuthSnap = await adminDb
-          .collection('customers')
-          .where('authUserId', '==', uid)
-          .limit(5)
-          .get();
-        custByAuthSnap.docs.forEach((d) => {
-          customerIds.add(d.id);
-          const cid = String(d.data()?.id || '').trim();
-          if (cid) customerIds.add(cid);
-        });
-      } catch {}
-    }
-
-    return {
-      uid,
-      email: verified.email,
-      isStaff,
-      staffRole,
-      staffMasterId,
-      staffName,
-      therapistIds,
-      customerIds,
-    };
+    if (master.role === 'therapist') for (const id of [...aliases, role.therapistId, master.therapistId]) if (s7Id(id)) therapistIds.add(id);
+    return { uid, role: master.role, staffId: masterSnap.id, name: s7Text(master.fullName || master.name || master.displayName, 120) || 'Staf Senzu Home', therapistIds };
   }
-
-  function isBookingOwnedByCaller(booking: any, caller: Stage7ECallerContext): boolean {
-    if (!booking || typeof booking !== 'object') return false;
-    const bCustAuthUid = String(booking.customerAuthUid || '').trim();
-    const bAuthUserId = String(booking.authUserId || '').trim();
-    if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
-      return false;
-    }
-    if (bCustAuthUid || bAuthUserId) {
-      return (bCustAuthUid || bAuthUserId) === caller.uid;
-    }
-    const bCustId = String(booking.customerId || '').trim();
-    return Boolean(bCustId && caller.customerIds.has(bCustId));
+  async function s7Customer(read: ReturnType<typeof s7Reader>, id: string, expectedUid = ''): Promise<{ id: string; uid: string; name: string }> {
+    if (!id) return { id: '', uid: expectedUid, name: 'Pelanggan' };
+    const snap = await read.doc('customers', id);
+    if (!snap.exists) { if (expectedUid) throw s7Error(409, 'CUSTOMER_PROFILE_MISSING'); return { id, uid: '', name: 'Pelanggan' }; }
+    const data = snap.data(), uid = s7UidFields(data, ['authUserId', 'customerAuthUid']);
+    if (s7Disabled(data) || (expectedUid && uid && expectedUid !== uid)) throw s7Error(403, 'CUSTOMER_OWNER_CONFLICT');
+    return { id: snap.id, uid: uid || expectedUid, name: s7Text(data.name, 120) || 'Pelanggan' };
   }
-
-  function isBookingAssignedToTherapistCaller(booking: any, caller: Stage7ECallerContext): boolean {
-    if (!caller.isStaff || caller.staffRole !== 'therapist' || !booking) return false;
-    const tId = String(booking.therapistId || booking.assignedTherapistId || '').trim();
-    const tAuthUid = String(booking.therapistAuthUid || '').trim();
-    if (tId && caller.therapistIds.has(tId)) return true;
-    if (tAuthUid && tAuthUid === caller.uid) return true;
-    return false;
+  async function s7Therapist(read: ReturnType<typeof s7Reader>, therapistId: string, expectedUid = ''): Promise<{ uid: string; name: string }> {
+    if (!therapistId) throw s7Error(409, 'THERAPIST_RECIPIENT_UNRESOLVED');
+    const [snap, linked] = await Promise.all([read.doc('therapists', therapistId), read.query(adminDb.collection('staff_roles').where('therapistId', '==', therapistId).limit(2))]);
+    if (!snap.exists || s7Disabled(snap.data())) throw s7Error(409, 'THERAPIST_RECIPIENT_UNRESOLVED');
+    const ownUid = s7UidFields(snap.data(), ['authUserId', 'authUid']);
+    const candidates = new Set<string>([ownUid, expectedUid, ...linked.docs.map((d: any) => d.id)].filter(Boolean));
+    if (candidates.size !== 1) throw s7Error(409, 'THERAPIST_MAPPING_CONFLICT');
+    const uid = [...candidates][0];
+    const staff = await s7Caller(read, uid);
+    if (staff.role !== 'therapist' || !staff.therapistIds.has(therapistId)) throw s7Error(409, 'THERAPIST_MAPPING_CONFLICT');
+    return { uid, name: s7Text(snap.data().name, 120) || staff.name };
   }
-
-  async function resolveCanonicalCustomerIdentity(
-    customerIdHint: string,
-    bookingData?: any
-  ): Promise<{ customerId: string; customerAuthUid?: string; customerName?: string; customerPhone?: string }> {
-    let bCustAuthUid = '';
-    let bAuthUserId = '';
-    if (bookingData && typeof bookingData === 'object') {
-      bCustAuthUid = String(bookingData.customerAuthUid || '').trim();
-      bAuthUserId = String(bookingData.authUserId || '').trim();
-      if (bCustAuthUid && bAuthUserId && bCustAuthUid !== bAuthUserId) {
-        throw Object.assign(new Error('Konflik pemilik akun pada data pesanan.'), {
-          statusCode: 403,
-          code: 'CUSTOMER_OWNER_CONFLICT',
-        });
-      }
+  async function s7Booking(read: ReturnType<typeof s7Reader>, refs: Record<string, any>): Promise<{ id: string; data: any; snap: any } | null> {
+    if (!refs.bookingId && !refs.bookingCode) return null;
+    let snap: any;
+    if (refs.bookingId) snap = await read.doc('bookings', refs.bookingId);
+    else {
+      const found = await read.query(adminDb.collection('bookings').where('bookingCode', '==', refs.bookingCode).limit(2));
+      if (found.docs.length !== 1) throw s7Error(found.empty ? 404 : 409, 'BOOKING_REFERENCE_CONFLICT'); snap = found.docs[0];
     }
-
-    const effectiveCustomerId = String(
-      bookingData?.customerId || customerIdHint || bCustAuthUid || bAuthUserId || ''
-    ).trim();
-    let resolvedAuthUid = bCustAuthUid || bAuthUserId;
-    let resolvedName = String(bookingData?.customerName || '').trim();
-    let resolvedPhone = String(bookingData?.customerWhatsApp || bookingData?.customerPhone || '').trim();
-
-    if (adminDb && effectiveCustomerId) {
-      try {
-        const cSnap = await adminDb.collection('customers').doc(effectiveCustomerId).get();
-        if (cSnap.exists) {
-          const cData = cSnap.data() as any;
-          const cAuth1 = String(cData?.authUserId || '').trim();
-          const cAuth2 = String(cData?.customerAuthUid || '').trim();
-          if (cAuth1 && cAuth2 && cAuth1 !== cAuth2) {
-            throw Object.assign(new Error('Konflik identitas akun pelanggan.'), {
-              statusCode: 403,
-              code: 'CUSTOMER_OWNER_CONFLICT',
-            });
-          }
-          const profileAuthUid = cAuth1 || cAuth2;
-          if (resolvedAuthUid && profileAuthUid && resolvedAuthUid !== profileAuthUid) {
-            throw Object.assign(new Error('Konflik pemilik pesanan dan profil pelanggan.'), {
-              statusCode: 403,
-              code: 'CUSTOMER_OWNER_CONFLICT',
-            });
-          }
-          if (!resolvedAuthUid && profileAuthUid) {
-            resolvedAuthUid = profileAuthUid;
-          }
-          if (!resolvedName && cData?.name) resolvedName = String(cData.name).trim();
-          if (!resolvedPhone && (cData?.whatsapp || cData?.phone)) {
-            resolvedPhone = String(cData.whatsapp || cData.phone).trim();
-          }
-        }
-      } catch (err: any) {
-        if (err?.code === 'CUSTOMER_OWNER_CONFLICT') throw err;
-      }
+    if (!snap.exists) throw s7Error(404, 'BOOKING_NOT_FOUND');
+    const data = snap.data();
+    if (refs.bookingCode && data.bookingCode !== refs.bookingCode) throw s7Error(409, 'BOOKING_REFERENCE_CONFLICT');
+    if (data.id !== undefined && data.id !== snap.id) throw s7Error(409, 'BOOKING_REFERENCE_CONFLICT');
+    if (s7Id(data.bookingCode)) {
+      const duplicates = await read.query(adminDb.collection('bookings').where('bookingCode', '==', data.bookingCode).limit(2));
+      if (duplicates.docs.some((d: any) => d.id !== snap.id)) throw s7Error(409, 'BOOKING_REFERENCE_CONFLICT');
     }
-
-    return {
-      customerId: effectiveCustomerId || resolvedAuthUid,
-      customerAuthUid: resolvedAuthUid || undefined,
-      customerName: resolvedName || undefined,
-      customerPhone: resolvedPhone || undefined,
-    };
+    s7UidFields(data, ['customerAuthUid', 'authUserId']);
+    return { id: snap.id, data, snap };
   }
-
-  async function isStage7ECallerAuthorizedForNotification(
-    notifData: Record<string, any> | undefined | null,
-    caller: Stage7ECallerContext
-  ): Promise<boolean> {
-    if (!notifData || typeof notifData !== 'object') return false;
-    const recRole = String(notifData.recipientRole || notifData.targetRole || '')
-      .trim()
-      .toLowerCase();
-    const recId = String(notifData.recipientId || '').trim();
-    const recUserId = String(notifData.recipientUserId || '').trim();
-
-    if (caller.isStaff && caller.staffRole) {
-      if (caller.staffRole === 'admin' || caller.staffRole === 'manager') {
-        if (
-          ['admin', 'manager', 'supervisor', 'css'].includes(recRole) ||
-          ['admin', 'manager', 'supervisor', 'css', caller.uid, caller.staffMasterId || ''].includes(recId) ||
-          recUserId === caller.uid
-        ) {
-          return true;
-        }
-      }
-      if (caller.staffRole === 'supervisor') {
-        if (
-          recRole === 'supervisor' ||
-          ['supervisor', caller.uid, caller.staffMasterId || ''].includes(recId) ||
-          recUserId === caller.uid
-        ) {
-          return true;
-        }
-      }
-      if (caller.staffRole === 'css') {
-        if (
-          ['css', 'supervisor'].includes(recRole) ||
-          ['css', caller.uid, caller.staffMasterId || ''].includes(recId) ||
-          recUserId === caller.uid
-        ) {
-          return true;
-        }
-      }
-      if (caller.staffRole === 'therapist' && recRole === 'therapist') {
-        for (const candidate of [
-          notifData.recipientId,
-          notifData.recipientUserId,
-          notifData.therapistId,
-          notifData.targetUserId,
-        ]) {
-          const clean = typeof candidate === 'string' ? candidate.trim() : '';
-          if (clean && caller.therapistIds.has(clean)) {
-            return true;
-          }
-        }
-        return false;
-      }
-    }
-
-    if (recRole === 'customer') {
-      const docCustAuthUid = String(notifData.customerAuthUid || '').trim();
-      const docAuthUserId = String(notifData.authUserId || '').trim();
-      if (docCustAuthUid && docAuthUserId && docCustAuthUid !== docAuthUserId) {
-        return false;
-      }
-      if (docCustAuthUid || docAuthUserId) {
-        return (docCustAuthUid || docAuthUserId) === caller.uid;
-      }
-      if (recUserId === caller.uid || recId === caller.uid) {
-        return true;
-      }
-      const docCustId = String(notifData.customerId || recId || '').trim();
-      if (docCustId && caller.customerIds.has(docCustId)) {
-        return true;
-      }
-      const bookingId = String(notifData.bookingId || '').trim();
-      if (bookingId && adminDb) {
-        try {
-          const bSnap = await adminDb.collection('bookings').doc(bookingId).get();
-          if (bSnap.exists && isBookingOwnedByCaller(bSnap.data(), caller)) {
-            return true;
-          }
-        } catch {}
-      }
-    }
-
-    return false;
+  function s7AssertBookingCustomer(caller: S7Caller, source: S7Source): boolean {
+    return Boolean(source.ownerUid && source.ownerUid === caller.uid);
   }
-
-  app.post('/api/notifications/emit', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
-      }
-
-      const caller = await resolveStage7ECaller(req);
-      const rawEventType = typeof req.body?.eventType === 'string' ? req.body.eventType.trim() : '';
-      const canonicalEventType = STAGE7E_EVENT_ALIASES[rawEventType] || rawEventType;
-      const rule = STAGE7E_EVENT_RULES[canonicalEventType];
-
-      if (!rawEventType || !rule) {
-        return res.status(400).json({
-          success: false,
-          code: 'UNSUPPORTED_NOTIFICATION_EVENT',
-          error: 'Tipe event notifikasi tidak dikenal atau tidak diizinkan.',
-        });
-      }
-
-      const rawPayload =
-        req.body?.payload && typeof req.body.payload === 'object' && !Array.isArray(req.body.payload)
-          ? (req.body.payload as Record<string, any>)
-          : null;
-      if (!rawPayload) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_EVENT_PAYLOAD',
-          error: 'Payload notifikasi tidak valid.',
-        });
-      }
-
-      // Reject chat notification spoofing through generic emit endpoint
-      if (canonicalEventType === 'chat.message_received') {
-        return res.status(403).json({
-          success: false,
-          code: 'USE_CHAT_NOTIFY_ENDPOINT',
-          error: 'Notifikasi chat harus dikirim melalui jalur resmi /api/chat/notify.',
-        });
-      }
-
-      let authoritativeBooking: any = null;
-      let authoritativeBookingId = String(
-        rawPayload.bookingId || rawPayload.id || rawPayload.sourceBookingId || ''
-      ).trim();
-      let authoritativePayment: any = null;
-      let authoritativePaymentId = String(rawPayload.paymentId || '').trim();
-      let authoritativeCustomerId = String(rawPayload.customerId || '').trim();
-      let authoritativeCustomerAuthUid = '';
-      let authoritativeCustomerName = String(rawPayload.customerName || '').trim();
-      let authoritativeCustomerPhone = String(
-        rawPayload.customerWhatsApp || rawPayload.customerPhone || ''
-      ).trim();
-      let authoritativeTherapistId = String(
-        rawPayload.therapistId || rawPayload.assignedTherapistId || ''
-      ).trim();
-      let authoritativeTherapistName = String(
-        rawPayload.therapistName || rawPayload.assignedTherapistName || ''
-      ).trim();
-      let entityReferenceKey = '';
-
-      // Load booking if referenced
-      if (authoritativeBookingId) {
-        const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
-        if (bSnap.exists) {
-          authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
-        }
-      } else if (typeof rawPayload.bookingCode === 'string' && rawPayload.bookingCode.trim()) {
-        const bCodeSnap = await adminDb
-          .collection('bookings')
-          .where('bookingCode', '==', rawPayload.bookingCode.trim())
-          .limit(1)
-          .get();
-        if (!bCodeSnap.empty) {
-          authoritativeBooking = {
-            id: bCodeSnap.docs[0].id,
-            ...(bCodeSnap.docs[0].data() as any),
-          };
-          authoritativeBookingId = authoritativeBooking.id;
-        }
-      }
-
-      // 1. Validate entity & state truthfulness per rule.entityKind
-      if (rule.entityKind === 'booking') {
-        if (!authoritativeBooking) {
-          return res.status(404).json({
-            success: false,
-            code: 'BOOKING_NOT_FOUND',
-            error: 'Data pesanan sumber tidak ditemukan untuk notifikasi ini.',
-          });
-        }
-        const bStatus = String(authoritativeBooking.status || '').trim();
-        const bStatusLower = bStatus.toLowerCase();
-        const bTherapistId = String(
-          authoritativeBooking.therapistId || authoritativeBooking.assignedTherapistId || ''
-        ).trim();
-
-        if (canonicalEventType === 'booking.cancelled') {
-          if (!['cancelled', 'dibatalkan'].includes(bStatusLower)) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Pesanan belum berstatus dibatalkan.',
-            });
-          }
-        } else if (canonicalEventType === 'booking.confirmed') {
-          if (['cancelled', 'dibatalkan', 'expired'].includes(bStatusLower)) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Status pesanan tidak sesuai untuk konfirmasi.',
-            });
-          }
-        } else if (
-          canonicalEventType === 'booking.assigned' ||
-          canonicalEventType === 'booking.reassigned'
-        ) {
-          if (!bTherapistId) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_THERAPIST_UNASSIGNED',
-              error: 'Pesanan belum memiliki terapis yang ditugaskan.',
-            });
-          }
-          if (authoritativeTherapistId && authoritativeTherapistId !== bTherapistId) {
-            return res.status(409).json({
-              success: false,
-              code: 'THERAPIST_ASSIGNMENT_MISMATCH',
-              error: 'Terapis pada payload tidak sesuai dengan penugasan pesanan.',
-            });
-          }
-        } else if (canonicalEventType === 'treatment.completed') {
-          if (!['completed', 'selesai'].includes(bStatusLower)) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Status pesanan belum selesai (Completed).',
-            });
-          }
-        } else if (canonicalEventType === 'treatment.started') {
-          if (
-            !['in progress', 'in_progress', 'ongoing', 'berlangsung', 'completed', 'selesai'].includes(
-              bStatusLower
-            ) &&
-            !authoritativeBooking.treatmentStartedAt &&
-            !authoritativeBooking.startedAt
-          ) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Sesi treatment belum dimulai pada data pesanan.',
-            });
-          }
-        } else if (canonicalEventType === 'therapist.arrived') {
-          if (
-            !['arrived', 'in progress', 'in_progress', 'completed', 'tiba'].includes(bStatusLower) &&
-            !authoritativeBooking.therapistArrivedAt &&
-            !authoritativeBooking.arrivedAt
-          ) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Status kedatangan terapis belum tercatat pada pesanan.',
-            });
-          }
-        } else if (canonicalEventType === 'therapist.departing') {
-          if (
-            !['on the way', 'on_the_way', 'departing', 'arrived', 'in progress', 'completed', 'confirmed'].includes(
-              bStatusLower
-            ) &&
-            !authoritativeBooking.therapistDepartingAt
-          ) {
-            return res.status(409).json({
-              success: false,
-              code: 'BOOKING_STATE_MISMATCH',
-              error: 'Status keberangkatan terapis tidak sesuai dengan pesanan.',
-            });
-          }
-        }
-
-        authoritativeTherapistId = bTherapistId || authoritativeTherapistId;
-        authoritativeTherapistName =
-          String(
-            authoritativeBooking.therapistName ||
-              authoritativeBooking.assignedTherapistName ||
-              authoritativeTherapistName ||
-              ''
-          ).trim();
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          authoritativeCustomerId,
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `booking:${authoritativeBookingId}:${canonicalEventType}:${bStatusLower}:${authoritativeTherapistId || 'none'}:${String(authoritativeBooking.date || '')}:${String(authoritativeBooking.time || '')}`;
-      } else if (rule.entityKind === 'payment') {
-        if (authoritativePaymentId) {
-          const pSnap = await adminDb.collection('payments').doc(authoritativePaymentId).get();
-          if (pSnap.exists) {
-            authoritativePayment = { id: pSnap.id, ...(pSnap.data() as any) };
-          }
-        }
-        if (!authoritativePayment && authoritativeBookingId) {
-          const pByBooking = await adminDb
-            .collection('payments')
-            .where('bookingId', '==', authoritativeBookingId)
-            .limit(5)
-            .get();
-          if (!pByBooking.empty) {
-            authoritativePayment = {
-              id: pByBooking.docs[0].id,
-              ...(pByBooking.docs[0].data() as any),
-            };
-            authoritativePaymentId = authoritativePayment.id;
-          }
-        }
-        if (!authoritativeBooking && authoritativePayment?.bookingId) {
-          authoritativeBookingId = String(authoritativePayment.bookingId).trim();
-          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
-          if (bSnap.exists) {
-            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
-          }
-        }
-        if (!authoritativeBooking && !authoritativePayment) {
-          return res.status(404).json({
-            success: false,
-            code: 'PAYMENT_SOURCE_NOT_FOUND',
-            error: 'Data pembayaran atau pesanan tidak ditemukan.',
-          });
-        }
-
-        const payStatus = String(
-          authoritativePayment?.status || authoritativeBooking?.paymentStatus || ''
-        )
-          .trim()
-          .toUpperCase();
-
-        if (canonicalEventType === 'payment.verified') {
-          if (!['PAID', 'VERIFIED', 'SETTLED', 'COMPLETED', 'DP_PAID'].includes(payStatus)) {
-            return res.status(409).json({
-              success: false,
-              code: 'PAYMENT_STATE_MISMATCH',
-              error: 'Pembayaran belum berstatus terverifikasi/lunas.',
-            });
-          }
-        } else if (canonicalEventType === 'payment.rejected') {
-          if (!['REJECTED', 'PAYMENT_REJECTED', 'FAILED', 'UNPAID'].includes(payStatus)) {
-            return res.status(409).json({
-              success: false,
-              code: 'PAYMENT_STATE_MISMATCH',
-              error: 'Pembayaran belum berstatus ditolak.',
-            });
-          }
-        } else if (canonicalEventType === 'payment.expired') {
-          if (!['EXPIRED', 'CANCELLED'].includes(payStatus)) {
-            return res.status(409).json({
-              success: false,
-              code: 'PAYMENT_STATE_MISMATCH',
-              error: 'Pembayaran belum berstatus kedaluwarsa.',
-            });
-          }
-        } else if (canonicalEventType === 'payment.proof_uploaded') {
-          const hasProof = Boolean(
-            authoritativePayment?.proofUrl ||
-              authoritativePayment?.proofFileName ||
-              authoritativeBooking?.paymentProofUrl ||
-              ['WAITING_VERIFICATION', 'PENDING_VERIFICATION', 'PROOF_UPLOADED', 'PAID', 'VERIFIED'].includes(
-                payStatus
-              )
-          );
-          if (!hasProof) {
-            return res.status(409).json({
-              success: false,
-              code: 'PAYMENT_PROOF_MISSING',
-              error: 'Bukti pembayaran belum tercatat pada sistem.',
-            });
-          }
-        } else if (canonicalEventType === 'payment.refund_completed') {
-          let refundCompleted = ['REFUNDED', 'PARTIALLY_REFUNDED', 'COMPLETED_MANUAL'].includes(
-            payStatus
-          );
-          if (!refundCompleted && rawPayload.caseId) {
-            const cSnap = await adminDb
-              .collection('booking_cases')
-              .doc(String(rawPayload.caseId).trim())
-              .get();
-            if (
-              cSnap.exists &&
-              String((cSnap.data() as any)?.recovery?.manualRefund?.status || '')
-                .trim()
-                .toUpperCase() === 'COMPLETED_MANUAL'
-            ) {
-              refundCompleted = true;
-            }
-          }
-          if (!refundCompleted) {
-            return res.status(409).json({
-              success: false,
-              code: 'REFUND_NOT_COMPLETED',
-              error: 'Status pengembalian dana belum selesai.',
-            });
-          }
-        }
-
-        authoritativeTherapistId = String(
-          authoritativeBooking?.therapistId ||
-            authoritativeBooking?.assignedTherapistId ||
-            authoritativeTherapistId ||
-            ''
-        ).trim();
-        authoritativeTherapistName = String(
-          authoritativeBooking?.therapistName ||
-            authoritativeBooking?.assignedTherapistName ||
-            authoritativeTherapistName ||
-            ''
-        ).trim();
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          authoritativeCustomerId || String(authoritativePayment?.customerId || ''),
-          authoritativeBooking || authoritativePayment
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `payment:${authoritativePaymentId || authoritativeBookingId}:${canonicalEventType}:${payStatus}`;
-      } else if (rule.entityKind === 'roster') {
-        const targetTherapistId = String(rawPayload.therapistId || '').trim();
-        const rosterDate = String(rawPayload.date || '').trim();
-        const rosterId =
-          String(rawPayload.rosterId || '').trim() ||
-          (targetTherapistId && rosterDate ? `${targetTherapistId}_${rosterDate}` : '');
-        if (!targetTherapistId) {
-          return res.status(400).json({
-            success: false,
-            code: 'INVALID_ROSTER_TARGET',
-            error: 'ID terapis wajib disertakan untuk notifikasi jadwal.',
-          });
-        }
-        let rosterDocExists = false;
-        let rosterUpdatedAt = '';
-        if (rosterId) {
-          const rSnap = await adminDb.collection('therapist_rosters').doc(rosterId).get();
-          if (rSnap.exists) {
-            const rData = rSnap.data() as any;
-            if (String(rData?.therapistId || targetTherapistId).trim() === targetTherapistId) {
-              rosterDocExists = true;
-              rosterUpdatedAt = String(rData?.updatedAt || rData?.status || '').trim();
-              if (!authoritativeTherapistName && rData?.therapistName) {
-                authoritativeTherapistName = String(rData.therapistName).trim();
-              }
-            }
-          }
-        }
-        if (!rosterDocExists) {
-          const tSnap = await adminDb.collection('therapists').doc(targetTherapistId).get();
-          if (!tSnap.exists) {
-            return res.status(404).json({
-              success: false,
-              code: 'ROSTER_OR_THERAPIST_NOT_FOUND',
-              error: 'Data jadwal atau terapis tidak ditemukan.',
-            });
-          }
-          const tData = tSnap.data() as any;
-          if (!authoritativeTherapistName && tData?.name) {
-            authoritativeTherapistName = String(tData.name).trim();
-          }
-          rosterUpdatedAt = String(tData?.updatedAt || rosterDate || 'default').trim();
-        }
-        authoritativeTherapistId = targetTherapistId;
-        entityReferenceKey = `roster:${rosterId || targetTherapistId}:${rosterDate}:${String(rawPayload.changeSummary || rosterUpdatedAt).slice(0, 80)}`;
-      } else if (rule.entityKind === 'loyalty_tx') {
-        const txId = String(
-          rawPayload.transactionId || rawPayload.loyaltyTransactionId || ''
-        ).trim();
-        let txData: any = null;
-        if (txId) {
-          const txSnap = await adminDb.collection('loyalty_transactions').doc(txId).get();
-          if (txSnap.exists) {
-            txData = { id: txSnap.id, ...(txSnap.data() as any) };
-          }
-        }
-        if (!txData && authoritativeBookingId) {
-          const expectedTxType =
-            canonicalEventType === 'loyalty.points_earned' ? 'earn' : 'redeem';
-          const txQuery = await adminDb
-            .collection('loyalty_transactions')
-            .where('bookingId', '==', authoritativeBookingId)
-            .where('transactionType', '==', expectedTxType)
-            .limit(1)
-            .get();
-          if (!txQuery.empty) {
-            txData = { id: txQuery.docs[0].id, ...(txQuery.docs[0].data() as any) };
-          }
-        }
-        if (!txData) {
-          return res.status(404).json({
-            success: false,
-            code: 'LOYALTY_TRANSACTION_NOT_FOUND',
-            error: 'Transaksi poin loyalitas tidak ditemukan pada buku besar.',
-          });
-        }
-        const expectedType = canonicalEventType === 'loyalty.points_earned' ? 'earn' : 'redeem';
-        const actualType = String(txData.transactionType || txData.type || '')
-          .trim()
-          .toLowerCase();
-        if (
-          (expectedType === 'earn' && !actualType.startsWith('earn')) ||
-          (expectedType === 'redeem' && !actualType.startsWith('redeem'))
-        ) {
-          return res.status(409).json({
-            success: false,
-            code: 'LOYALTY_TRANSACTION_TYPE_MISMATCH',
-            error: 'Tipe transaksi loyalitas tidak sesuai dengan event notifikasi.',
-          });
-        }
-        const txCustomerId = String(txData.customerId || '').trim();
-        if (authoritativeCustomerId && txCustomerId && authoritativeCustomerId !== txCustomerId) {
-          return res.status(409).json({
-            success: false,
-            code: 'LOYALTY_CUSTOMER_MISMATCH',
-            error: 'Pelanggan pada transaksi poin tidak sesuai.',
-          });
-        }
-        authoritativeCustomerId = txCustomerId || authoritativeCustomerId;
-        if (!authoritativeBooking && txData.bookingId) {
-          authoritativeBookingId = String(txData.bookingId).trim();
-          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
-          if (bSnap.exists) {
-            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
-          }
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          authoritativeCustomerId,
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName =
-          custResolved.customerName || String(txData.customerName || authoritativeCustomerName);
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `loyalty_tx:${txData.id}:${canonicalEventType}`;
-      } else if (rule.entityKind === 'tier_upgrade') {
-        if (!authoritativeCustomerId) {
-          return res.status(400).json({
-            success: false,
-            code: 'MISSING_CUSTOMER_ID',
-            error: 'customerId wajib disertakan untuk notifikasi kenaikan tier.',
-          });
-        }
-        const accSnap = await adminDb
-          .collection('loyalty_accounts')
-          .doc(authoritativeCustomerId)
-          .get();
-        if (!accSnap.exists) {
-          return res.status(404).json({
-            success: false,
-            code: 'LOYALTY_ACCOUNT_NOT_FOUND',
-            error: 'Akun loyalitas pelanggan tidak ditemukan.',
-          });
-        }
-        const accData = accSnap.data() as any;
-        const requestedTierName = String(
-          rawPayload.newTierName || rawPayload.tierName || rawPayload.newTier || ''
-        )
-          .trim()
-          .toLowerCase();
-        const requestedTierId = String(rawPayload.newTierId || rawPayload.newTier || '')
-          .trim()
-          .toLowerCase();
-        const actualTierName = String(accData?.currentTierName || '').trim().toLowerCase();
-        const actualTierId = String(accData?.currentTierId || '').trim().toLowerCase();
-        if (
-          (requestedTierName &&
-            actualTierName &&
-            requestedTierName !== actualTierName &&
-            requestedTierName !== actualTierId) ||
-          (requestedTierId &&
-            actualTierId &&
-            requestedTierId !== actualTierId &&
-            requestedTierId !== actualTierName)
-        ) {
-          return res.status(409).json({
-            success: false,
-            code: 'TIER_UPGRADE_MISMATCH',
-            error: 'Tier pada akun loyalitas tidak sesuai dengan notifikasi yang diminta.',
-          });
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          authoritativeCustomerId,
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName =
-          custResolved.customerName || String(accData?.customerName || authoritativeCustomerName);
-        authoritativeCustomerPhone =
-          custResolved.customerPhone ||
-          String(accData?.customerWhatsApp || accData?.customerPhone || authoritativeCustomerPhone);
-        entityReferenceKey = `tier_upgrade:${authoritativeCustomerId}:${actualTierId || actualTierName}:${String(accData?.tierStartedAt || '')}`;
-      } else if (rule.entityKind === 'voucher') {
-        const cvId = String(rawPayload.customerVoucherId || rawPayload.voucherId || '').trim();
-        let cvData: any = null;
-        if (cvId) {
-          const cvSnap = await adminDb.collection('customer_vouchers').doc(cvId).get();
-          if (cvSnap.exists) {
-            cvData = { id: cvSnap.id, ...(cvSnap.data() as any) };
-          }
-        }
-        if (!cvData && authoritativeCustomerId) {
-          const cvQuery = await adminDb
-            .collection('customer_vouchers')
-            .where('customerId', '==', authoritativeCustomerId)
-            .limit(10)
-            .get();
-          if (!cvQuery.empty) {
-            const matched = cvQuery.docs
-              .map((d) => ({ id: d.id, ...(d.data() as any) }))
-              .find(
-                (v) =>
-                  (!rawPayload.voucherName || v.voucherName === rawPayload.voucherName) &&
-                  (!rawPayload.voucherCode || v.voucherCode === rawPayload.voucherCode)
-              );
-            cvData = matched || { id: cvQuery.docs[0].id, ...(cvQuery.docs[0].data() as any) };
-          }
-        }
-        if (!cvData) {
-          return res.status(404).json({
-            success: false,
-            code: 'CUSTOMER_VOUCHER_NOT_FOUND',
-            error: 'Data voucher pelanggan tidak ditemukan.',
-          });
-        }
-        if (
-          authoritativeCustomerId &&
-          cvData.customerId &&
-          String(cvData.customerId).trim() !== authoritativeCustomerId
-        ) {
-          return res.status(409).json({
-            success: false,
-            code: 'VOUCHER_CUSTOMER_MISMATCH',
-            error: 'Pemilik voucher tidak sesuai dengan pelanggan pada notifikasi.',
-          });
-        }
-        authoritativeCustomerId = String(cvData.customerId || authoritativeCustomerId).trim();
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          authoritativeCustomerId,
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `voucher:${cvData.id}:${authoritativeCustomerId}`;
-      } else if (rule.entityKind === 'referral') {
-        const refId = String(rawPayload.referralId || '').trim();
-        let refData: any = null;
-        if (refId) {
-          const refSnap = await adminDb.collection('referrals').doc(refId).get();
-          if (refSnap.exists) {
-            refData = { id: refSnap.id, ...(refSnap.data() as any) };
-          }
-        }
-        if (!refData && authoritativeCustomerId) {
-          const refQuery = await adminDb
-            .collection('referrals')
-            .where('referrerCustomerId', '==', authoritativeCustomerId)
-            .limit(5)
-            .get();
-          if (!refQuery.empty) {
-            refData = { id: refQuery.docs[0].id, ...(refQuery.docs[0].data() as any) };
-          }
-        }
-        if (
-          !refData ||
-          !['rewarded', 'qualified'].includes(String(refData.status || '').trim().toLowerCase())
-        ) {
-          return res.status(404).json({
-            success: false,
-            code: 'QUALIFIED_REFERRAL_NOT_FOUND',
-            error: 'Data kualifikasi referral tidak ditemukan atau belum berstatus rewarded.',
-          });
-        }
-        authoritativeCustomerId = String(
-          refData.referrerCustomerId || authoritativeCustomerId
-        ).trim();
-        if (!authoritativeBooking && refData.firstBookingId) {
-          authoritativeBookingId = String(refData.firstBookingId).trim();
-          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
-          if (bSnap.exists) {
-            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
-          }
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(authoritativeCustomerId);
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName =
-          custResolved.customerName ||
-          String(refData.referrerName || authoritativeCustomerName || '');
-        authoritativeCustomerPhone =
-          custResolved.customerPhone ||
-          String(refData.referrerPhone || authoritativeCustomerPhone || '');
-        entityReferenceKey = `referral:${refData.id}:${authoritativeCustomerId}`;
-      } else if (rule.entityKind === 'birthday') {
-        if (!authoritativeCustomerId) {
-          return res.status(400).json({
-            success: false,
-            code: 'MISSING_CUSTOMER_ID',
-            error: 'customerId wajib diisi untuk notifikasi hadiah ulang tahun.',
-          });
-        }
-        const currentYear = Number(rawPayload.year) || new Date().getFullYear();
-        const accSnap = await adminDb
-          .collection('loyalty_accounts')
-          .doc(authoritativeCustomerId)
-          .get();
-        const txId = String(
-          rawPayload.transactionId || rawPayload.loyaltyTransactionId || ''
-        ).trim();
-        let verifiedBirthdayReward = false;
-        if (
-          accSnap.exists &&
-          Number((accSnap.data() as any)?.birthdayBenefitUsedYear) === currentYear
-        ) {
-          verifiedBirthdayReward = true;
-        }
-        if (!verifiedBirthdayReward && txId) {
-          const txSnap = await adminDb.collection('loyalty_transactions').doc(txId).get();
-          if (
-            txSnap.exists &&
-            String((txSnap.data() as any)?.customerId || '').trim() === authoritativeCustomerId &&
-            String((txSnap.data() as any)?.transactionType || '').includes('birthday')
-          ) {
-            verifiedBirthdayReward = true;
-          }
-        }
-        if (!verifiedBirthdayReward) {
-          return res.status(409).json({
-            success: false,
-            code: 'BIRTHDAY_REWARD_NOT_RECORDED',
-            error: 'Klaim hadiah ulang tahun belum tercatat pada sistem.',
-          });
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(authoritativeCustomerId);
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `birthday:${authoritativeCustomerId}:${currentYear}`;
-      } else if (rule.entityKind === 'case') {
-        const caseId = String(rawPayload.caseId || rawPayload.id || '').trim();
-        let caseDocData: any = null;
-        if (caseId) {
-          const cSnap = await adminDb.collection('booking_cases').doc(caseId).get();
-          if (cSnap.exists) {
-            caseDocData = { id: cSnap.id, ...(cSnap.data() as any) };
-          } else {
-            const cSnapAlt = await adminDb.collection('cases').doc(caseId).get();
-            if (cSnapAlt.exists) {
-              caseDocData = { id: cSnapAlt.id, ...(cSnapAlt.data() as any) };
-            }
-          }
-        }
-        if (!caseDocData && !authoritativeBooking) {
-          return res.status(404).json({
-            success: false,
-            code: 'CASE_NOT_FOUND',
-            error: 'Data kasus layanan tidak ditemukan.',
-          });
-        }
-        if (!authoritativeBooking && caseDocData?.bookingId) {
-          authoritativeBookingId = String(caseDocData.bookingId).trim();
-          const bSnap = await adminDb.collection('bookings').doc(authoritativeBookingId).get();
-          if (bSnap.exists) {
-            authoritativeBooking = { id: bSnap.id, ...(bSnap.data() as any) };
-          }
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          String(caseDocData?.customerId || authoritativeCustomerId || ''),
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `case:${caseDocData?.id || caseId || authoritativeBookingId}:${canonicalEventType}`;
-      } else if (rule.entityKind === 'review') {
-        const reviewId = String(rawPayload.reviewId || rawPayload.id || '').trim();
-        let reviewDocData: any = null;
-        if (reviewId) {
-          const rSnap = await adminDb.collection('reviews').doc(reviewId).get();
-          if (rSnap.exists) {
-            reviewDocData = { id: rSnap.id, ...(rSnap.data() as any) };
-          }
-        }
-        if (!reviewDocData && !authoritativeBooking) {
-          return res.status(404).json({
-            success: false,
-            code: 'REVIEW_NOT_FOUND',
-            error: 'Data ulasan pelanggan tidak ditemukan.',
-          });
-        }
-        const custResolved = await resolveCanonicalCustomerIdentity(
-          String(reviewDocData?.customerId || authoritativeCustomerId || ''),
-          authoritativeBooking
-        );
-        authoritativeCustomerId = custResolved.customerId;
-        authoritativeCustomerAuthUid = custResolved.customerAuthUid || '';
-        authoritativeCustomerName = custResolved.customerName || authoritativeCustomerName;
-        authoritativeCustomerPhone = custResolved.customerPhone || authoritativeCustomerPhone;
-        entityReferenceKey = `review:${reviewDocData?.id || reviewId || authoritativeBookingId}:${canonicalEventType}`;
+  async function s7AssignedCaller(read: ReturnType<typeof s7Reader>, caller: S7Caller, source: S7Source): Promise<boolean> {
+    if (caller.role !== 'therapist' || !source.therapistId || !caller.therapistIds.has(source.therapistId)) return false;
+    const target = await s7Therapist(read, source.therapistId, s7Text(source.booking?.therapistAuthUid));
+    return target.uid === caller.uid;
+  }
+  async function s7Source(read: ReturnType<typeof s7Reader>, type: string, references: Record<string, any>): Promise<S7Source> {
+    const refs = { ...references };
+    let booking = await s7Booking(read, refs), entity: any = {}, version = '', entityCustomerId = refs.customerId || '';
+    let entityId = '', kind = 'booking';
+    const load = async (collection: string, id: string) => { const snap = await read.doc(collection, id); if (!snap.exists) throw s7Error(404, 'NOTIFICATION_SOURCE_NOT_FOUND'); return { ...snap.data(), id: snap.id }; };
+    if (type === 'chat.message_received') {
+      if (!booking || !s7Id(refs.messageId)) throw s7Error(400, 'CHAT_REFERENCE_INVALID');
+      kind = 'chat';
+      const message = await read.doc(`booking_chats/${booking.id}/messages`, refs.messageId);
+      if (!message.exists) throw s7Error(404, 'CHAT_MESSAGE_NOT_FOUND');
+      entity = message.data(); entityId = message.id;
+      if (entity.bookingId !== booking.id || !s7Id(entity.senderUid) || !['CUSTOMER','THERAPIST','SYSTEM'].includes(entity.senderType)) throw s7Error(409, 'CHAT_MESSAGE_MISMATCH');
+      if (entity.senderType === 'CUSTOMER') {
+        if (s7UidFields(booking.data, ['customerAuthUid','authUserId']) !== entity.senderUid) throw s7Error(403, 'CHAT_SENDER_CONFLICT');
+        const target = await s7Therapist(read, s7Text(booking.data.therapistId || booking.data.assignedTherapistId), s7Text(booking.data.therapistAuthUid));
+        entity = { ...entity, recipientRole: 'therapist', recipientUid: target.uid };
       } else {
-        entityReferenceKey = `system:${canonicalEventType}:${String(rawPayload.date || new Date().toISOString().slice(0, 10))}`;
+        const sender = await s7Caller(read, entity.senderUid);
+        if (entity.senderType === 'THERAPIST') {
+          const target = await s7Therapist(read, s7Text(booking.data.therapistId || booking.data.assignedTherapistId), s7Text(booking.data.therapistAuthUid));
+          if (sender.role !== 'therapist' || target.uid !== entity.senderUid) throw s7Error(403, 'CHAT_SENDER_CONFLICT');
+        } else if (!s7Operational.includes(sender.role)) throw s7Error(403, 'CHAT_SENDER_CONFLICT');
+        const uid = s7UidFields(booking.data, ['customerAuthUid','authUserId']);
+        if (!uid) throw s7Error(409, 'CHAT_RECIPIENT_UNRESOLVED');
+        entity = { ...entity, recipientRole: 'customer', recipientUid: uid };
       }
-
-      // 2. Verify Caller Authorization for this event & entity
-      let callerAuthorized = false;
-      if (caller.isStaff && caller.staffRole) {
-        if (rule.allowedStaffRoles.includes(caller.staffRole)) {
-          callerAuthorized = true;
-        } else if (rule.allowAssignedTherapist && caller.staffRole === 'therapist') {
-          if (authoritativeBooking && isBookingAssignedToTherapistCaller(authoritativeBooking, caller)) {
-            callerAuthorized = true;
-          }
+      version = `${booking.id}:${entityId}:${entity.recipientUid}`;
+    } else if (type.startsWith('payment.')) {
+      kind = 'payment';
+      let id = refs.paymentId;
+      if (!id && booking?.data.activePaymentId) id = booking.data.activePaymentId;
+      if (!id && booking) {
+        const found = await read.query(adminDb.collection('payments').where('bookingId', '==', booking.id).limit(2));
+        if (found.docs.length !== 1) throw s7Error(409, 'PAYMENT_REFERENCE_REVIEW_REQUIRED'); id = found.docs[0].id;
+      }
+      if (!id) throw s7Error(400, 'PAYMENT_REFERENCE_REQUIRED');
+      entity = await load('payments', id); entityId = id; refs.paymentId = id;
+      if (!s7Id(entity.bookingId)) throw s7Error(409, 'PAYMENT_LINKAGE_CONFLICT');
+      if (booking && booking.id !== entity.bookingId) throw s7Error(409, 'PAYMENT_LINKAGE_CONFLICT');
+      booking = booking || await s7Booking(read, { bookingId: entity.bookingId });
+      const uid = s7UidFields(entity, ['customerAuthUid', 'authUserId']);
+      const bUid = s7UidFields(booking!.data, ['customerAuthUid', 'authUserId']);
+      if ((uid && bUid && uid !== bUid) || (entity.customerId && booking!.data.customerId && entity.customerId !== booking!.data.customerId) || (entity.bookingCode && entity.bookingCode !== booking!.data.bookingCode)) throw s7Error(409, 'PAYMENT_LINKAGE_CONFLICT');
+      version = `${entityId}:${type}:${entity.paymentProofUploadedAt || entity.proofUploadedAt || entity.verifiedAt || entity.rejectedAt || entity.expiredAt || entity.createdAt || ''}`;
+    } else if (['loyalty.points_earned', 'loyalty.points_redeemed', 'referral.qualified', 'birthday.reward_issued'].includes(type)) {
+      kind = 'ledger';
+      let id = refs.transactionId;
+      if (!id && booking && type.startsWith('loyalty.points_')) {
+        const found = await read.query(adminDb.collection('loyalty_transactions').where('bookingId', '==', booking.id).where('transactionType', '==', type.endsWith('earned') ? 'earn' : 'redeem').limit(2));
+        if (found.docs.length !== 1) throw s7Error(409, 'LOYALTY_REFERENCE_REVIEW_REQUIRED'); id = found.docs[0].id;
+      }
+      if (!id) throw s7Error(400, 'LOYALTY_REFERENCE_REQUIRED');
+      entity = await load('loyalty_transactions', id); entityId = id; refs.transactionId = id;
+      if (!s7Id(entity.customerId) || !Number.isFinite(entity.points) || !Number.isFinite(entity.balanceAfter)) throw s7Error(409, 'LOYALTY_LEDGER_INVALID');
+      if (entity.bookingId) {
+        if (booking && booking.id !== entity.bookingId) throw s7Error(409, 'LOYALTY_BOOKING_CONFLICT');
+        booking = booking || await s7Booking(read, { bookingId: entity.bookingId });
+      }
+      entityCustomerId = entity.customerId;
+      if (refs.customerId && refs.customerId !== entityCustomerId) throw s7Error(409, 'LOYALTY_CUSTOMER_CONFLICT');
+      const expected = type === 'loyalty.points_earned' ? 'earn' : type === 'loyalty.points_redeemed' ? 'redeem' : type === 'referral.qualified' ? 'referral_bonus' : 'birthday_bonus';
+      if (entity.transactionType !== expected || (expected === 'redeem' ? entity.points >= 0 : entity.points <= 0)) throw s7Error(409, 'LOYALTY_EVENT_MISMATCH');
+      if (type === 'referral.qualified') {
+        const id = refs.referralId || entity.referenceId;
+        const referral = await load('referrals', id);
+        if (referral.referrerCustomerId !== entityCustomerId || !['qualified', 'rewarded'].includes(s7Text(referral.status).toLowerCase()) || entity.referenceId !== id || (referral.firstBookingId && referral.firstBookingId !== booking?.id)) throw s7Error(409, 'REFERRAL_LINKAGE_CONFLICT');
+        refs.referralId = id; entity.referral = referral;
+      }
+      if (type === 'birthday.reward_issued') {
+        const account = await load('loyalty_accounts', entityCustomerId);
+        const year = refs.year || Number(String(entity.referenceId || '').split('_').at(-1));
+        if (!Number.isInteger(year) || account.birthdayBenefitUsedYear !== year || entity.referenceId !== `${entityCustomerId}_${year}`) throw s7Error(409, 'BIRTHDAY_LEDGER_CONFLICT');
+        refs.year = year;
+      }
+      version = `${entityId}:${type}`;
+    } else if (type === 'membership.tier_upgraded') {
+      kind = 'tier';
+      if (!s7Id(entityCustomerId)) throw s7Error(400, 'CUSTOMER_REFERENCE_REQUIRED');
+      entity = await load('loyalty_accounts', entityCustomerId); entityId = entityCustomerId;
+      if (!s7Id(entity.currentTierId) || !s7Date(entity.tierStartedAt)) throw s7Error(409, 'TIER_REFERENCE_INVALID');
+      const tier = await load('membership_tiers', entity.currentTierId); entity.tier = tier;
+      version = `${entityCustomerId}:${entity.currentTierId}:${entity.tierStartedAt}`;
+    } else if (type === 'voucher.issued') {
+      kind = 'voucher';
+      const id = refs.customerVoucherId || (String(refs.voucherId || '').startsWith('cv_') ? refs.voucherId : '');
+      if (!s7Id(id)) throw s7Error(400, 'CUSTOMER_VOUCHER_REFERENCE_REQUIRED');
+      entity = await load('customer_vouchers', id); entityId = id; refs.customerVoucherId = id;
+      entityCustomerId = entity.customerId;
+      if (!s7Id(entityCustomerId) || (refs.customerId && refs.customerId !== entityCustomerId) || (refs.voucherId && refs.voucherId !== id && refs.voucherId !== entity.voucherId)) throw s7Error(409, 'VOUCHER_LINKAGE_CONFLICT');
+      version = `${id}:${entity.assignedAt || entity.issuedAt || entity.createdAt || ''}`;
+    } else if (type.startsWith('therapist.shift_') || type === 'therapist.off_updated' || type === 'therapist.schedule_override') {
+      kind = 'roster';
+      if (!s7Id(refs.therapistId) || !refs.date) throw s7Error(400, 'ROSTER_REFERENCE_REQUIRED');
+      const therapist = await load('therapists', refs.therapistId);
+      let entries: any[];
+      if (refs.date === 'Jadwal Mingguan Rutin') {
+        if (!therapist.weeklySchedule || typeof therapist.weeklySchedule !== 'object') throw s7Error(409, 'ROSTER_SOURCE_MISSING');
+        entries = Object.entries(therapist.weeklySchedule).map(([day, value]) => ({ day, value }));
+      } else {
+        const dates = refs.date.split(' s/d '), first = dates[0], last = dates[1] || first;
+        if (!Number.isFinite(Date.parse(first)) || !Number.isFinite(Date.parse(last)) || last < first) throw s7Error(400, 'INVALID_ROSTER_DATE');
+        const roster = await read.query(adminDb.collection('therapist_rosters').where('therapistId', '==', refs.therapistId));
+        entries = roster.docs.map((s: any) => ({ ...s.data(), id: s.id })).filter((r: any) => typeof r.date === 'string' && r.date >= first && r.date <= last).map((r: any) => ({ id: r.id, date: r.date, status: r.status, shiftStart: r.shiftStart, shiftEnd: r.shiftEnd, isOff: r.isOff, reason: r.offReason || r.reason || '', updatedAt: r.updatedAt || '' })).sort((a: any, b: any) => a.id.localeCompare(b.id));
+        if (!entries.length) throw s7Error(409, 'ROSTER_SOURCE_MISSING');
+      }
+      entity = { therapist, entries }; entityId = refs.therapistId;
+      version = `${entityId}:${refs.date}:${s7Hash(entries)}`;
+    } else if (type.startsWith('case.') || type.startsWith('recovery.')) {
+      kind = 'case';
+      if (!s7Id(refs.caseId)) throw s7Error(400, 'CASE_REFERENCE_REQUIRED');
+      const snap = await read.doc('cases', refs.caseId), alternate = snap.exists ? snap : await read.doc('booking_cases', refs.caseId);
+      if (!alternate.exists) throw s7Error(404, 'CASE_NOT_FOUND'); entity = { ...alternate.data(), id: alternate.id }; entityId = alternate.id;
+      if (booking && entity.bookingId && booking.id !== entity.bookingId) throw s7Error(409, 'CASE_LINKAGE_CONFLICT');
+      if (!booking && entity.bookingId) booking = await s7Booking(read, { bookingId: entity.bookingId });
+      version = `${entityId}:${type}:${entity.status || ''}:${entity.updatedAt || entity.createdAt || ''}`;
+    } else if (type.startsWith('review.')) {
+      kind = 'review';
+      if (!s7Id(refs.reviewId)) throw s7Error(400, 'REVIEW_REFERENCE_REQUIRED');
+      entity = await load('reviews', refs.reviewId); entityId = entity.id;
+      if (booking && entity.bookingId !== booking.id) throw s7Error(409, 'REVIEW_LINKAGE_CONFLICT');
+      if (!booking && entity.bookingId) booking = await s7Booking(read, { bookingId: entity.bookingId });
+      version = `${entityId}:${type}:${entity.createdAt || ''}`;
+    }
+    if (!booking && !['ledger', 'tier', 'voucher', 'roster'].includes(kind)) throw s7Error(400, 'PERSISTED_SOURCE_REQUIRED');
+    const data = booking?.data || null;
+    const bookingOwner = data ? s7UidFields(data, ['customerAuthUid', 'authUserId']) : '';
+    if (!['ledger', 'tier', 'voucher'].includes(kind)) entityCustomerId = data?.customerId || entityCustomerId;
+    if (data && refs.customerId && !['ledger'].includes(kind) && data.customerId !== refs.customerId) throw s7Error(409, 'CUSTOMER_LINKAGE_CONFLICT');
+    const expectedUid = kind === 'ledger' && type === 'referral.qualified' ? '' : bookingOwner;
+    const customer = await s7Customer(read, entityCustomerId, expectedUid);
+    if (kind === 'ledger' && type !== 'referral.qualified' && data?.customerId && data.customerId !== entityCustomerId) throw s7Error(409, 'LOYALTY_CUSTOMER_CONFLICT');
+    const therapistId = kind === 'roster' ? refs.therapistId : s7Text(data?.therapistId || data?.assignedTherapistId);
+    if (refs.therapistId && therapistId && refs.therapistId !== therapistId) throw s7Error(409, 'THERAPIST_LINKAGE_CONFLICT');
+    const payload: Record<string, any> = {
+      ...(booking ? { bookingId: booking.id, bookingCode: data.bookingCode, customerName: s7Text(data.customerName, 120), serviceName: s7Text(data.serviceName, 160), scheduleAt: s7Text(data.scheduleAt, 80) || `${s7Text(data.date)} ${s7Text(data.time)}`.trim(), area: s7Text(data.area, 100), totalAmount: data.totalAmount } : {}),
+      customerId: customer.id || undefined, customerName: customer.name, therapistId: therapistId || undefined, therapistName: s7Text(data?.therapistName || data?.assignedTherapistName, 120) || undefined,
+    };
+    if (kind === 'ledger') {
+      payload.pointsEarned = Math.max(0, entity.points); payload.pointsRedeemed = Math.abs(entity.points); payload.newBalance = entity.balanceAfter;
+      payload.discountAmount = Number(entity.metadata?.discountRp || entity.metadata?.discountAmount || 0);
+      payload.pointsReward = entity.points; payload.referredCustomerName = s7Text(entity.referral?.refereeName || entity.referral?.referredCustomerName, 120) || 'Pelanggan';
+    }
+    if (kind === 'tier') { payload.newTierName = s7Text(entity.tier.name, 100); payload.earningMultiplier = entity.tier.earningMultiplier; }
+    if (kind === 'voucher') payload.voucherName = s7Text(entity.voucherName || entity.name, 160) || 'Senzu Voucher';
+    if (kind === 'payment') payload.rejectionReason = s7Text(entity.rejectionReason, 250) || 'Silakan hubungi Customer Service';
+    if (kind === 'booking') {
+      entity = data;
+      const stampField: Record<string, string> = { 'booking.created': 'createdAt', 'booking.confirmed': 'confirmedAt', 'booking.cancelled': 'cancelledAt', 'booking.ready_for_assignment': 'paymentVerifiedAt', 'therapist.assigned': 'assignedAt', 'therapist.reassigned': 'assignedAt', 'therapist.accepted': 'acceptedAt', 'therapist.on_the_way': 'onTheWayAt', 'therapist.arrived': 'arrivedAt', 'treatment.started': 'treatmentStartedAt', 'treatment.completed': 'completedAt' };
+      version = `${booking!.id}:${type}:${data[stampField[type]] || ''}:${['therapist.assigned','therapist.reassigned'].includes(type) ? therapistId : ''}`;
+      if (type === 'therapist.nearby') version = `${booking!.id}:${type}:${therapistId}:${data.assignedAt || ''}`;
+      if (type === 'tracking.location_stale') {
+        const location = await read.doc('therapist_locations', booking!.id);
+        version = `${booking!.id}:${type}:${therapistId}:${location.exists ? s7Date(location.data().updatedAt || location.data().timestamp) : 'missing'}`;
+      }
+      if (['supervisor.unassigned_alert', 'therapist.not_accepted_alert', 'therapist.late_departure_alert', 'booking.reminder'].includes(type)) version = `${booking!.id}:${type}:${data.scheduleAt || `${data.date} ${data.time}`}:${data.assignedAt || ''}`;
+    }
+    refs.bookingId = booking?.id || undefined; delete refs.bookingCode;
+    return { type, references: s7Json(refs), booking: data, bookingId: booking?.id || '', customerId: customer.id, customerUid: customer.uid, therapistId, payload: s7Json(payload), version, entity, ownerUid: bookingOwner || customer.uid };
+  }
+  async function s7AuthorizeSource(read: ReturnType<typeof s7Reader>, caller: S7Caller, source: S7Source): Promise<void> {
+    if (s7Operational.includes(caller.role)) {
+      if (source.type.startsWith('therapist.shift_') || source.type === 'therapist.off_updated' || source.type === 'therapist.schedule_override') {
+        if (!['supervisor', 'manager', 'admin'].includes(caller.role)) throw s7Error(403, 'EVENT_PERMISSION_DENIED');
+      }
+      return;
+    }
+    const ownerEvents = ['booking.created', 'booking.cancelled', 'payment.proof_uploaded', 'payment.expired', 'therapist.nearby', 'loyalty.points_earned', 'loyalty.points_redeemed', 'membership.tier_upgraded', 'voucher.issued', 'referral.qualified', 'birthday.reward_issued', 'review.low_rating'];
+    const owner = source.booking && !['referral.qualified','birthday.reward_issued','membership.tier_upgraded','voucher.issued','loyalty.points_earned','loyalty.points_redeemed'].includes(source.type)
+      ? s7AssertBookingCustomer(caller, source) : caller.uid === source.customerUid || s7AssertBookingCustomer(caller, source);
+    if ((ownerEvents.includes(source.type) || source.type.startsWith('case.')) && owner) return;
+    const therapistEvents = ['therapist.accepted', 'therapist.on_the_way', 'therapist.nearby', 'therapist.arrived', 'treatment.started', 'treatment.completed', 'loyalty.points_earned', 'membership.tier_upgraded', 'referral.qualified'];
+    if ((therapistEvents.includes(source.type) || source.type.startsWith('case.')) && await s7AssignedCaller(read, caller, source)) return;
+    throw s7Error(403, 'EVENT_PERMISSION_DENIED');
+  }
+  async function s7Settings(read: ReturnType<typeof s7Reader>): Promise<any> {
+    const snap = await read.doc('notification_settings', 'default');
+    return { ...DEFAULT_NOTIFICATION_SETTINGS, ...(snap.exists ? snap.data() : {}) };
+  }
+  async function s7Eligible(read: ReturnType<typeof s7Reader>, source: S7Source, settings: any): Promise<void> {
+    const b = source.booking || {}, type = source.type, status = s7Text(b.status).toLowerCase(), entity = source.entity;
+    const paymentStatus = s7Text(entity.status || b.paymentStatus).toLowerCase();
+    const requireState = (valid: any) => { if (!valid) throw s7Error(409, 'EVENT_SOURCE_STATE_MISMATCH'); };
+    const progressed = ['confirmed', 'assigned', 'accepted', 'on the way', 'arrived', 'treatment', 'completed'];
+    if (type === 'chat.message_received') {
+      const chat = await read.doc('booking_chats', source.bookingId);
+      requireState(!['completed','cancelled','rescheduled','rejected','dibatalkan','selesai','expired'].includes(status) && !['expired','refunded','payment_rejected'].includes(s7Text(b.paymentStatus).toLowerCase()) && !(chat.exists && s7Text(chat.data().status).toLowerCase() === 'closed'));
+    }
+    if (type === 'booking.confirmed') requireState(Boolean(b.confirmedAt) || progressed.includes(status));
+    if (type === 'booking.cancelled') requireState(['cancelled', 'dibatalkan'].includes(status));
+    if (type === 'booking.ready_for_assignment') requireState(['paid', 'verified', 'terverifikasi'].includes(s7Text(b.paymentStatus).toLowerCase()) && !source.therapistId);
+    if (['therapist.assigned', 'therapist.reassigned'].includes(type)) requireState(source.therapistId && b.assignedAt && !['cancelled', 'completed'].includes(status));
+    if (type === 'therapist.reassigned') requireState(b.isReassigned === true || b.reassignedFromTherapistId);
+    const transition: Record<string, [string, string[]]> = {
+      'therapist.accepted': ['acceptedAt', ['accepted', 'on the way', 'arrived', 'treatment', 'completed']],
+      'therapist.on_the_way': ['onTheWayAt', ['on the way', 'arrived', 'treatment', 'completed']],
+      'therapist.arrived': ['arrivedAt', ['arrived', 'treatment', 'completed']],
+      'treatment.started': ['treatmentStartedAt', ['treatment', 'completed']],
+      'treatment.completed': ['completedAt', ['completed']],
+    };
+    if (transition[type]) requireState(source.therapistId && (s7Date(b[transition[type][0]]) || transition[type][1].includes(status)));
+    if (type === 'payment.proof_uploaded') requireState(typeof entity.paymentProofUrl === 'string' && entity.paymentProofUrl.length > 0 && ['pending_manual_verification', 'paid', 'verified', 'pending_verification'].includes(paymentStatus));
+    if (type === 'payment.verified') requireState(['paid', 'verified', 'settled'].includes(paymentStatus));
+    if (type === 'payment.rejected') requireState(['payment_rejected', 'rejected'].includes(paymentStatus));
+    if (type === 'payment.expired') requireState(paymentStatus === 'expired');
+    if (type === 'review.low_rating') requireState(Number(entity.overallRating) <= 2 && Number(entity.overallRating) >= 1);
+    if (type === 'case.high_severity') requireState(['HIGH', 'CRITICAL'].includes(entity.severity));
+    if (type === 'therapist.nearby' || type === 'tracking.location_stale') {
+      const snap = await read.doc('therapist_locations', source.bookingId);
+      requireState(snap.exists && source.therapistId && status === 'on the way');
+      const loc = snap.data();
+      requireState(loc.bookingId === source.bookingId && loc.therapistId === source.therapistId);
+      const updated = s7Date(loc.updatedAt || loc.timestamp), age = Date.now() - Date.parse(updated);
+      if (type === 'tracking.location_stale') {
+        requireState(settings.staleGpsAlert && Number.isFinite(age) && age >= Math.max(1, Number(settings.gpsStaleMinutes) || 3) * 60000);
+      } else {
+        requireState(settings.nearbyNotification && Number.isFinite(age) && age >= -60000 && age < 5 * 60000);
+        const coords = [loc.latitude, loc.longitude, b.latitude, b.longitude];
+        requireState(coords.every(v => typeof v === 'number' && Number.isFinite(v)));
+        const rad = (n: number) => n * Math.PI / 180;
+        const a = Math.sin(rad(loc.latitude - b.latitude) / 2) ** 2 + Math.cos(rad(b.latitude)) * Math.cos(rad(loc.latitude)) * Math.sin(rad(loc.longitude - b.longitude) / 2) ** 2;
+        const distance = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        requireState(distance <= Math.max(0.1, Number(settings.nearbyDistanceKm) || 1));
+      }
+    }
+    if (type === 'supervisor.unassigned_alert' || type === 'therapist.not_accepted_alert' || type === 'therapist.late_departure_alert' || type === 'booking.reminder') {
+      const schedule = s7Date(b.scheduleAt) || s7Date(`${b.date}T${b.time}:00+07:00`), until = Date.parse(schedule) - Date.now();
+      requireState(Number.isFinite(until) && !['completed', 'cancelled'].includes(status));
+      if (type === 'supervisor.unassigned_alert') requireState(!source.therapistId && ['paid', 'verified', 'terverifikasi'].includes(s7Text(b.paymentStatus).toLowerCase()) && until <= Math.max(1, settings.assignmentAlertMinutes) * 60000);
+      if (type === 'therapist.not_accepted_alert') requireState(source.therapistId && !b.acceptedAt && Date.now() - Date.parse(s7Date(b.assignedAt)) >= Math.max(1, settings.therapistNotAcceptedMinutes) * 60000);
+      if (type === 'therapist.late_departure_alert') requireState(source.therapistId && !b.onTheWayAt && until < -Math.max(1, settings.lateDepartureBufferMinutes) * 60000);
+      if (type === 'booking.reminder') requireState(settings.bookingReminder && until > 0 && until <= Math.max(1, settings.reminderMinutes) * 60000);
+    }
+    if (source.type === 'membership.tier_upgraded' && source.references.tierStartedAt) requireState(s7Date(entity.tierStartedAt) === source.references.tierStartedAt);
+  }
+  const s7SafeAction = (url: unknown): url is string => typeof url === 'string' && url.length <= 400 && /^\/(?:\?|$|(?:track|css|reconciliation|supervisor|therapist|portal|crm|loyalty)(?:[/?]|$))/.test(url) && !/[\\\u0000-\u0020]/.test(url) && !url.startsWith('//');
+  const s7Core = (data: any): any => {
+    const result = { ...data }; for (const key of ['read', 'readAt', 'updatedAt']) delete result[key]; return s7Json(result);
+  };
+  async function s7Unused(read: ReturnType<typeof s7Reader>, collection: string, preferred: string): Promise<string> {
+    let id = preferred;
+    for (let attempt = 0; attempt < 4; attempt++) { if (!(await read.doc(collection, id)).exists) return id; id = s7NewId(preferred.slice(0, 30)); }
+    throw s7Error(503, 'NOTIFICATION_ID_COLLISION');
+  }
+  function s7ValidateReceipt(data: any, kind: string): void {
+    if (!data || data.schemaVersion !== 1 || data.kind !== kind || !s7Id(data.eventId) || !Array.isArray(data.notificationIds) || data.notificationIds.some((id: any) => !s7Id(id)) || !s7Date(data.createdAt) || !data.response || data.response.eventId !== data.eventId || data.responseFingerprint !== s7Hash(data.response)) throw s7Error(409, 'NOTIFICATION_RECEIPT_CORRUPTED');
+  }
+  async function s7Replay(read: ReturnType<typeof s7Reader>, data: any, kind: string): Promise<any> {
+    s7ValidateReceipt(data, kind);
+    const event = await read.doc('notification_events', data.eventId);
+    if (!event.exists || data.eventFingerprint !== s7Hash(event.data())) throw s7Error(409, 'NOTIFICATION_RECEIPT_CORRUPTED');
+    return { ...data.response, isIdempotent: true };
+  }
+  async function s7Recipients(read: ReturnType<typeof s7Reader>, source: S7Source, settings: any, callerName: string, guest = false): Promise<any[]> {
+    if (source.type === 'chat.message_received') return [{ recipientRole: source.entity.recipientRole, recipientUserId: source.entity.recipientUid, title: 'Senzu Home', message: source.entity.recipientRole === 'therapist' ? 'Pesan baru dari customer.' : 'Pesan baru dari terapis Anda.', actionUrl: `/?openChat=${encodeURIComponent(source.bookingId)}`, priority: 'HIGH' }];
+    const targets: any[] = resolveNotificationTargets(source.type as any, source.payload, settings);
+    if (['therapist.shift_updated', 'therapist.off_updated', 'therapist.schedule_override'].includes(source.type)) {
+      const entries = source.entity.entries || [];
+      const summaries = entries.slice(0, 10).map((r: any) => r.day ? `${r.day}: ${JSON.stringify(r.value)}` : `${r.date}: ${r.shiftStart || '-'}–${r.shiftEnd || '-'} (${r.status || 'diperbarui'})`).join('; ');
+      targets.push({ recipientRole: 'therapist', therapistId: source.therapistId, title: 'Pembaruan Jadwal Kerja', message: `Jadwal ${source.references.date} telah diperbarui oleh ${callerName}. ${summaries}`, actionUrl: '/therapist', priority: 'NORMAL' });
+    }
+    const resolved: any[] = [];
+    (source as any).recipientReviewRoles = [];
+    for (const target of targets) {
+      if (guest && !['css', 'manager'].includes(target.recipientRole)) continue;
+      let uid = '';
+      if (target.recipientRole === 'customer') { uid = source.customerUid; if (!uid) { (source as any).recipientReviewRoles.push('customer'); continue; } }
+      else if (target.recipientRole === 'therapist') {
+        try { uid = (await s7Therapist(read, target.therapistId || source.therapistId, s7Text(source.booking?.therapistAuthUid))).uid; }
+        catch (err: any) { if (![403, 409].includes(err.statusCode)) throw err; (source as any).recipientReviewRoles.push('therapist'); continue; }
+      } else if (!s7Operational.includes(target.recipientRole)) continue;
+      if (!s7SafeAction(target.actionUrl)) throw s7Error(409, 'NOTIFICATION_ACTION_INVALID');
+      resolved.push({ recipientRole: target.recipientRole, ...(uid ? { recipientUserId: uid } : {}), title: s7Text(target.title, 200), message: s7Text(target.message, 1000), priority: target.priority, actionUrl: target.actionUrl });
+    }
+    return resolved;
+  }
+  async function s7PersistEvent(transaction: any, read: ReturnType<typeof s7Reader>, source: S7Source, caller: S7Caller, settings: any, request: { id: string; fingerprint: string } | null, guest = false): Promise<any> {
+    const semanticId = `s7s_${s7Hash([source.type, source.version])}`;
+    const guardSnap = await read.doc('notification_private_receipts', semanticId);
+    if (guardSnap.exists) {
+      const guard = guardSnap.data();
+      if (guard.type !== source.type || guard.version !== source.version) throw s7Error(409, 'NOTIFICATION_RECEIPT_CONFLICT');
+      const response = await s7Replay(read, guard, 'semantic');
+      if (request) transaction.create(adminDb.collection('notification_private_receipts').doc(request.id), { ...guard, kind: 'request', actorUid: caller.uid, requestFingerprint: request.fingerprint });
+      return response;
+    }
+    // Existing voucher checkout writes this alert atomically with the booking.
+    if (!guest && source.type === 'booking.created') {
+      const receipts = await read.query(adminDb.collection('voucher_checkout_receipts').where('bookingId', '==', source.bookingId).limit(2));
+      if (receipts.docs.length > 1) throw s7Error(409, 'CHECKOUT_NOTIFICATION_REVIEW_REQUIRED');
+      if (receipts.docs.length === 1) {
+        const receipt = receipts.docs[0].data(), eventId = `evt_checkout_${source.bookingId}`;
+        if (receipt.schemaVersion !== 2 || receipt.bookingEventId !== eventId || receipt.customerAuthUid !== source.customerUid || receipt.bookingCode !== source.booking.bookingCode || !s7Date(receipt.committedAt)) throw s7Error(409, 'CHECKOUT_NOTIFICATION_REVIEW_REQUIRED');
+        const eventSnap = await read.doc('notification_events', eventId);
+        if (!eventSnap.exists || eventSnap.data().eventType !== source.type || eventSnap.data().bookingId !== source.bookingId) throw s7Error(409, 'CHECKOUT_NOTIFICATION_REVIEW_REQUIRED');
+        const ids: string[] = [];
+        for (const role of ['css', 'manager', 'customer']) { const n = await read.doc('notifications', `notif_checkout_${source.bookingId}_${role}`); if (n.exists) ids.push(n.id); }
+        const response = { success: true, eventId, notificationIds: ids, isIdempotent: true };
+        const guard = { schemaVersion: 1, kind: 'semantic', type: source.type, version: source.version, eventId, notificationIds: ids, createdAt: s7Date(receipt.committedAt), eventFingerprint: s7Hash(eventSnap.data()), response, responseFingerprint: s7Hash(response) };
+        transaction.create(adminDb.collection('notification_private_receipts').doc(semanticId), guard);
+        if (request) transaction.create(adminDb.collection('notification_private_receipts').doc(request.id), { ...guard, kind: 'request', actorUid: caller.uid, requestFingerprint: request.fingerprint });
+        return response;
+      }
+    }
+    await s7Eligible(read, source, settings);
+    const targets = await s7Recipients(read, source, settings, caller.name, guest);
+    const eventId = await s7Unused(read, 'notification_events', `evt_${semanticId}`), now = new Date().toISOString();
+    const eventCreatedAt = guest ? s7Date((source as any).initialCreatedAt) : now;
+    if (!eventCreatedAt) throw s7Error(409, 'NOTIFICATION_CREATION_TIME_UNVERIFIED');
+    const notifications: any[] = [], deliveries: any[] = [];
+    for (const target of targets) {
+      const id = await s7Unused(read, 'notifications', `notif_${semanticId}_${target.recipientRole}`);
+      const deliveryId = await s7Unused(read, 'notification_deliveries', `del_${s7Hash([id, 'in_app']).slice(0, 40)}`);
+      const metadata: any = {}; for (const key of ['bookingId', 'bookingCode', 'customerId', 'therapistId', 'caseId', 'caseCode', 'transactionId', 'customerVoucherId']) if (source.references[key]) metadata[key] = source.references[key];
+      notifications.push(s7Json({ id, eventId, eventType: source.type, ...target, ...(source.bookingId ? { bookingId: source.bookingId, bookingCode: source.booking.bookingCode } : {}), ...(source.customerId ? { customerId: source.customerId } : {}), ...(source.therapistId ? { therapistId: source.therapistId } : {}), channel: 'in_app', read: false, readAt: null, createdAt: eventCreatedAt, provenanceId: semanticId, metadata }));
+      deliveries.push({ id: deliveryId, notificationId: id, eventId, channel: 'in_app', recipient: target.recipientUserId || target.recipientRole, status: 'delivered', sentAt: now, deliveredAt: now, retryCount: 0, createdAt: now });
+      if (settings.pushEnabled) {
+        const pushId = await s7Unused(read, 'notification_deliveries', `del_${s7Hash([id, 'push']).slice(0, 40)}`);
+        deliveries.push({ id: pushId, notificationId: id, eventId, channel: 'push', recipient: target.recipientUserId || target.recipientRole, status: 'pending', failureReason: 'TRANSPORT_NOT_ATTEMPTED', retryCount: 0, createdAt: now });
+      }
+      for (const channel of ['whatsapp', 'email']) if (settings[`${channel}Enabled`]) {
+        const externalId = await s7Unused(read, 'notification_deliveries', `del_${s7Hash([id, channel]).slice(0, 40)}`);
+        deliveries.push({ id: externalId, notificationId: id, eventId, channel, recipient: target.recipientUserId || target.recipientRole, status: 'pending', failureReason: 'PROVIDER_NOT_CONFIGURED', retryCount: 0, createdAt: now });
+      }
+    }
+    const event = s7Json({ id: eventId, eventType: source.type, ...(source.bookingId ? { bookingId: source.bookingId } : {}), actorId: caller.staffId || caller.uid, actorRole: caller.role, payload: source.payload, createdAt: eventCreatedAt, processedAt: now, status: 'processed', targetCount: targets.length, skippedRecipientRoles: (source as any).recipientReviewRoles || [], reviewRequired: Boolean((source as any).recipientReviewRoles?.length) });
+    const response = { success: true, eventId, notificationIds: notifications.map(n => n.id), isIdempotent: false };
+    const guard = { schemaVersion: 1, kind: 'semantic', type: source.type, version: source.version, source: { type: source.type, references: source.references }, eventId, notificationIds: response.notificationIds, notificationHashes: Object.fromEntries(notifications.map(n => [n.id, s7Hash(s7Core(n))])), createdAt: now, eventFingerprint: s7Hash(event), response, responseFingerprint: s7Hash(response) };
+    // All authorization/entity/settings/collision reads above precede the first write.
+    transaction.create(adminDb.collection('notification_events').doc(eventId), event);
+    notifications.forEach(n => transaction.create(adminDb.collection('notifications').doc(n.id), n));
+    deliveries.forEach(d => transaction.create(adminDb.collection('notification_deliveries').doc(d.id), d));
+    transaction.create(adminDb.collection('notification_private_receipts').doc(semanticId), guard);
+    if (request) transaction.create(adminDb.collection('notification_private_receipts').doc(request.id), { ...guard, kind: 'request', actorUid: caller.uid, requestFingerprint: request.fingerprint });
+    return response;
+  }
+  function s7Audience(data: any, caller: S7Caller): boolean {
+    const role = s7Text(data.recipientRole), addressed = [data.recipientUserId, data.recipientId].filter(v => v !== undefined && v !== null && v !== '');
+    if (addressed.some(v => !s7Id(v))) return false;
+    if (role === 'customer') return caller.role === 'customer' || data.recipientUserId === caller.uid;
+    if (role === 'therapist') return caller.role === 'therapist';
+    const roles = ['manager', 'admin'].includes(caller.role) ? s7Operational : [caller.role];
+    if (!s7Operational.includes(caller.role) || !roles.includes(role)) return false;
+    return addressed.every(value => value === caller.uid || value === caller.staffId || value === role);
+  }
+  async function s7Visible(read: ReturnType<typeof s7Reader>, caller: S7Caller, snap: any): Promise<any | null> {
+    if (!snap.exists || !s7Id(snap.id)) return null;
+    const data = snap.data();
+    if (!s7Audience(data, caller)) return null;
+    let source: S7Source, content = data, createdAt = s7Date(data.createdAt);
+    try {
+      if (data.provenanceId) {
+        if (!s7Id(data.provenanceId)) return null;
+        const guardSnap = await read.doc('notification_private_receipts', data.provenanceId);
+        if (!guardSnap.exists) return null;
+        const guard = guardSnap.data();
+        s7ValidateReceipt(guard, 'semantic');
+        if (guard.notificationHashes?.[snap.id] !== s7Hash(s7Core(data)) || !guard.notificationIds.includes(snap.id) || guard.eventId !== data.eventId || !guard.source || guard.source.type !== data.eventType) return null;
+        source = await s7Source(read, guard.source.type, guard.source.references);
+        const event = await read.doc('notification_events', guard.eventId);
+        if (!event.exists || s7Hash(event.data()) !== guard.eventFingerprint) return null;
+      } else {
+        // Historic public rows are pointers, never trusted text, actor, URL or identity proof.
+        if ((!s7EventTypes.has(data.eventType) && data.eventType !== 'chat.message_received') || !s7Id(data.bookingId)) return null;
+        const messageId = data.metadata?.messageId;
+        if (data.eventType === 'chat.message_received' && !s7Id(messageId)) return null;
+        source = await s7Source(read, data.eventType, { bookingId: data.bookingId, ...(s7Id(data.paymentId) ? { paymentId: data.paymentId } : {}), ...(s7Id(messageId) ? { messageId } : {}) });
+        if (data.eventType === 'chat.message_received') {
+          const legacy = await read.doc('chat_notification_dispatches', `chat_notif_${messageId}`);
+          if (!legacy.exists || legacy.data().bookingId !== source.bookingId || legacy.data().messageId !== messageId || legacy.data().notificationId !== snap.id || legacy.data().recipientUserId !== source.entity.recipientUid) return null;
+        }
+        if (data.bookingCode && data.bookingCode !== source.booking?.bookingCode) return null;
+        const settings = await s7Settings(read);
+        await s7Eligible(read, source, settings);
+        const targets = await s7Recipients(read, source, settings, 'Sistem Senzu Home');
+        const target = targets.find(target => target.recipientRole === data.recipientRole && (!target.recipientUserId || target.recipientUserId === caller.uid));
+        if (!target) return null;
+        content = { ...target, eventId: s7Id(data.eventId) ? data.eventId : `legacy_${s7Hash([source.type, source.bookingId]).slice(0, 32)}`, eventType: source.type, bookingId: source.bookingId, bookingCode: source.booking?.bookingCode, customerId: source.customerId, therapistId: source.therapistId, read: data.read === true, readAt: s7Date(data.readAt) || null };
+        createdAt = s7Date(snap.createTime) || s7Date(source.booking?.createdAt);
+      }
+      if (data.recipientRole === 'customer') {
+        if (source.customerUid !== caller.uid || (source.booking && s7UidFields(source.booking, ['customerAuthUid', 'authUserId']) !== caller.uid)) return null;
+        const aliases = new Set([caller.uid, source.customerId]);
+        if ([data.recipientUserId, data.recipientId].some(v => v && !aliases.has(v))) return null;
+        if (s7UidFields(data, ['customerAuthUid', 'authUserId']) && s7UidFields(data, ['customerAuthUid', 'authUserId']) !== caller.uid) return null;
+      }
+      if (data.recipientRole === 'therapist') {
+        const therapist = await s7Therapist(read, source.therapistId, s7Text(source.booking?.therapistAuthUid));
+        if (therapist.uid !== caller.uid) return null;
+        const aliases = new Set([caller.uid, caller.staffId, source.therapistId]);
+        if ([data.recipientUserId, data.recipientId, data.therapistId].some(v => v && !aliases.has(v))) return null;
+      }
+    } catch (err: any) { if ([403, 404, 409, 400].includes(err.statusCode)) return null; throw err; }
+    if (!s7Date(createdAt) || !s7SafeAction(content.actionUrl) || !s7Id(content.eventId)) return null;
+    const result: any = { id: snap.id, eventId: content.eventId, eventType: content.eventType, recipientRole: data.recipientRole, title: s7Text(content.title, 200), message: s7Text(content.message, 1000), actionUrl: content.actionUrl, channel: 'in_app', priority: ['LOW','NORMAL','HIGH','CRITICAL'].includes(content.priority) ? content.priority : 'NORMAL', read: data.read === true, readAt: s7Date(data.readAt) || null, createdAt };
+    for (const key of ['bookingId', 'bookingCode', 'customerId', 'therapistId', 'caseId', 'caseCode', 'recipientUserId']) if (s7Id(content[key])) result[key] = content[key];
+    return result;
+  }
+  async function s7Inbox(read: ReturnType<typeof s7Reader>, caller: S7Caller): Promise<any[]> {
+    const candidates = new Map<string, any>();
+    const collect = async (query: any) => {
+      let after: any = null;
+      for (let page = 0; page < 50; page++) {
+        const snap = await read.query(after ? query.limit(200).startAfter(after) : query.limit(200));
+        snap.docs.forEach((d: any) => candidates.set(d.id, d));
+        if (snap.docs.length < 200) return;
+        after = snap.docs.at(-1);
+      }
+      throw s7Error(503, 'INBOX_PAGE_LIMIT', 'Daftar notifikasi terlalu besar untuk diproses sekaligus.');
+    };
+    if (s7Operational.includes(caller.role)) {
+      const roles = ['manager', 'admin'].includes(caller.role) ? s7Operational : [caller.role];
+      for (const role of roles) await collect(adminDb.collection('notifications').where('recipientRole', '==', role));
+    } else {
+      const ids = new Set([caller.uid]);
+      if (caller.role === 'therapist') caller.therapistIds.forEach(id => ids.add(id));
+      else {
+        for (const field of ['authUserId', 'customerAuthUid']) {
+          const owned = await read.query(adminDb.collection('customers').where(field, '==', caller.uid));
+          owned.docs.forEach((d: any) => ids.add(d.id));
         }
       }
-      if (!callerAuthorized && rule.allowCustomerOwner) {
-        if (authoritativeBooking && isBookingOwnedByCaller(authoritativeBooking, caller)) {
-          callerAuthorized = true;
-        } else if (
-          authoritativeCustomerAuthUid &&
-          authoritativeCustomerAuthUid === caller.uid
-        ) {
-          callerAuthorized = true;
-        } else if (
-          !authoritativeCustomerAuthUid &&
-          authoritativeCustomerId &&
-          caller.customerIds.has(authoritativeCustomerId)
-        ) {
-          callerAuthorized = true;
-        }
-      }
-
-      if (!callerAuthorized) {
-        return res.status(403).json({
-          success: false,
-          code: 'FORBIDDEN_EVENT_EMITTER',
-          error: 'Anda tidak memiliki wewenang untuk memicu event notifikasi ini.',
-        });
-      }
-
-      // 3. Deterministic Deduplication Key & Idempotency Check
-      const clientIdempotencyKey =
-        typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey.trim() : '';
-      const rawDedupeBasis = clientIdempotencyKey
-        ? `${canonicalEventType}:${entityReferenceKey}:${clientIdempotencyKey}`
-        : `${canonicalEventType}:${entityReferenceKey}`;
-      const dedupeHash = createHash('sha256').update(rawDedupeBasis).digest('hex').slice(0, 32);
-      const deduplicationKey = `s7e_${canonicalEventType.replace(/[^a-zA-Z0-9]/g, '_')}_${dedupeHash}`;
-      const eventId = `evt_${dedupeHash}`;
-
-      const existingEventSnap = await adminDb.collection('notification_events').doc(eventId).get();
-      if (existingEventSnap.exists) {
-        return res.json({
-          success: true,
-          isIdempotent: true,
-          event: existingEventSnap.data(),
-        });
-      }
-
-      // Also check by deduplicationKey query in case of legacy doc ID
-      const existingByKeySnap = await adminDb
-        .collection('notification_events')
-        .where('deduplicationKey', '==', deduplicationKey)
-        .limit(1)
-        .get();
-      if (!existingByKeySnap.empty) {
-        return res.json({
-          success: true,
-          isIdempotent: true,
-          event: existingByKeySnap.docs[0].data(),
-        });
-      }
-
-      // 4. Load Notification Settings & Resolve Canonical Recipients
-      let settings: any = {
-        inAppEnabled: true,
-        pushEnabled: true,
-        whatsappEnabled: false,
-        emailEnabled: false,
-        quietHoursEnabled: false,
-      };
-      try {
-        const sSnapDefault = await adminDb
-          .collection('notification_settings')
-          .doc('default')
-          .get();
-        if (sSnapDefault.exists) {
-          settings = { ...settings, ...(sSnapDefault.data() as any) };
-        } else {
-          const sSnapLegacy = await adminDb
-            .collection('notification_settings')
-            .doc('default_settings')
-            .get();
-          if (sSnapLegacy.exists) {
-            settings = { ...settings, ...(sSnapLegacy.data() as any) };
-          }
-        }
-      } catch {}
-
-      const eventRuleOverride = settings?.eventRules?.[canonicalEventType];
-      if (eventRuleOverride && eventRuleOverride.enabled === false) {
-        return res.json({
-          success: true,
-          skipped: true,
-          event: {
-            id: eventId,
-            type: canonicalEventType,
-            createdAt: new Date().toISOString(),
-            deduplicationKey,
-          },
-        });
-      }
-
-      const targetRoles: Stage7ERecipientRole[] = Array.isArray(eventRuleOverride?.roles) &&
-        eventRuleOverride.roles.length > 0
-        ? eventRuleOverride.roles
-        : rule.defaultRoles;
-      const priority: Stage7EPriority = eventRuleOverride?.priority || rule.defaultPriority;
-
-      // Resolve therapist auth UID if therapist is among recipients
-      let resolvedTherapistAuthUid = '';
-      if (authoritativeTherapistId) {
-        try {
-          const tSnap = await adminDb
-            .collection('therapists')
-            .doc(authoritativeTherapistId)
-            .get();
-          if (tSnap.exists) {
-            const tData = tSnap.data() as any;
-            resolvedTherapistAuthUid = String(
-              tData?.authUserId || tData?.authUid || ''
-            ).trim();
-            if (!authoritativeTherapistName && tData?.name) {
-              authoritativeTherapistName = String(tData.name).trim();
-            }
-          }
-        } catch {}
-      }
-
-      const canonicalPayload: Record<string, any> = {
-        ...rawPayload,
-        bookingId: authoritativeBookingId || rawPayload.bookingId,
-        bookingCode:
-          authoritativeBooking?.bookingCode || rawPayload.bookingCode || undefined,
-        serviceName:
-          authoritativeBooking?.serviceName || rawPayload.serviceName || undefined,
-        date: authoritativeBooking?.date || rawPayload.date || undefined,
-        time: authoritativeBooking?.time || rawPayload.time || undefined,
-        customerId: authoritativeCustomerId || undefined,
-        customerAuthUid: authoritativeCustomerAuthUid || undefined,
-        customerName: authoritativeCustomerName || undefined,
-        customerWhatsApp: authoritativeCustomerPhone || undefined,
-        therapistId: authoritativeTherapistId || undefined,
-        therapistName: authoritativeTherapistName || undefined,
-      };
-
-      const now = new Date().toISOString();
-      const eventRecord = {
-        id: eventId,
-        type: canonicalEventType,
-        bookingId: canonicalPayload.bookingId,
-        bookingCode: canonicalPayload.bookingCode,
-        customerId: authoritativeCustomerId || undefined,
-        customerName: authoritativeCustomerName || undefined,
-        therapistId: authoritativeTherapistId || undefined,
-        therapistName: authoritativeTherapistName || undefined,
-        actorId: caller.staffMasterId || caller.uid,
-        actorName:
-          caller.staffName ||
-          (typeof req.body?.actor?.name === 'string' ? req.body.actor.name : undefined),
-        actorRole: caller.isStaff ? caller.staffRole : 'customer',
-        priority,
-        targetRoles,
-        payload: canonicalPayload,
-        createdAt: now,
-        deduplicationKey,
-      };
-
-      await adminDb
-        .collection('notification_events')
-        .doc(eventId)
-        .set(JSON.parse(JSON.stringify(eventRecord)));
-
-      // 5. Fan out to Canonical Recipients and Record Truthful Deliveries
-      const uniqueRoles = Array.from(new Set(targetRoles));
-      for (const recipientRole of uniqueRoles) {
-        let recipientId = '';
-        let recipientUserId = '';
-        let recipientName = '';
-        let recipientContact = '';
-
-        if (recipientRole === 'customer') {
-          recipientId = authoritativeCustomerId || authoritativeCustomerAuthUid;
-          recipientUserId = authoritativeCustomerAuthUid || authoritativeCustomerId;
-          recipientName = authoritativeCustomerName || 'Pelanggan';
-          recipientContact = authoritativeCustomerPhone || '';
-          if (!recipientId) continue;
-        } else if (recipientRole === 'therapist') {
-          recipientId = authoritativeTherapistId;
-          recipientUserId = resolvedTherapistAuthUid || authoritativeTherapistId;
-          recipientName = authoritativeTherapistName || 'Terapis';
-          if (!recipientId) continue;
-        } else {
-          recipientId = recipientRole;
-          recipientUserId = recipientRole;
-          recipientName =
-            recipientRole === 'supervisor'
-              ? 'Supervisor Operasional'
-              : recipientRole === 'manager'
-                ? 'Manager / Owner'
-                : recipientRole === 'css'
-                  ? 'Customer Service Support'
-                  : 'Administrator';
-        }
-
-        const code = String(canonicalPayload.bookingCode || canonicalPayload.bookingId || 'BOOKING');
-        const cName = String(canonicalPayload.customerName || 'Pelanggan');
-        const tName = String(canonicalPayload.therapistName || 'Terapis Senzu');
-        const sName = String(canonicalPayload.serviceName || 'Refleksi & Massage');
-        const sched = String(
-          canonicalPayload.scheduleAt ||
-            canonicalPayload.scheduleDate ||
-            (canonicalPayload.date
-              ? `${canonicalPayload.date} ${canonicalPayload.time || ''}`.trim()
-              : 'Jadwal Pesanan')
-        );
-
-        const buildStage7ETemplateMessage = (
-          evtType: string,
-          role: string,
-          p: Record<string, any>
-        ): { title: string; message: string; actionUrl: string; actionLabel?: string } => {
-          switch (evtType) {
-            case 'booking.created':
-              if (role === 'customer') {
-                return {
-                  title: 'Reservasi Senzu Home Diterima',
-                  message: `Pesanan #${code} (${sName}) berhasil dibuat. Silakan lakukan pembayaran agar dapat diproses.`,
-                  actionUrl: `/track/${code}`,
-                };
-              }
-              return {
-                title: 'Booking Baru Diterima',
-                message: `Order #${code} dari ${cName} (${sName}) menunggu verifikasi pembayaran.`,
-                actionUrl: role === 'css' ? `/css?booking=${code}` : `/reconciliation?booking=${code}`,
-              };
-            case 'booking.confirmed':
-              return {
-                title: 'Reservasi Dikonfirmasi',
-                message: `Pesanan #${code} (${sName}) pada ${sched} telah dikonfirmasi.`,
-                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
-              };
-            case 'booking.assigned':
-            case 'therapist.assigned':
-              if (role === 'therapist') {
-                return {
-                  title: 'Tugas Treatment Baru Ditugaskan',
-                  message: `Anda mendapat tugas baru #${code} (${cName}, ${sName}) jadwal ${sched}. Segera konfirmasi.`,
-                  actionUrl: `/therapist?booking=${code}`,
-                };
-              }
-              if (role === 'customer') {
-                return {
-                  title: 'Terapis Senzu Telah Ditugaskan',
-                  message: `Terapis ${tName} telah ditugaskan untuk reservasi #${code}.`,
-                  actionUrl: `/track/${code}`,
-                };
-              }
-              return {
-                title: 'Terapis Ditugaskan',
-                message: `Order #${code} telah ditugaskan ke ${tName}.`,
-                actionUrl: `/supervisor?booking=${code}`,
-              };
-            case 'booking.reassigned':
-            case 'therapist.reassigned':
-              if (role === 'therapist') {
-                return {
-                  title: 'Tugas Treatment Dialihkan',
-                  message: `Anda ditugaskan menggantikan order #${code} (${cName}, ${sName}).`,
-                  actionUrl: `/therapist?booking=${code}`,
-                };
-              }
-              return {
-                title: 'Pembaruan Terapis Pesanan',
-                message: `Terapis untuk pesanan #${code} diperbarui menjadi ${tName}.`,
-                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
-              };
-            case 'booking.cancelled':
-              return {
-                title: 'Pesanan Dibatalkan',
-                message: `Pesanan #${code} (${sName}) telah dibatalkan.${p.cancelReason ? ` Alasan: ${p.cancelReason}` : ''}`,
-                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor?booking=${code}`,
-              };
-            case 'payment.proof_uploaded':
-              if (role === 'customer') {
-                return {
-                  title: 'Bukti Pembayaran Diterima',
-                  message: `Bukti transfer Anda untuk pesanan #${code} sedang diverifikasi oleh staf CSS kami.`,
-                  actionUrl: `/track/${code}`,
-                };
-              }
-              return {
-                title: 'Bukti Pembayaran Diunggah',
-                message: `Customer ${cName} mengunggah bukti bayar untuk pesanan #${code}. Siap diverifikasi.`,
-                actionUrl: `/reconciliation?booking=${code}`,
-              };
-            case 'payment.verified':
-              if (role === 'customer') {
-                return {
-                  title: 'Pembayaran Terverifikasi Lunas',
-                  message: `Pembayaran pesanan #${code} telah terverifikasi. Tim Senzu segera menugaskan terapis profesional.`,
-                  actionUrl: `/track/${code}`,
-                };
-              }
-              return {
-                title: 'Pembayaran Lunas — Siap Ditugaskan',
-                message: `Order #${code} (${cName}, ${sName}) lunas. Silakan tugaskan terapis.`,
-                actionUrl: role === 'supervisor' ? `/supervisor?booking=${code}` : `/reconciliation?booking=${code}`,
-              };
-            case 'payment.rejected':
-              return {
-                title: 'Bukti Pembayaran Ditolak',
-                message: `Bukti pembayaran untuk #${code} belum sesuai: ${p.rejectionReason || 'Nominal tidak cocok'}.`,
-                actionUrl: role === 'customer' ? `/track/${code}` : `/reconciliation?booking=${code}`,
-              };
-            case 'payment.expired':
-              return {
-                title: 'Waktu Pembayaran Berakhir',
-                message: `Batas waktu pembayaran pesanan #${code} telah berakhir.`,
-                actionUrl: `/track/${code}`,
-              };
-            case 'therapist.shift_updated':
-              return {
-                title: String(p.title || 'Pembaruan Jadwal Kerja'),
-                message: String(
-                  p.message ||
-                    `Halo ${tName}, jadwal kerja Anda untuk tanggal ${p.date || '-'} telah diperbarui oleh Supervisor (${p.actorName || 'Supervisor'}): ${p.changeSummary || 'Pembaruan shift'}.`
-                ),
-                actionUrl: `/therapist`,
-              };
-            case 'loyalty.points_earned':
-              return {
-                title: 'Senzu Points Bertambah!',
-                message: `Selamat! Anda memperoleh +${p.pointsEarned || 0} Senzu Points dari layanan ${sName}.`,
-                actionUrl: `/portal?tab=wallet`,
-              };
-            case 'loyalty.points_redeemed':
-              return {
-                title: 'Senzu Points Ditukarkan',
-                message: `${p.pointsRedeemed || 0} Senzu Points berhasil ditukarkan untuk potongan Rp ${Number(p.discountAmount || 0).toLocaleString('id-ID')}.`,
-                actionUrl: `/portal?tab=wallet`,
-              };
-            case 'membership.tier_upgraded':
-              return {
-                title: `Selamat! Naik ke Tier ${p.newTierName || p.tierName || 'Baru'}`,
-                message: `Status keanggotaan Senzu Home Anda telah naik ke tier ${p.newTierName || p.tierName || 'Baru'}.`,
-                actionUrl: role === 'customer' ? `/portal?tab=wallet` : `/loyalty`,
-              };
-            case 'voucher.issued':
-              return {
-                title: 'Voucher Spesial Untuk Anda!',
-                message: `Voucher "${p.voucherName || p.voucherTitle || 'Senzu Voucher'}" telah ditambahkan ke dompet reward Anda.`,
-                actionUrl: `/portal?tab=wallet`,
-              };
-            case 'referral.qualified':
-              return {
-                title: 'Bonus Referral Berhasil Diklaim!',
-                message: `Teman Anda (${p.referredCustomerName || 'Pelanggan'}) telah menyelesaikan treatment perdananya! Anda mendapatkan bonus ${p.pointsReward || p.pointsAwarded || 0} Senzu Points.`,
-                actionUrl: `/portal?tab=wallet`,
-              };
-            case 'birthday.reward_issued':
-              return {
-                title: 'Selamat Ulang Tahun dari Senzu Home!',
-                message: `Selamat ulang tahun! Kami memberikan hadiah spesial ${p.pointsReward || p.bonusPoints || 0} Senzu Points ke akun Anda.`,
-                actionUrl: `/portal?tab=wallet`,
-              };
-            default:
-              return {
-                title: String(p.title || `Notifikasi Senzu Home`),
-                message: String(p.message || `Pembaruan status untuk pesanan #${code}.`),
-                actionUrl: role === 'customer' ? `/track/${code}` : `/supervisor`,
-              };
-          }
-        };
-
-        const template = buildStage7ETemplateMessage(
-          canonicalEventType,
-          recipientRole,
-          canonicalPayload
-        );
-        const safeRecipientKey = recipientId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
-
-        // In-App Notification & Delivery
-        if (settings.inAppEnabled !== false) {
-          const notifId = `notif_${eventId}_${recipientRole}_${safeRecipientKey}`;
-          const inAppDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_inapp`;
-          const notifDoc: Record<string, any> = {
-            id: notifId,
-            eventId,
-            eventType: canonicalEventType,
-            recipientRole,
-            recipientId,
-            recipientUserId: recipientUserId || recipientId,
-            bookingId: canonicalPayload.bookingId,
-            bookingCode: canonicalPayload.bookingCode,
-            customerId: authoritativeCustomerId || undefined,
-            customerAuthUid:
-              recipientRole === 'customer'
-                ? authoritativeCustomerAuthUid || undefined
-                : undefined,
-            therapistId: authoritativeTherapistId || undefined,
-            title: template.title,
-            message: template.message,
-            channel: 'in_app',
-            priority,
-            read: false,
-            readAt: null,
-            actionUrl: template.actionUrl,
-            actionLabel: template.actionLabel,
-            metadata: canonicalPayload,
-            createdAt: now,
-          };
-
-          await adminDb
-            .collection('notifications')
-            .doc(notifId)
-            .set(JSON.parse(JSON.stringify(notifDoc)));
-
-          await adminDb
-            .collection('notification_deliveries')
-            .doc(inAppDeliveryId)
-            .set(
-              JSON.parse(
-                JSON.stringify({
-                  id: inAppDeliveryId,
-                  eventId,
-                  eventType: canonicalEventType,
-                  bookingId: canonicalPayload.bookingId,
-                  bookingCode: canonicalPayload.bookingCode,
-                  recipientRole,
-                  recipientId,
-                  recipientName,
-                  channel: 'in_app',
-                  status: 'delivered',
-                  attemptCount: 1,
-                  providerResponse: 'Written to Firestore notifications collection',
-                  sentAt: now,
-                  deliveredAt: now,
-                  createdAt: now,
-                })
-              )
-            );
-        }
-
-        // Push Delivery (Truthful status: sent only on real FCM delivery, skipped/failed otherwise)
-        if (settings.pushEnabled !== false) {
-          const pushDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_push`;
-          let pushStatus: 'sent' | 'failed' | 'skipped' = 'skipped';
-          let pushProviderResponse = 'No active push devices registered for recipient';
-          let pushErrorMsg: string | undefined;
-
+      for (const id of ids) for (const field of ['recipientUserId', 'recipientId']) await collect(adminDb.collection('notifications').where(field, '==', id));
+      if (caller.role === 'customer') await collect(adminDb.collection('notifications').where('customerAuthUid', '==', caller.uid));
+    }
+    if (s7Operational.includes(caller.role)) await collect(adminDb.collection('notifications').where('recipientUserId', '==', caller.uid));
+    const visible: any[] = [];
+    for (const snap of candidates.values()) { const item = await s7Visible(read, caller, snap); if (item) visible.push(item); }
+    return visible.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id));
+  }
+  async function s7Push(notificationIds: string[]): Promise<void> {
+    for (const id of notificationIds) {
+      const setup = await adminDb.runTransaction(async (transaction: any) => {
+        const read = s7Reader(transaction), snap = await read.doc('notifications', id);
+        if (!snap.exists) return null;
+        const n = snap.data(), guardSnap = n.provenanceId ? await read.doc('notification_private_receipts', n.provenanceId) : null;
+        if (!guardSnap?.exists || guardSnap.data().notificationHashes?.[id] !== s7Hash(s7Core(n))) return null;
+        const deliveries = await read.query(adminDb.collection('notification_deliveries').where('notificationId', '==', id).where('channel', '==', 'push'));
+        if (deliveries.docs.length !== 1 || deliveries.docs[0].data().status !== 'pending') return null;
+        const source = await s7Source(read, guardSnap.data().source.type, guardSnap.data().source.references);
+        const deviceSnap = await read.query(adminDb.collection('notification_devices').where('role', '==', n.recipientRole));
+        const tokens: string[] = [];
+        for (const device of deviceSnap.docs) {
+          const d = device.data();
+          let uid: string;
+          try { uid = s7UidFields(d, ['authUid', 'userId']); } catch { continue; }
+          if (!uid || d.enabled === false || !/^[A-Za-z0-9_-]{16,}:[A-Za-z0-9_-]{80,}$/.test(d.token || '') || /^(?:token_|dev_|device_)/i.test(d.token || '')) continue;
+          if (n.recipientUserId && n.recipientUserId !== uid) continue;
           try {
-            const devSnap = await adminDb
-              .collection('notification_devices')
-              .where('role', '==', recipientRole)
-              .get();
-            const candidateIds = new Set<string>(
-              [recipientId, recipientUserId].filter(Boolean)
-            );
-            const tokens: string[] = [];
-            devSnap.docs.forEach((docSnap) => {
-              const d = docSnap.data() as any;
-              if (d?.enabled === false) return;
-              if (
-                recipientRole === 'therapist' ||
-                recipientRole === 'customer'
-              ) {
-                const dUid = String(d?.userId || '').trim();
-                const dAuth = String(d?.authUid || '').trim();
-                if (!candidateIds.has(dUid) && !candidateIds.has(dAuth)) return;
-              }
-              if (typeof d?.token === 'string' && d.token.trim()) {
-                tokens.push(d.token.trim());
-              }
-            });
-
-            if (tokens.length === 0) {
-              pushStatus = 'skipped';
-              pushProviderResponse = 'No registered device tokens found for recipient';
-            } else if (!adminMessaging) {
-              pushStatus = 'skipped';
-              pushProviderResponse = 'FCM adminMessaging not configured on server';
-            } else {
-              try {
-                const resPush = await adminMessaging.sendEachForMulticast({
-                  tokens,
-                  notification: {
-                    title: template.title,
-                    body: template.message,
-                  },
-                  data: {
-                    eventId,
-                    eventType: canonicalEventType,
-                    bookingId: String(canonicalPayload.bookingId || ''),
-                    actionUrl: String(template.actionUrl || '/'),
-                  },
-                });
-                if (resPush && resPush.successCount > 0) {
-                  pushStatus = 'sent';
-                  pushProviderResponse = `FCM multicast sent (${resPush.successCount}/${tokens.length})`;
-                } else {
-                  pushStatus = 'failed';
-                  pushErrorMsg = 'FCM multicast returned 0 successful deliveries';
-                  pushProviderResponse = pushErrorMsg;
-                }
-              } catch (fcmErr: any) {
-                pushStatus = 'failed';
-                pushErrorMsg = fcmErr?.message || String(fcmErr);
-                pushProviderResponse = `FCM error: ${pushErrorMsg}`;
-              }
-            }
-          } catch (devErr: any) {
-            pushStatus = 'failed';
-            pushErrorMsg = devErr?.message || String(devErr);
-            pushProviderResponse = `Device query error: ${pushErrorMsg}`;
+            const caller = await s7Caller(read, uid);
+            if (n.recipientRole === 'customer') { if (caller.role !== 'customer' || source.customerUid !== uid) continue; }
+            else if (n.recipientRole === 'therapist') { if ((await s7Therapist(read, source.therapistId, s7Text(source.booking?.therapistAuthUid))).uid !== uid) continue; }
+            else if (caller.role !== n.recipientRole) continue;
+            tokens.push(d.token);
+          } catch (error: any) { if (![403, 409].includes(error.statusCode)) throw error; }
+        }
+        return { n, delivery: deliveries.docs[0].ref, tokens: [...new Set(tokens)].slice(0, 500) };
+      });
+      if (!setup) continue;
+      if (!adminMessaging || !setup.tokens.length) {
+        await setup.delivery.update({ status: 'pending', failureReason: !adminMessaging ? 'FCM_NOT_CONFIGURED' : 'NO_VERIFIED_FCM_DEVICE', retryCount: 0 });
+        continue;
+      }
+      // A successful FCM response is acceptance by FCM, not proof of display on a handset.
+      try {
+        const result = await adminMessaging.sendEachForMulticast({ tokens: setup.tokens, notification: { title: setup.n.title, body: setup.n.message }, data: { notificationId: id, actionUrl: setup.n.actionUrl } });
+        await setup.delivery.update(result.successCount > 0 ? { status: 'sent', sentAt: new Date().toISOString(), retryCount: 0, acceptedCount: result.successCount, failedCount: result.failureCount, failureReason: result.failureCount ? 'PARTIAL_FCM_ACCEPTANCE' : null } : { status: 'failed', failedAt: new Date().toISOString(), retryCount: 0, failureReason: 'FCM_REJECTED' });
+      } catch { await setup.delivery.update({ status: 'failed', failedAt: new Date().toISOString(), retryCount: 0, failureReason: 'FCM_REQUEST_FAILED' }); }
+    }
+  }
+  function s7Route(handler: (req: express.Request, uid: string) => Promise<any>) {
+    return async (req: express.Request, res: express.Response) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try { const uid = await s7Verify(req); const result = await handler(req, uid); res.status(200).json(result); }
+      catch (error: any) {
+        const status = [400, 401, 403, 404, 409, 429, 503].includes(error.statusCode) ? error.statusCode : 503;
+        res.status(status).json({ success: false, code: error.statusCode ? error.code : 'NOTIFICATION_UNAVAILABLE', message: status === 503 ? 'Layanan notifikasi belum tersedia. Silakan coba lagi.' : error.message });
+      }
+    };
+  }
+  app.post('/api/notifications/emit', s7Route(async (req, uid) => {
+    const body = s7Body(req.body, ['eventType', 'references', 'requestId']);
+    if (!s7EventTypes.has(body.eventType) || !s7Id(body.requestId)) throw s7Error(400, 'INVALID_NOTIFICATION_EVENT');
+    const refs = s7References(body.references), fingerprint = s7Hash([body.eventType, refs]);
+    const requestId = `s7r_${s7Hash(['emit', uid, body.requestId])}`;
+    const result = await adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction), caller = await s7Caller(read, uid);
+      const requestSnap = await read.doc('notification_private_receipts', requestId);
+      const source = await s7Source(read, body.eventType, refs);
+      await s7AuthorizeSource(read, caller, source);
+      if (requestSnap.exists) {
+        const saved = requestSnap.data();
+        if (saved.actorUid !== uid || saved.requestFingerprint !== fingerprint) throw s7Error(409, 'NOTIFICATION_IDEMPOTENCY_MISMATCH');
+        return s7Replay(read, saved, 'request');
+      }
+      return s7PersistEvent(transaction, read, source, caller, await s7Settings(read), { id: requestId, fingerprint });
+    });
+    if (!result.isIdempotent) void s7Push(result.notificationIds).catch(() => {});
+    return result;
+  }));
+  app.post('/api/notifications/list', s7Route(async (req, uid) => {
+    const body = s7Body(req.body, ['bookingId', 'bookingCode']);
+    if ([body.bookingId, body.bookingCode].some(v => v !== undefined && !s7Id(v))) throw s7Error(400, 'INVALID_NOTIFICATION_FILTER');
+    return adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction), caller = await s7Caller(read, uid), items = await s7Inbox(read, caller);
+      return { success: true, notifications: items.filter(n => (!body.bookingId || n.bookingId === body.bookingId) && (!body.bookingCode || n.bookingCode === body.bookingCode)).slice(0, 50) };
+    });
+  }));
+  function s7ActionRequest(body: any, uid: string, action: string): { id: string; fingerprint: string } | null {
+    if (body.requestId === undefined) return null; // Existing callers remain authenticated and scoped.
+    if (!s7Id(body.requestId)) throw s7Error(400, 'INVALID_NOTIFICATION_REQUEST_ID');
+    return { id: `s7a_${s7Hash([uid, action, body.requestId])}`, fingerprint: s7Hash([action, body.notificationId || '']) };
+  }
+  async function s7ActionReplay(read: ReturnType<typeof s7Reader>, request: { id: string; fingerprint: string } | null, uid: string, action: string): Promise<any | null> {
+    if (!request) return null;
+    const snap = await read.doc('notification_private_receipts', request.id);
+    if (!snap.exists) return null;
+    const data = snap.data(), response = data.response;
+    if (data.actorUid !== uid || data.action !== action || data.requestFingerprint !== request.fingerprint) throw s7Error(409, 'NOTIFICATION_IDEMPOTENCY_MISMATCH');
+    if (data.schemaVersion !== 1 || data.kind !== 'action' || !s7Date(data.createdAt) || !response || response.success !== true || data.responseFingerprint !== s7Hash(response)) throw s7Error(409, 'NOTIFICATION_RECEIPT_INVALID');
+    if (['mark-read', 'delete'].includes(action) ? !s7Id(response.notificationId) : typeof response.hasMore !== 'boolean' || !Number.isInteger(response.updatedCount) || response.updatedCount < 0 || !Number.isInteger(response.deletedCount) || response.deletedCount < 0) throw s7Error(409, 'NOTIFICATION_RECEIPT_INVALID');
+    return response;
+  }
+  function s7SaveAction(transaction: any, request: { id: string; fingerprint: string } | null, uid: string, action: string, response: any): any {
+    if (request) transaction.create(adminDb.collection('notification_private_receipts').doc(request.id), { schemaVersion: 1, kind: 'action', actorUid: uid, action, requestFingerprint: request.fingerprint, response, responseFingerprint: s7Hash(response), createdAt: new Date().toISOString() });
+    return response;
+  }
+  for (const action of ['mark-read', 'delete']) app.post(`/api/notifications/${action}`, s7Route(async (req, uid) => {
+    const body = s7Body(req.body, ['notificationId', 'requestId']);
+    if (!s7Id(body.notificationId)) throw s7Error(400, 'INVALID_NOTIFICATION_ID');
+    const request = s7ActionRequest(body, uid, action);
+    return adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction), caller = await s7Caller(read, uid);
+      if (action === 'delete' && !s7Operational.includes(caller.role)) throw s7Error(403, 'NOTIFICATION_DELETE_DENIED');
+      const replay = await s7ActionReplay(read, request, uid, action);
+      if (replay) { if (replay.notificationId !== body.notificationId) throw s7Error(409, 'NOTIFICATION_RECEIPT_INVALID'); return replay; }
+      const snap = await read.doc('notifications', body.notificationId), visible = await s7Visible(read, caller, snap);
+      if (!visible) throw s7Error(403, 'NOTIFICATION_ACCESS_DENIED');
+      if (action === 'delete') transaction.delete(snap.ref);
+      else if (!visible.read) transaction.update(snap.ref, { read: true, readAt: new Date().toISOString() });
+      return s7SaveAction(transaction, request, uid, action, { success: true, notificationId: snap.id });
+    });
+  }));
+  for (const action of ['mark-all-read', 'clear-read']) app.post(`/api/notifications/${action}`, s7Route(async (req, uid) => {
+    const body = s7Body(req.body, ['requestId']), request = s7ActionRequest(body, uid, action);
+    return adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction), caller = await s7Caller(read, uid);
+      if (action === 'clear-read' && !s7Operational.includes(caller.role)) throw s7Error(403, 'NOTIFICATION_DELETE_DENIED');
+      const replay = await s7ActionReplay(read, request, uid, action);
+      if (replay) return replay;
+      const inbox = await s7Inbox(read, caller), targets = inbox.filter(n => action === 'mark-all-read' ? !n.read : n.read), batch = targets.slice(0, 350);
+      const now = new Date().toISOString();
+      for (const item of batch) {
+        const ref = adminDb.collection('notifications').doc(item.id);
+        if (action === 'clear-read') transaction.delete(ref); else transaction.update(ref, { read: true, readAt: now });
+      }
+      return s7SaveAction(transaction, request, uid, action, { success: true, updatedCount: action === 'mark-all-read' ? batch.length : 0, deletedCount: action === 'clear-read' ? batch.length : 0, hasMore: targets.length > batch.length });
+    });
+  }));
+  app.post('/api/notifications/devices/list', s7Route(async (req, uid) => {
+    s7Body(req.body, []);
+    return adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction); await s7Caller(read, uid);
+      const snap = await read.query(adminDb.collection('notification_devices').where('userId', '==', uid));
+      return { success: true, devices: snap.docs.filter((d: any) => !d.data().authUid || d.data().authUid === uid).map((d: any) => ({ id: d.id, userId: uid, role: d.data().role, enabled: d.data().enabled === true, platform: d.data().platform, createdAt: s7Date(d.data().createdAt), lastSeenAt: s7Date(d.data().lastSeenAt), updatedAt: s7Date(d.data().updatedAt), token: '' })) };
+    });
+  }));
+  app.post('/api/notifications/booking-created-initial', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ack = { success: true, code: 'INITIAL_NOTIFICATION_ACKNOWLEDGED' };
+    try {
+      const names = [...Object.keys(req.headers || {}), ...(req.rawHeaders || []).filter((_: any, index: number) => index % 2 === 0)].map(k => k.toLowerCase());
+      if (names.includes('authorization') || names.includes('x-firebase-auth')) throw s7Error(401, 'AUTH_HEADER_INVALID');
+      s7Rate(s7GuestRates, req.ip || req.socket?.remoteAddress || 'unknown', 25);
+      const body = s7Body(req.body, ['bookingId']);
+      if (!s7Id(body.bookingId)) throw s7Error(400, 'INVALID_BOOKING_ID');
+      if (!adminDb) throw s7Error(503, 'NOTIFICATION_UNAVAILABLE');
+      const emitted = await adminDb.runTransaction(async (transaction: any) => {
+        const read = s7Reader(transaction), snap = await read.doc('bookings', body.bookingId);
+        if (!snap.exists) return;
+        const data = snap.data();
+        for (const key of ['customerAuthUid', 'authUserId', 'customerUid', 'userId', 'uid']) if (data[key] !== undefined && data[key] !== null && data[key] !== '') return;
+        if (typeof data.customerId === 'string' && data.customerId.startsWith('cust_u_')) return;
+        if (!['Menunggu Pembayaran', 'awaiting_payment', 'Draft', 'Pending'].includes(data.status) || !['', 'unpaid', 'pending', 'menunggu pembayaran'].includes(s7Text(data.paymentStatus).toLowerCase())) return;
+        if (!s7Date(snap.createTime)) return;
+        if (data.customerId) {
+          if (!s7Id(data.customerId)) return;
+          const profile = await read.doc('customers', data.customerId);
+          if (profile.exists) {
+            const p = profile.data();
+            for (const key of ['authUserId', 'customerAuthUid', 'authUid']) if (p[key] !== undefined && p[key] !== null && p[key] !== '') return;
+            if (s7Disabled(p)) return;
+            if (p.isRegistered === true || p.isActive === true || ['active','registered'].includes(s7Text(p.status).toLowerCase())) return;
           }
-
-          await adminDb
-            .collection('notification_deliveries')
-            .doc(pushDeliveryId)
-            .set(
-              JSON.parse(
-                JSON.stringify({
-                  id: pushDeliveryId,
-                  eventId,
-                  eventType: canonicalEventType,
-                  bookingId: canonicalPayload.bookingId,
-                  bookingCode: canonicalPayload.bookingCode,
-                  recipientRole,
-                  recipientId,
-                  recipientName,
-                  channel: 'push',
-                  status: pushStatus,
-                  attemptCount: pushStatus === 'skipped' ? 0 : 1,
-                  providerResponse: pushProviderResponse,
-                  errorMessage: pushErrorMsg,
-                  sentAt: pushStatus === 'sent' ? now : undefined,
-                  failedAt: pushStatus === 'failed' ? now : undefined,
-                  createdAt: now,
-                })
-              )
-            );
         }
-
-        // External WhatsApp / Email: never mark 'sent' unless real gateway confirms
-        if (settings.whatsappEnabled && recipientContact) {
-          const waDeliveryId = `del_${eventId}_${recipientRole}_${safeRecipientKey}_wa`;
-          const hasWebhook =
-            typeof settings.whatsappWebhookUrl === 'string' &&
-            settings.whatsappWebhookUrl.trim().startsWith('https://');
-          await adminDb
-            .collection('notification_deliveries')
-            .doc(waDeliveryId)
-            .set(
-              JSON.parse(
-                JSON.stringify({
-                  id: waDeliveryId,
-                  eventId,
-                  eventType: canonicalEventType,
-                  bookingId: canonicalPayload.bookingId,
-                  bookingCode: canonicalPayload.bookingCode,
-                  recipientRole,
-                  recipientId,
-                  recipientName,
-                  recipientContact,
-                  channel: 'whatsapp',
-                  status: 'skipped',
-                  attemptCount: 0,
-                  providerResponse: hasWebhook
-                    ? 'External WhatsApp gateway dispatch disabled in server-only mode'
-                    : 'WhatsApp webhook not configured; skipped',
-                  createdAt: now,
-                })
-              )
-            );
-        }
-      }
-
-      return res.json({
-        success: true,
-        isIdempotent: false,
-        event: eventRecord,
+        const source = await s7Source(read, 'booking.created', { bookingId: body.bookingId });
+        if (source.customerUid) return;
+        (source as any).initialCreatedAt = s7Date(snap.createTime);
+        const guest: S7Caller = { uid: 'system_guest_initial', role: 'system', staffId: '', name: 'Sistem Senzu Home', therapistIds: new Set() };
+        return s7PersistEvent(transaction, read, source, guest, await s7Settings(read), null, true);
       });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'NOTIFICATION_EMIT_ERROR',
-        error: err?.message || 'Gagal memproses event notifikasi.',
-      });
+      if (emitted && !emitted.isIdempotent) void s7Push(emitted.notificationIds).catch(() => {});
+      return res.status(200).json(ack);
+    } catch (error: any) {
+      const status = [400, 401, 429].includes(error.statusCode) ? error.statusCode : 503;
+      return res.status(status).json({ success: false, code: error.statusCode ? error.code : 'NOTIFICATION_UNAVAILABLE', message: status === 503 ? 'Layanan notifikasi belum tersedia.' : error.message });
     }
   });
-
-  app.post('/api/notifications/mark-read', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
+  async function s7DispatchChat(bookingId: string, messageId: string, caller?: S7Caller, requestedSenderType?: string): Promise<any> {
+    if (!s7Id(bookingId) || !s7Id(messageId) || !adminDb) throw s7Error(400, 'CHAT_REFERENCE_INVALID');
+    const response = await adminDb.runTransaction(async (transaction: any) => {
+      const read = s7Reader(transaction), source = await s7Source(read, 'chat.message_received', { bookingId, messageId });
+      let verifiedCaller: S7Caller | undefined;
+      if (caller) {
+        const current = await s7Caller(read, caller.uid);
+        verifiedCaller = current;
+        if (source.entity.senderUid !== current.uid || (requestedSenderType && source.entity.senderType !== requestedSenderType)) throw s7Error(403, 'FORBIDDEN_MESSAGE_SENDER');
+        if (source.entity.senderType === 'CUSTOMER' && !s7AssertBookingCustomer(current, source)) throw s7Error(403, 'FORBIDDEN_MESSAGE_SENDER');
+        if (source.entity.senderType === 'THERAPIST' && !await s7AssignedCaller(read, current, source)) throw s7Error(403, 'FORBIDDEN_MESSAGE_SENDER');
+        if (source.entity.senderType === 'SYSTEM' && !s7Operational.includes(current.role)) throw s7Error(403, 'FORBIDDEN_MESSAGE_SENDER');
       }
-      const caller = await resolveStage7ECaller(req);
-      const notificationId =
-        typeof req.body?.notificationId === 'string' ? req.body.notificationId.trim() : '';
-      if (!notificationId) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_NOTIFICATION_ID',
-          error: 'ID notifikasi wajib diisi.',
-        });
+      const settings = await s7Settings(read);
+      await s7Eligible(read, source, settings);
+      const legacy = await read.doc('chat_notification_dispatches', `chat_notif_${messageId}`);
+      if (legacy.exists && legacy.data().bookingId === bookingId && legacy.data().messageId === messageId && legacy.data().recipientUserId === source.entity.recipientUid && s7Id(legacy.data().notificationId)) {
+        const old = await read.doc('notifications', legacy.data().notificationId);
+        if (old.exists && old.data().bookingId === bookingId && old.data().metadata?.messageId === messageId && old.data().recipientUserId === source.entity.recipientUid) return { success: true, isIdempotent: true, eventId: s7Id(old.data().eventId) ? old.data().eventId : legacy.id, notificationIds: [old.id] };
       }
-
-      const notifRef = adminDb.collection('notifications').doc(notificationId);
-      const snap = await notifRef.get();
-      if (!snap.exists) {
-        return res.status(404).json({
-          success: false,
-          code: 'NOTIFICATION_NOT_FOUND',
-          error: 'Notifikasi tidak ditemukan.',
-        });
-      }
-
-      const authorized = await isStage7ECallerAuthorizedForNotification(snap.data() as any, caller);
-      if (!authorized) {
-        return res.status(403).json({
-          success: false,
-          code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-          error: 'Anda tidak memiliki akses ke notifikasi ini.',
-        });
-      }
-
-      const now = new Date().toISOString();
-      await notifRef.update({
-        read: true,
-        readAt: now,
-      });
-
-      return res.json({ success: true, notificationId, readAt: now });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'NOTIFICATION_MARK_READ_ERROR',
-        error: err?.message || 'Gagal menandai notifikasi telah dibaca.',
-      });
-    }
-  });
-
-  app.post('/api/notifications/mark-all-read', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
-      }
-      const caller = await resolveStage7ECaller(req);
-      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
-      const requestedUserId =
-        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
-
-      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_RECIPIENT_ROLE',
-          error: 'Role notifikasi tidak valid.',
-        });
-      }
-
-      if (role === 'therapist') {
-        if (!caller.isStaff || caller.staffRole !== 'therapist') {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Hanya terapis pemilik yang dapat menandai notifikasi terapis.',
-          });
-        }
-        if (requestedUserId && !caller.therapistIds.has(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Tidak dapat memodifikasi notifikasi terapis lain.',
-          });
-        }
-      } else if (['supervisor', 'manager', 'admin', 'css'].includes(role)) {
-        if (!caller.isStaff) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Akses staf diperlukan.',
-          });
-        }
-      } else if (role === 'customer' && requestedUserId) {
-        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Tidak dapat memodifikasi notifikasi pelanggan lain.',
-          });
-        }
-      }
-
-      const snap = await adminDb
-        .collection('notifications')
-        .where('recipientRole', '==', role)
-        .where('read', '==', false)
-        .get();
-
-      const now = new Date().toISOString();
-      const batch = adminDb.batch();
-      let updatedCount = 0;
-
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as any;
-        const ok = await isStage7ECallerAuthorizedForNotification(data, caller);
-        if (!ok) continue;
-        batch.update(docSnap.ref, { read: true, readAt: now });
-        updatedCount++;
-      }
-
-      if (updatedCount > 0) {
-        await batch.commit();
-      }
-
-      return res.json({ success: true, updatedCount });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'NOTIFICATION_MARK_ALL_READ_ERROR',
-        error: err?.message || 'Gagal menandai semua notifikasi.',
-      });
-    }
-  });
-
-  app.post('/api/notifications/delete', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
-      }
-      const caller = await resolveStage7ECaller(req);
-      const notificationId =
-        typeof req.body?.notificationId === 'string' ? req.body.notificationId.trim() : '';
-      if (!notificationId) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_NOTIFICATION_ID',
-          error: 'ID notifikasi wajib diisi.',
-        });
-      }
-
-      const notifRef = adminDb.collection('notifications').doc(notificationId);
-      const snap = await notifRef.get();
-      if (!snap.exists) {
-        return res.status(404).json({
-          success: false,
-          code: 'NOTIFICATION_NOT_FOUND',
-          error: 'Notifikasi tidak ditemukan.',
-        });
-      }
-
-      const authorized = await isStage7ECallerAuthorizedForNotification(snap.data() as any, caller);
-      if (!authorized) {
-        return res.status(403).json({
-          success: false,
-          code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-          error: 'Anda tidak memiliki akses untuk menghapus notifikasi ini.',
-        });
-      }
-
-      await notifRef.delete();
-      return res.json({ success: true, notificationId });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'NOTIFICATION_DELETE_ERROR',
-        error: err?.message || 'Gagal menghapus notifikasi.',
-      });
-    }
-  });
-
-  app.post('/api/notifications/clear-read', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
-      }
-      const caller = await resolveStage7ECaller(req);
-      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
-      const requestedUserId =
-        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
-
-      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_RECIPIENT_ROLE',
-          error: 'Role notifikasi tidak valid.',
-        });
-      }
-
-      if (role === 'therapist') {
-        if (!caller.isStaff || caller.staffRole !== 'therapist') {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Hanya terapis pemilik yang dapat menghapus notifikasi terapis.',
-          });
-        }
-        if (requestedUserId && !caller.therapistIds.has(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Tidak dapat menghapus notifikasi terapis lain.',
-          });
-        }
-      } else if (['supervisor', 'manager', 'admin', 'css'].includes(role)) {
-        if (!caller.isStaff) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Akses staf diperlukan.',
-          });
-        }
-      } else if (role === 'customer' && requestedUserId) {
-        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_NOTIFICATION_ACCESS',
-            error: 'Tidak dapat menghapus notifikasi pelanggan lain.',
-          });
-        }
-      }
-
-      const snap = await adminDb
-        .collection('notifications')
-        .where('recipientRole', '==', role)
-        .where('read', '==', true)
-        .get();
-
-      const batch = adminDb.batch();
-      let deletedCount = 0;
-
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as any;
-        const ok = await isStage7ECallerAuthorizedForNotification(data, caller);
-        if (!ok) continue;
-        batch.delete(docSnap.ref);
-        deletedCount++;
-      }
-
-      if (deletedCount > 0) {
-        await batch.commit();
-      }
-
-      return res.json({ success: true, deletedCount });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'NOTIFICATION_CLEAR_READ_ERROR',
-        error: err?.message || 'Gagal membersihkan notifikasi.',
-      });
-    }
-  });
-
-  app.post('/api/notifications/devices/register', async (req, res) => {
-    try {
-      await ensureServerAuthenticated();
-      if (!adminDb) {
-        return res.status(500).json({
-          success: false,
-          code: 'SERVER_UNAVAILABLE',
-          error: 'Database server tidak tersedia.',
-        });
-      }
-      const caller = await resolveStage7ECaller(req);
-      const role = typeof req.body?.role === 'string' ? req.body.role.trim().toLowerCase() : '';
-      const requestedUserId =
-        typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
-      const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-      const platform =
-        req.body?.platform === 'android' ||
-        req.body?.platform === 'ios' ||
-        req.body?.platform === 'web'
-          ? req.body.platform
-          : 'pwa';
-
-      if (!['customer', 'therapist', 'supervisor', 'manager', 'admin', 'css'].includes(role)) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_DEVICE_ROLE',
-          error: 'Role perangkat tidak valid.',
-        });
-      }
-      if (!rawToken || rawToken.length < 10 || rawToken.length > 4096) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_DEVICE_TOKEN',
-          error: 'Token perangkat tidak valid.',
-        });
-      }
-      if (!requestedUserId || requestedUserId.toLowerCase() === 'guest') {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_DEVICE_OWNER',
-          error: 'Identitas pemilik perangkat tidak valid.',
-        });
-      }
-
-      if (role === 'admin' || role === 'manager') {
-        if (!caller.isStaff || (caller.staffRole !== 'admin' && caller.staffRole !== 'manager')) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_ROLE',
-            error: 'Hanya Manager/Admin aktif yang dapat mendaftarkan perangkat role ini.',
-          });
-        }
-        if (
-          !['admin', 'manager', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)
-        ) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_OWNER',
-            error: 'Identitas pemilik perangkat tidak sesuai.',
-          });
-        }
-      } else if (role === 'supervisor') {
-        if (
-          !caller.isStaff ||
-          !['supervisor', 'manager', 'admin'].includes(caller.staffRole || '')
-        ) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_ROLE',
-            error: 'Hanya Supervisor aktif yang dapat mendaftarkan perangkat role ini.',
-          });
-        }
-        if (!['supervisor', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_OWNER',
-            error: 'Identitas pemilik perangkat tidak sesuai.',
-          });
-        }
-      } else if (role === 'css') {
-        if (!caller.isStaff || !['css', 'manager', 'admin'].includes(caller.staffRole || '')) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_ROLE',
-            error: 'Hanya CSS aktif yang dapat mendaftarkan perangkat role ini.',
-          });
-        }
-        if (!['css', caller.uid, caller.staffMasterId || ''].includes(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_OWNER',
-            error: 'Identitas pemilik perangkat tidak sesuai.',
-          });
-        }
-      } else if (role === 'therapist') {
-        if (
-          !caller.isStaff ||
-          caller.staffRole !== 'therapist' ||
-          !caller.therapistIds.has(requestedUserId)
-        ) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_OWNER',
-            error: 'Terapis hanya dapat mendaftarkan perangkat miliknya sendiri.',
-          });
-        }
-      } else if (role === 'customer') {
-        if (requestedUserId !== caller.uid && !caller.customerIds.has(requestedUserId)) {
-          return res.status(403).json({
-            success: false,
-            code: 'FORBIDDEN_DEVICE_OWNER',
-            error: 'Pelanggan hanya dapat mendaftarkan perangkat miliknya sendiri.',
-          });
-        }
-      }
-
-      const safeTokenKey = rawToken.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
-      const deviceId = `dev_${role}_${requestedUserId}_${safeTokenKey}`;
-      const devRef = adminDb.collection('notification_devices').doc(deviceId);
-      const existingSnap = await devRef.get();
-      if (existingSnap.exists) {
-        const existingAuthUid = String(existingSnap.data()?.authUid || '').trim();
-        if (existingAuthUid && existingAuthUid !== caller.uid) {
-          return res.status(403).json({
-            success: false,
-            code: 'DEVICE_OWNERSHIP_CONFLICT',
-            error: 'Perangkat telah terdaftar pada akun lain.',
-          });
-        }
-      }
-
-      const now = new Date().toISOString();
-      const deviceRecord = {
-        id: deviceId,
-        userId: requestedUserId,
-        authUid: caller.uid,
-        role,
-        token: rawToken,
-        platform,
-        enabled: true,
-        userAgent:
-          typeof req.body?.userAgent === 'string' ? req.body.userAgent.slice(0, 512) : undefined,
-        createdAt: existingSnap.exists
-          ? String(existingSnap.data()?.createdAt || now)
-          : now,
-        lastActiveAt: now,
-      };
-
-      await devRef.set(JSON.parse(JSON.stringify(deviceRecord)), { merge: true });
-      return res.json({ success: true, device: deviceRecord });
-    } catch (err: any) {
-      const status =
-        typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
-          ? err.statusCode
-          : 500;
-      return res.status(status).json({
-        success: false,
-        code: err?.code || 'DEVICE_REGISTER_ERROR',
-        error: err?.message || 'Gagal mendaftarkan perangkat notifikasi.',
-      });
-    }
-  });
-
+      const actor: S7Caller = verifiedCaller || await s7Caller(read, source.entity.senderUid);
+      return s7PersistEvent(transaction, read, source, actor, settings, null);
+    });
+    if (!response.isIdempotent) void s7Push(response.notificationIds).catch(() => {});
+    return { dispatched: true, isIdempotent: response.isIdempotent, notificationId: response.notificationIds[0] || null };
+  }
   // Catch-all 404 for undefined API endpoints
   app.all('/api/*', (req, res) => {
     res.status(404).json({
