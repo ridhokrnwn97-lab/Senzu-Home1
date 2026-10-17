@@ -23,6 +23,7 @@ export interface CustomerCRM {
   normalizedPhone: string; // Canonical E.164-like (e.g. +6281272902321)
   email?: string;
   genderPreference?: GenderPreference;
+  gender?: 'Laki-laki' | 'Perempuan';
 
   // Customer Account & Firebase Auth
   authUserId?: string; // Firebase Auth UID

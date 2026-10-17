@@ -906,6 +906,7 @@ const CLIENT_OWNER_ALLOWED_BOOKING_FIELDS: ReadonlyArray<string> = [
   'timeSlot',
   'scheduleAt',
   'genderPreference',
+  'customerGender',
   'address',
   'customerAddress',
   'latitude',
@@ -1519,6 +1520,7 @@ export async function createBooking(
           scheduleTime: data.scheduleTime,
           scheduleAt: data.scheduleAt || `${data.scheduleDate} ${data.scheduleTime}`,
           genderPreference: data.genderPreference,
+          customerGender: data.customerGender,
           address: data.address,
           latitude: data.latitude,
           longitude: data.longitude,
@@ -3827,6 +3829,13 @@ export async function supervisorOverrideStatus(
   }
 
   await updateDoc(ref, updatePayload);
+
+  // A supervisor can complete a booking that is already paid; credit it server-side (idempotent, no-ops otherwise).
+  if (newStatus === 'Completed') {
+    processBookingLoyaltyEarning({ ...booking, status: 'Completed', paymentStatus: booking.paymentStatus }).catch((err) =>
+      console.warn('Loyalty points earning trigger error:', err)
+    );
+  }
 
   // If Completed or Cancelled, stop tracking and release therapist
   if (['Completed', 'Cancelled'].includes(newStatus)) {

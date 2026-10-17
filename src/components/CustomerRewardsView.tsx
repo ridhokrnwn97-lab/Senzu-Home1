@@ -7,6 +7,8 @@ import {
   Users,
   Share2,
   Copy,
+  LogIn,
+  UserPlus,
   Check,
   Calendar,
   Sparkles,
@@ -31,18 +33,26 @@ import {
   getMembershipTiers,
   getLoyaltySettings,
   checkAndIssueBirthdayReward,
+  syncCustomerLoyalty,
 } from '../lib/loyaltyService';
 import { formatRupiah, formatDateIndo } from '../lib/utils';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 
 export interface CustomerRewardsViewProps {
   onStartBooking: () => void;
+  onRequestLogin?: () => void;
+  onRequestRegister?: () => void;
 }
 
 export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
   onStartBooking,
+  onRequestLogin,
+  onRequestRegister,
 }) => {
   const { currentCustomer, isCustomerAuthenticated, isCustomerPreviewMode } = useCustomerAuth();
+
+  // Signed-out visitors can't read loyalty data (Firestore rules require an authenticated owner).
+  const isSignedOutVisitor = !isCustomerAuthenticated && !isCustomerPreviewMode;
 
   const [phoneInput, setPhoneInput] = useState(() => {
     if (isCustomerPreviewMode) return '';
@@ -73,22 +83,31 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
       return;
     }
     const clean = phoneInput.replace(/[^0-9]/g, '');
-    if (clean.length >= 8) {
+    // A signed-out visitor has no account to read, so skip the request the rules would deny anyway.
+    if (isSignedOutVisitor) return;
+    if (isCustomerAuthenticated && currentCustomer?.id) {
+      loadCustomerLoyalty(clean);
+    } else if (clean.length >= 8) {
       loadCustomerLoyalty(clean);
     }
-  }, [phoneInput, isCustomerPreviewMode]);
+  }, [phoneInput, isCustomerPreviewMode, isSignedOutVisitor, isCustomerAuthenticated, currentCustomer?.id]);
 
   const loadCustomerLoyalty = async (phone: string) => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const custId = `cust_${phone}`;
+      // Logged-in customers own a CRM profile (cust_u_<uid>); the phone key is only the guest fallback.
+      // Credit any completed + paid order that still has no ledger entry before reading the balance.
+      if (isCustomerAuthenticated) await syncCustomerLoyalty();
+      const custId = isCustomerAuthenticated && currentCustomer?.id ? currentCustomer.id : `cust_${phone}`;
       let acc = await getLoyaltyAccountByCustomerId(custId);
       if (!acc) {
         acc = await getOrCreateLoyaltyAccount({
           id: custId,
-          name: `Pelanggan ${phone.slice(-4)}`,
-          phone,
+          name: currentCustomer?.name || `Pelanggan ${phone.slice(-4)}`,
+          phone: currentCustomer?.phone || phone,
+          whatsapp: currentCustomer?.whatsapp || phone,
+          email: currentCustomer?.email,
         });
       }
       setAccount(acc);
@@ -107,7 +126,14 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
       setTransactions(txs);
     } catch (err) {
       console.warn('Could not load customer loyalty:', err);
-      setErrorMessage('Terjadi kendala saat memuat data loyalitas. Silakan coba sesaat lagi.');
+      const code = (err as any)?.code;
+      setErrorMessage(
+        code === 'AUTH_REQUIRED'
+          ? 'Silakan masuk ke akun Anda untuk melihat dan mengumpulkan poin loyalitas.'
+          : // Show the server's own reason (already Indonesian) so a failure is diagnosable, not generic.
+            (code && (err as any)?.message) ||
+            'Terjadi kendala saat memuat data loyalitas. Silakan coba sesaat lagi.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -172,28 +198,62 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
           </div>
         </div>
 
-        {/* Input Phone */}
-        <form onSubmit={handlePhoneSubmit} className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              type="tel"
-              value={phoneInput}
-              onChange={(e) => setPhoneInput(e.target.value)}
-              placeholder="Masukkan nomor WhatsApp member Anda"
-              className="w-full pl-9 pr-3 py-2 rounded-2xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
-            />
-            <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+        {/* Input Phone — signed-out visitors can't read loyalty data, so offer sign-in instead */}
+        {isSignedOutVisitor ? (
+          <div className="text-center space-y-3 py-2">
+            <div className="w-12 h-12 rounded-2xl bg-[#082A4F]/5 border border-[#D4AF37]/30 flex items-center justify-center mx-auto">
+              <Award className="w-6 h-6 text-[#D4AF37]" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-serif font-bold text-base text-[#082A4F]">
+                Masuk untuk melihat poin Anda
+              </h2>
+              <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                Poin dikumpulkan dari setiap pesanan yang selesai & sudah dibayar, dan baru tampil setelah Anda masuk ke akun.
+              </p>
+            </div>
+            <div className="flex gap-2 max-w-xs mx-auto">
+              <button
+                type="button"
+                onClick={onRequestLogin}
+                className="flex-1 py-2 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Masuk</span>
+              </button>
+              <button
+                type="button"
+                onClick={onRequestRegister}
+                className="flex-1 py-2 rounded-2xl bg-white border border-slate-200 text-[#082A4F] text-xs font-bold hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Daftar Akun</span>
+              </button>
+            </div>
           </div>
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="px-4 py-2 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer shrink-0"
-          >
-            {isLoading ? 'Memuat...' : 'Cek Poin'}
-          </button>
-        </form>
+        ) : (
+          <form onSubmit={handlePhoneSubmit} className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder="Masukkan nomor WhatsApp member Anda"
+                className="w-full pl-9 pr-3 py-2 rounded-2xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
+              />
+              <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="px-4 py-2 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer shrink-0"
+            >
+              {isLoading ? 'Memuat...' : 'Cek Poin'}
+            </button>
+          </form>
+        )}
 
-        {errorMessage && (
+        {errorMessage && !isSignedOutVisitor && (
           <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center justify-between">
             <span>{errorMessage}</span>
             <button
@@ -210,7 +270,8 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
         )}
       </div>
 
-      {/* Membership Card (Benchmark: Alfagift / Grab Rewards Card) */}
+      {/* Membership Card (Benchmark: Alfagift / Grab Rewards Card) — hidden when signed out, a read without auth always reports 0 points */}
+      {!isSignedOutVisitor && (
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-[#082A4F] via-[#0D3866] to-[#061F3B] text-white p-5 sm:p-6 shadow-xl border border-[#D4AF37]/40">
         <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-[#D4AF37]/15 blur-2xl pointer-events-none" />
 
@@ -276,6 +337,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
           )}
         </div>
       </div>
+      )}
 
       {/* Referral Card */}
       {account && (

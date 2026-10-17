@@ -38,6 +38,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
     currentCustomer?.genderPreference
   );
   const [birthDate, setBirthDate] = useState(currentCustomer?.birthDate || '');
+  const [gender, setGender] = useState<'Laki-laki' | 'Perempuan' | undefined>(currentCustomer?.gender);
 
   // Password fields
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -54,6 +55,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
       setPhone(currentCustomer.phone || '');
       setGenderPreference(currentCustomer.genderPreference);
       setBirthDate(currentCustomer.birthDate || '');
+      setGender(currentCustomer.gender);
       setIsChangingPassword(false);
       setNewPassword('');
       setConfirmPassword('');
@@ -92,6 +94,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
         nickname: nickname.trim(),
         phone: phone.trim(),
         genderPreference,
+        gender,
         birthDate: birthDate || undefined,
       });
 
@@ -247,6 +250,30 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Gender Pelanggan (dasar penugasan terapis) */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-[#082A4F]">Gender Anda</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['Laki-laki', 'Perempuan'] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGender(g)}
+                  className={`py-2 text-xs font-bold rounded-xl border text-center transition cursor-pointer ${
+                    gender === g
+                      ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'
+                  }`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Digunakan agar terapis ditugaskan sesuai gender Anda.
+            </p>
           </div>
 
           {/* Tanggal Lahir */}

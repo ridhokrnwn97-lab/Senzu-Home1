@@ -208,6 +208,7 @@ export interface Booking {
   scheduleTime: string; // HH:mm
   scheduleAt: string; // formatted full date time
   genderPreference: GenderPreference;
+  customerGender?: 'Laki-laki' | 'Perempuan';
   address: string;
   latitude?: number;
   longitude?: number;

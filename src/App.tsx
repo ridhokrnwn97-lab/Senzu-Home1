@@ -492,6 +492,7 @@ function MainApp() {
 
   const handleRepeatBooking = (booking: Partial<Booking>) => {
     setRepeatBookingData(booking);
+    setPreselectedServiceId('');
     setActiveStaffTab('home');
     setCustomerTab('booking');
     setTimeout(() => {
@@ -612,7 +613,7 @@ function MainApp() {
                 bookings={bookings}
                 settings={settings}
                 onStartBooking={(serviceId, promoCode) => {
-                  if (serviceId) setPreselectedServiceId(serviceId);
+                  setPreselectedServiceId(serviceId || '');
                   if (promoCode) setPreselectedPromoCode(promoCode);
                   setCustomerTab('booking');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -648,6 +649,7 @@ function MainApp() {
                 }}
                 onRepeatBooking={handleRepeatBooking}
                 onStartBooking={() => {
+                  setPreselectedServiceId('');
                   setCustomerTab('booking');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
@@ -680,6 +682,7 @@ function MainApp() {
                     settings={settings}
                     onBookingSuccess={(b) => {
                       setPreselectedPromoCode('');
+                      setPreselectedServiceId('');
                       handleBookingCreated(b);
                     }}
                     onOpenTracking={handleOpenTrackingWithCode}
@@ -701,9 +704,12 @@ function MainApp() {
               >
                 <CustomerRewardsView
                   onStartBooking={() => {
+                    setPreselectedServiceId('');
                     setCustomerTab('booking');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
+                  onRequestLogin={() => setIsCustomerLoginOpen(true)}
+                  onRequestRegister={() => setIsCustomerRegisterOpen(true)}
                 />
               </ErrorBoundary>
             )}

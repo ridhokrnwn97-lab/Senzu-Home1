@@ -135,45 +135,34 @@ export async function getOrCreateLoyaltyAccount(customer: {
     return existing;
   }
 
-  const { cleanDigits } = normalizeIndonesianPhone(customer.phone || customer.whatsapp || '');
-  const memberNumber = generateMemberNumber(cleanDigits || customer.id.replace(/[^0-9]/g, ''));
-  const referralCode = generateReferralCode(customer.name, cleanDigits);
-  const now = new Date().toISOString();
+  // Creating the account is server-side: Firestore rules keep loyalty_accounts staff-only.
+  // shortcut: a guest earns under the booking's customer key (cust_<phone>); those points are not
+  // claimed when that person later registers, because a phone typed into a profile is never verified
+  // and must not grant ownership of someone else's balance. Revisit with phone/OTP verification.
+  const rawToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
+  const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  if (!idToken) {
+    throw Object.assign(new Error('Silakan masuk ke akun Anda untuk melihat dan mengumpulkan poin loyalitas.'), {
+      code: 'AUTH_REQUIRED',
+    });
+  }
 
-  const newAccount: CustomerLoyaltyAccount = {
-    id: customer.id,
-    customerId: customer.id,
-    memberNumber,
-    customerName: customer.name,
-    customerPhone: customer.phone,
-    customerWhatsApp: customer.whatsapp || customer.phone,
-    customerEmail: customer.email,
-    birthDate: customer.birthDate,
-
-    pointsBalance: 0,
-    lifetimePointsEarned: 0,
-    lifetimePointsRedeemed: 0,
-    lifetimePointsExpired: 0,
-
-    currentTierId: 'member',
-    currentTierName: 'Member',
-    tierStartedAt: now,
-    tierExpiresAt: null,
-
-    qualifiedSpend: 0,
-    qualifiedBookings: 0,
-
-    referralCode,
-    referralCount: 0,
-
-    birthdayBenefitUsedYear: null,
-    status: 'active',
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  await setDoc(doc(db, 'loyalty_accounts', customer.id), cleanFirestoreData(newAccount));
-  return newAccount;
+  const res = await fetch('/api/loyalty/account/ensure', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({
+      customerId: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      whatsapp: customer.whatsapp,
+      email: customer.email,
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.success || !data.account) {
+    throw Object.assign(new Error(data?.error || 'Gagal menyiapkan akun poin loyalitas.'), { code: data?.code });
+  }
+  return data.account as CustomerLoyaltyAccount;
 }
 
 export async function getAllLoyaltyAccounts(): Promise<CustomerLoyaltyAccount[]> {
@@ -358,6 +347,30 @@ export async function evaluateAndUpgradeCustomerTier(
 // ----------------- POINT EARNING FROM COMPLETED BOOKING -----------------
 
 /**
+ * Credits any of the caller's completed + fully paid bookings that still have no ledger entry
+ * (orders finished before this fix, or a completion path whose trigger never ran).
+ * Best-effort and idempotent: safe to call on every visit.
+ */
+export async function syncCustomerLoyalty(customerId?: string): Promise<void> {
+  const rawToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
+  const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  if (!idToken) return;
+  try {
+    const res = await fetch('/api/loyalty/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(customerId ? { customerId } : {}),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      console.warn('[Loyalty] sync skipped:', res.status, data?.code || data?.error || '(no body)');
+    }
+  } catch (err) {
+    console.warn('[Loyalty] sync failed:', err);
+  }
+}
+
+/**
  * Idempotent Point Earning Triggered upon Booking Completion & Full Payment
  */
 export async function processBookingLoyaltyEarning(booking: Booking): Promise<{
@@ -368,118 +381,31 @@ export async function processBookingLoyaltyEarning(booking: Booking): Promise<{
     return null;
   }
 
-  const settings = await getLoyaltySettings();
-  if (!settings.loyaltyEnabled) {
+  // Earning runs server-side: Firestore rules keep loyalty_accounts staff-only, so the
+  // therapist/customer client can never write the balance or the ledger.
+  const rawToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
+  const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  if (!idToken) {
     return null;
   }
 
-  // Idempotency check: Look for existing 'earn' transaction for this booking
-  const existingTxQuery = query(
-    collection(db, 'loyalty_transactions'),
-    where('bookingId', '==', booking.id),
-    where('transactionType', '==', 'earn')
-  );
-  const existingTxSnap = await getDocs(existingTxQuery);
-  if (!existingTxSnap.empty) {
-    return null; // Already processed, strictly prevent double earning
-  }
-
-  // Get or initialize customer loyalty account
-  const account = await getOrCreateLoyaltyAccount({
-    id: booking.customerId || `cust_${booking.customerWhatsApp.replace(/[^0-9]/g, '')}`,
-    name: booking.customerName,
-    phone: booking.customerWhatsApp,
-    whatsapp: booking.customerWhatsApp,
-    email: booking.customerEmail,
-  });
-
-  const tiers = await getMembershipTiers();
-  const currentTier = tiers.find((t) => t.id === account.currentTierId) || tiers[0];
-  const tierMultiplier = currentTier?.earningMultiplier || 1.0;
-
-  // Calculate Net Qualified Spend
-  const includeFee = settings.includeHomeServiceFeeForPoints ?? false;
-  const discounts = (booking.voucherDiscount || 0) + (booking.pointsDiscount || 0) + (booking.promoDiscount || 0) + (booking.discountAmount || 0);
-  let netSpend = Math.max(0, booking.servicePrice - discounts);
-  if (includeFee) {
-    netSpend += (booking.homeServiceFee || 0);
-  }
-
-  const spendPerPoint = settings.spendPerPoint || 10000;
-  const basePoints = Math.floor(netSpend / spendPerPoint);
-  const finalPoints = Math.floor(basePoints * tierMultiplier);
-
-  if (finalPoints <= 0) {
+  try {
+    const res = await fetch('/api/loyalty/earn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ bookingId: booking.id }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success || !(data.pointsEarned > 0)) {
+      // Never lose this silently: "saldo tetap 0" is otherwise indistinguishable from a missing route.
+      console.warn('[Loyalty] earning not applied:', res.status, data?.code || data?.reason || data?.error || '(no body)', 'booking', booking.id);
+      return null;
+    }
+    return { pointsEarned: data.pointsEarned, reason: data.reason || 'Earned' };
+  } catch (err) {
+    console.warn('Loyalty points earning trigger error:', err);
     return null;
   }
-
-  // Calculate Expiry Date
-  let expiresAt: string | null = null;
-  if (settings.pointsExpireEnabled && settings.pointsValidityDays > 0) {
-    const expDate = new Date();
-    expDate.setDate(expDate.getDate() + settings.pointsValidityDays);
-    expiresAt = expDate.toISOString();
-  }
-
-  // Record ledger transaction
-  const { transaction: earnTx } = await recordLoyaltyTransaction({
-    customerId: account.customerId,
-    customerName: account.customerName,
-    bookingId: booking.id,
-    bookingCode: booking.bookingCode,
-    transactionType: 'earn',
-    pointsDelta: finalPoints,
-    referenceType: 'booking',
-    referenceId: booking.id,
-    reason: `Poin treatment selesai ${booking.serviceName} (${booking.bookingCode})`,
-    createdBy: 'system',
-    expiresAt,
-    metadata: {
-      basePoints,
-      tierMultiplier,
-      finalPoints,
-      netSpend,
-      serviceName: booking.serviceName,
-    },
-  });
-
-  // Update cumulative qualified stats
-  const newSpend = (account.qualifiedSpend || 0) + netSpend;
-  const newBookings = (account.qualifiedBookings || 0) + 1;
-  const updatedAccount: CustomerLoyaltyAccount = {
-    ...account,
-    qualifiedSpend: newSpend,
-    qualifiedBookings: newBookings,
-    pointsBalance: account.pointsBalance + finalPoints,
-  };
-
-  await updateDoc(doc(db, 'loyalty_accounts', account.customerId), {
-    qualifiedSpend: newSpend,
-    qualifiedBookings: newBookings,
-    updatedAt: new Date().toISOString(),
-  });
-
-  // Re-check Tier Upgrade
-  await evaluateAndUpgradeCustomerTier(account.customerId, updatedAccount, tiers);
-
-  // Check if this booking qualifies an existing referral
-  await checkAndQualifyReferral(booking, account);
-
-  // Emit Notification
-  emitEvent('loyalty.points_earned', {
-    customerId: account.customerId,
-    customerName: account.customerName,
-    customerWhatsApp: account.customerWhatsApp,
-    bookingId: booking.id,
-    bookingCode: booking.bookingCode,
-    pointsEarned: finalPoints,
-    newBalance: account.pointsBalance + finalPoints,
-    serviceName: booking.serviceName,
-    transactionId: earnTx.id,
-    loyaltyTransactionId: earnTx.id,
-  }, { id: 'system', role: 'system' }).catch(() => {});
-
-  return { pointsEarned: finalPoints, reason: 'Earned' };
 }
 
 // ----------------- POINT REDEMPTION & REFUNDS -----------------
