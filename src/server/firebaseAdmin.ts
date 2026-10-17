@@ -1,20 +1,33 @@
-import { initializeApp, getApps, applicationDefault, type App } from 'firebase-admin/app';
+import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 import path from 'path';
 import fs from 'fs';
 
-// Default project configuration fallback matching Senzu Home
-let projectId = 'gen-lang-client-0466978413';
-let firestoreDatabaseId = 'ai-studio-senzuhome-cf81d161-42d7-42e4-96ab-3268a47c01d5';
+// Load service account key from filesystem
+const serviceAccountPath = path.join(process.cwd(), 'src/server/serviceAccountKey.json');
+let serviceAccount: any = {};
 
+try {
+  if (fs.existsSync(serviceAccountPath)) {
+    serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
+  }
+} catch (e) {
+  console.warn('[FirebaseAdmin] Warning reading service account key:', e);
+}
+
+// Default project configuration fallback matching Senzu Home
+let projectId = serviceAccount?.projectId || 'gen-lang-client-0466978413';
+let firestoreDatabaseId = serviceAccount?.firestoreDatabaseId || 'ai-studio-senzuhome-cf81d161-42d7-42e4-96ab-3268a47c01d5';
+
+// Try to read API key from firebase-applet-config.json for fallback Identity Toolkit
+let apiKeyFromConfig = '';
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (cfg.projectId) projectId = cfg.projectId;
-    if (cfg.firestoreDatabaseId) firestoreDatabaseId = cfg.firestoreDatabaseId;
+    if (cfg.apiKey) apiKeyFromConfig = cfg.apiKey;
   }
 } catch (e) {
   console.warn('[FirebaseAdmin] Warning reading config file:', e);
@@ -31,7 +44,7 @@ if (!existingApp) {
   adminApp = initializeApp(
     {
       projectId,
-      credential: applicationDefault(),
+      credential: cert(serviceAccount),
     },
     ADMIN_APP_NAME
   );
