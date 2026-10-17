@@ -29,22 +29,17 @@ export function registerLoyaltyAccounts(app: Express, db: Firestore | null, veri
   console.log(`[Loyalty] routes registered (adminDb: ${db ? 'available' : 'MISSING'})`);
 
   /**
-   * Idempotent point earning for a completed + fully paid booking.
-   * Callable by the assigned therapist, the booking owner, or operational staff.
+   * Idempotent point earning for one completed + fully paid booking. Shared by the HTTP route
+   * below, the payment routes in server.ts and the catch-up sync, so no completion path is missed.
    * shortcut: no loyalty.points_earned notification and no referral qualification here; add both when those flows are wired to the server.
    */
-  app.post('/api/loyalty/earn', async (req, res) => {
-    try {
-      const firestore = store();
-      const bookingId = safeId(text(req.body?.bookingId));
-      await requireIdentity(req, verify);
-
-      const result = await firestore.runTransaction(async (t) => {
+  const creditBookingLoyalty = async (bookingId: string) => {
+    const firestore = store();
+    return firestore.runTransaction(async (t) => {
         const bookingSnap = await t.get(firestore.collection('bookings').doc(bookingId));
         if (!bookingSnap.exists) throw securityError(404, 'BOOKING_NOT_FOUND', 'Reservasi tidak ditemukan.');
         const booking: any = bookingSnap.data() || {};
-        // Assigned therapist, booking owner or operational staff - same rule the client write needed.
-        await requireBookingAccess(req, firestore, verify, booking, true);
+        // Access is enforced by the /api/loyalty/earn route; server-initiated callers are already authorized.
         if (booking.status !== 'Completed' || !paidStatus(booking.paymentStatus)) {
           return { pointsEarned: 0, balance: null, reason: 'NOT_ELIGIBLE' };
         }
@@ -170,7 +165,20 @@ export function registerLoyaltyAccounts(app: Express, db: Firestore | null, veri
 
         return { pointsEarned: points, balance: balanceAfter, reason: 'Earned' };
       });
+  };
 
+  /**
+   * Client-triggered earning for one booking the caller may act on (therapist, owner, staff).
+   */
+  app.post('/api/loyalty/earn', async (req, res) => {
+    try {
+      const bookingId = safeId(text(req.body?.bookingId));
+      await requireIdentity(req, verify);
+      const bookingSnap = await store().collection('bookings').doc(bookingId).get();
+      if (!bookingSnap.exists) throw securityError(404, 'BOOKING_NOT_FOUND', 'Reservasi tidak ditemukan.');
+      // Assigned therapist, booking owner or operational staff - same rule the client write needed.
+      await requireBookingAccess(req, store(), verify, bookingSnap.data() || {}, true);
+      const result = await creditBookingLoyalty(bookingId);
       return res.json({ success: true, ...result });
     } catch (e) {
       return failure(res, e);
@@ -243,4 +251,46 @@ export function registerLoyaltyAccounts(app: Express, db: Firestore | null, veri
       return failure(res, e);
     }
   });
+
+  /**
+   * Catch-up for the caller's own bookings: credits every completed + fully paid booking that has no
+   * ledger entry yet (orders finished before this fix, or a completion path whose trigger never ran).
+   * Operational staff may name another customer explicitly. Idempotent, so it is safe to call on load.
+   */
+  app.post('/api/loyalty/sync', async (req, res) => {
+    try {
+      const firestore = store();
+      const identity = await requireIdentity(req, verify);
+      const staff = await resolveActiveStaff(firestore, identity.uid);
+      const operational = !!staff && ['manager', 'admin', 'css', 'supervisor'].includes(String(staff.role));
+      const requested = operational ? text(req.body?.customerId) : '';
+      let customerId = requested ? safeId(requested) : '';
+      if (!customerId) {
+        const mine = await firestore.collection('customers').where('authUserId', '==', identity.uid).limit(2).get();
+        if (mine.size !== 1) throw securityError(403, 'PERMISSION_DENIED', 'Profil pelanggan tidak ditemukan untuk akun ini.');
+        customerId = mine.docs[0].id;
+      }
+
+      const snap = await firestore.collection('bookings').where('customerId', '==', customerId).limit(50).get();
+      const earnable = snap.docs.filter((d) => {
+        const b: any = d.data() || {};
+        return b.status === 'Completed' && String(b.paymentStatus || '').trim().toLowerCase() === 'paid';
+      });
+
+      let credited = 0;
+      let points = 0;
+      for (const d of earnable) {
+        const out: any = await creditBookingLoyalty(d.id).catch(() => null);
+        if (out?.reason === 'Earned' && Number(out.pointsEarned) > 0) {
+          credited += 1;
+          points += Number(out.pointsEarned);
+        }
+      }
+      return res.json({ success: true, customerId, checked: earnable.length, credited, points });
+    } catch (e) {
+      return failure(res, e);
+    }
+  });
+
+  return { creditBookingLoyalty };
 }

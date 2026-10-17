@@ -33,6 +33,7 @@ import {
   getMembershipTiers,
   getLoyaltySettings,
   checkAndIssueBirthdayReward,
+  syncCustomerLoyalty,
 } from '../lib/loyaltyService';
 import { formatRupiah, formatDateIndo } from '../lib/utils';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
@@ -96,6 +97,8 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
     setErrorMessage(null);
     try {
       // Logged-in customers own a CRM profile (cust_u_<uid>); the phone key is only the guest fallback.
+      // Credit any completed + paid order that still has no ledger entry before reading the balance.
+      if (isCustomerAuthenticated) await syncCustomerLoyalty();
       const custId = isCustomerAuthenticated && currentCustomer?.id ? currentCustomer.id : `cust_${phone}`;
       let acc = await getLoyaltyAccountByCustomerId(custId);
       if (!acc) {

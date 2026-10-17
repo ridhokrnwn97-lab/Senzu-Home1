@@ -1686,7 +1686,7 @@ async function startServer() {
   registerPaymentAcceptance(app, adminDb, token => adminAuth!.verifyIdToken(token));
 
   // Loyalty point earning + account provisioning run server-side; Firestore rules keep client writes staff-only.
-  registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));
+  const loyaltyAccounts = registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));
 
   // Protected Server Endpoint for Payment Verification (Prompt 18 Phase 5)
   app.post('/api/payments/:paymentId/verify', async (req, res) => {
@@ -1837,6 +1837,10 @@ async function startServer() {
           payment: { id: paymentSnap.id, ...payment, status: 'paid', verifiedAt: now }
         };
       });
+
+      // Loyalty: payment is often confirmed *after* the treatment is completed, so this path must credit too.
+      // Idempotent and detached: it can never change or delay the verification response.
+      loyaltyAccounts.creditBookingLoyalty(result.targetBookingId).catch((e) => console.warn('[Loyalty] post-verify earning failed:', e?.code || e?.message || e));
 
       if (result.isIdempotent) {
         return res.json({
@@ -3654,6 +3658,10 @@ async function startServer() {
       }
 
       const { status: _st, ...payloadOut } = txResult;
+      // Loyalty: a corrected payment can be what completes the "completed + paid" state (idempotent, detached).
+      if (String(txResult.newStatus || '').trim().toLowerCase() === 'paid') {
+        loyaltyAccounts.creditBookingLoyalty(txResult.bookingId).catch((e) => console.warn('[Loyalty] post-correct earning failed:', e?.code || e?.message || e));
+      }
       return res.status(200).json({
         ...payloadOut,
         success: true,

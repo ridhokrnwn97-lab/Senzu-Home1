@@ -347,6 +347,30 @@ export async function evaluateAndUpgradeCustomerTier(
 // ----------------- POINT EARNING FROM COMPLETED BOOKING -----------------
 
 /**
+ * Credits any of the caller's completed + fully paid bookings that still have no ledger entry
+ * (orders finished before this fix, or a completion path whose trigger never ran).
+ * Best-effort and idempotent: safe to call on every visit.
+ */
+export async function syncCustomerLoyalty(customerId?: string): Promise<void> {
+  const rawToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
+  const idToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+  if (!idToken) return;
+  try {
+    const res = await fetch('/api/loyalty/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(customerId ? { customerId } : {}),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      console.warn('[Loyalty] sync skipped:', res.status, data?.code || data?.error || '(no body)');
+    }
+  } catch (err) {
+    console.warn('[Loyalty] sync failed:', err);
+  }
+}
+
+/**
  * Idempotent Point Earning Triggered upon Booking Completion & Full Payment
  */
 export async function processBookingLoyaltyEarning(booking: Booking): Promise<{

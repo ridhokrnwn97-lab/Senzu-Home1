@@ -1,6 +1,6 @@
 // Self-check for the server-side loyalty earning + account provisioning endpoints.
 // Runs without the Firestore emulator: a minimal in-memory stand-in covers the
-// document/query/transaction shapes these two endpoints touch.
+// document/query/transaction shapes these endpoints touch.
 //   node_modules/.bin/tsx tests/loyalty/loyaltyEarning.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -257,4 +257,39 @@ test('account provisioning without a customerId resolves the caller profile; no 
   assert.equal(bySession.body.account.customerId, 'cust_u_alice');
   const anonymous = await ensure(call, { customerId: 'cust_u_alice' });
   assert.equal(anonymous.status, 401);
+});
+
+const sync = (call: any, body: Doc = {}, token?: string) => call('/api/loyalty/sync', body, token);
+
+// ---- catch-up sync: covers orders finished before the fix, or a completion path whose trigger never ran ----
+
+test('sync credits every completed + paid booking of the caller that has no ledger entry yet', async () => {
+  const { store, call } = await harness();
+  const first = await sync(call, {}, 'alice');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.customerId, 'cust_u_alice');
+  // bk_1 paid -> 16 points; bk_discount is fully discounted -> checked but nothing to credit; bk_2 is UNPAID.
+  assert.equal(first.body.checked, 2);
+  assert.equal(first.body.credited, 1);
+  assert.equal(first.body.points, 16);
+  assert.equal(store.get('loyalty_accounts')!.get('cust_u_alice')!.pointsBalance, 16);
+  assert.equal(store.get('loyalty_transactions')!.has('ltx_earn_bk_1'), true);
+
+  const second = await sync(call, {}, 'alice');
+  assert.equal(second.body.credited, 0);
+  assert.equal(store.get('loyalty_accounts')!.get('cust_u_alice')!.pointsBalance, 16);
+});
+
+test('sync only credits the caller own profile; staff may name another customer', async () => {
+  const { call } = await harness();
+  // 'bob' owns no customer profile, so there is nothing he is allowed to sync.
+  const foreign = await sync(call, {}, 'bob');
+  assert.equal(foreign.status, 403);
+  const anonymous = await sync(call, {});
+  assert.equal(anonymous.status, 401);
+
+  const asStaff = await sync(call, { customerId: 'cust_u_alice' }, 'css');
+  assert.equal(asStaff.status, 200);
+  assert.equal(asStaff.body.customerId, 'cust_u_alice');
+  assert.equal(asStaff.body.credited, 1);
 });

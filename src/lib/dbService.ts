@@ -3830,6 +3830,13 @@ export async function supervisorOverrideStatus(
 
   await updateDoc(ref, updatePayload);
 
+  // A supervisor can complete a booking that is already paid; credit it server-side (idempotent, no-ops otherwise).
+  if (newStatus === 'Completed') {
+    processBookingLoyaltyEarning({ ...booking, status: 'Completed', paymentStatus: booking.paymentStatus }).catch((err) =>
+      console.warn('Loyalty points earning trigger error:', err)
+    );
+  }
+
   // If Completed or Cancelled, stop tracking and release therapist
   if (['Completed', 'Cancelled'].includes(newStatus)) {
     await stopTherapistTracking(booking.id).catch(() => {});
