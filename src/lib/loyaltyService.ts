@@ -160,7 +160,7 @@ export async function getOrCreateLoyaltyAccount(customer: {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.success || !data.account) {
-    throw new Error(data?.error || 'Gagal menyiapkan akun poin loyalitas.');
+    throw Object.assign(new Error(data?.error || 'Gagal menyiapkan akun poin loyalitas.'), { code: data?.code });
   }
   return data.account as CustomerLoyaltyAccount;
 }
@@ -373,6 +373,8 @@ export async function processBookingLoyaltyEarning(booking: Booking): Promise<{
     });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data?.success || !(data.pointsEarned > 0)) {
+      // Never lose this silently: "saldo tetap 0" is otherwise indistinguishable from a missing route.
+      console.warn('[Loyalty] earning not applied:', res.status, data?.code || data?.reason || data?.error || '(no body)', 'booking', booking.id);
       return null;
     }
     return { pointsEarned: data.pointsEarned, reason: data.reason || 'Earned' };

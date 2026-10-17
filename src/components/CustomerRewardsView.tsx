@@ -123,11 +123,13 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
       setTransactions(txs);
     } catch (err) {
       console.warn('Could not load customer loyalty:', err);
-      const authRequired = (err as any)?.code === 'AUTH_REQUIRED';
+      const code = (err as any)?.code;
       setErrorMessage(
-        authRequired
+        code === 'AUTH_REQUIRED'
           ? 'Silakan masuk ke akun Anda untuk melihat dan mengumpulkan poin loyalitas.'
-          : 'Terjadi kendala saat memuat data loyalitas. Silakan coba sesaat lagi.'
+          : // Show the server's own reason (already Indonesian) so a failure is diagnosable, not generic.
+            (code && (err as any)?.message) ||
+            'Terjadi kendala saat memuat data loyalitas. Silakan coba sesaat lagi.'
       );
     } finally {
       setIsLoading(false);

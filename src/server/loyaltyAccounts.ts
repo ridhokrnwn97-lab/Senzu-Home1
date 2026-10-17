@@ -26,6 +26,8 @@ export function registerLoyaltyAccounts(app: Express, db: Firestore | null, veri
     return db;
   };
 
+  console.log(`[Loyalty] routes registered (adminDb: ${db ? 'available' : 'MISSING'})`);
+
   /**
    * Idempotent point earning for a completed + fully paid booking.
    * Callable by the assigned therapist, the booking owner, or operational staff.
