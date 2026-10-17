@@ -708,6 +708,8 @@ function MainApp() {
                     setCustomerTab('booking');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
+                  onRequestLogin={() => setIsCustomerLoginOpen(true)}
+                  onRequestRegister={() => setIsCustomerRegisterOpen(true)}
                 />
               </ErrorBoundary>
             )}

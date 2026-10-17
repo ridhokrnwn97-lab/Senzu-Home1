@@ -1,4 +1,5 @@
 import { registerPaymentAcceptance, assertPaymentLink } from './src/server/paymentAcceptance.ts';
+import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
 import { DEFAULT_NOTIFICATION_SETTINGS } from './src/types/notification.ts';
@@ -1683,6 +1684,9 @@ async function startServer() {
   });
 
   registerPaymentAcceptance(app, adminDb, token => adminAuth!.verifyIdToken(token));
+
+  // Loyalty point earning + account provisioning run server-side; Firestore rules keep client writes staff-only.
+  registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));
 
   // Protected Server Endpoint for Payment Verification (Prompt 18 Phase 5)
   app.post('/api/payments/:paymentId/verify', async (req, res) => {
