@@ -9478,6 +9478,7 @@ async function startServer() {
           scheduleTime,
           scheduleAt: `${scheduleDate} ${scheduleTime}`,
           genderPreference: typeof req.body?.genderPreference === 'string' && req.body.genderPreference.trim() ? req.body.genderPreference.trim() : 'Bebas',
+          customerGender: (req.body?.customerGender === 'Laki-laki' || req.body?.customerGender === 'Perempuan') ? req.body.customerGender : undefined,
           address: addressTrimmed,
           latitude,
           longitude,
@@ -9554,6 +9555,7 @@ async function startServer() {
               defaultAddress: addressTrimmed, defaultArea: newBookingData.area, defaultLatitude: latitude,
               defaultLongitude: longitude, defaultPlaceId: newBookingData.placeId, addressNotes: newBookingData.addressNotes,
             } : {}),
+            ...(!verifiedCustomerData.gender && newBookingData.customerGender ? { gender: newBookingData.customerGender } : {}),
           }));
         }
         const bookingEventId = `evt_checkout_${candidateBookingId}`;
@@ -17726,6 +17728,7 @@ async function startServer() {
     'timeSlot',
     'scheduleAt',
     'genderPreference',
+    'customerGender',
     'address',
     'customerAddress',
     'latitude',

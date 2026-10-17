@@ -68,6 +68,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
   const [errorMsg, setErrorMsg] = useState('');
   const [dailyRosters, setDailyRosters] = useState<TherapistRoster[]>(initialRosters || []);
   const [favoriteTherapistId, setFavoriteTherapistId] = useState<string | undefined>(undefined);
+  const [crmGender, setCrmGender] = useState<string | undefined>(undefined);
   const [isLoadingRosters, setIsLoadingRosters] = useState<boolean>(false);
 
   // Load rosters and CRM customer preferences when booking changes
@@ -87,6 +88,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
         if (c?.favoriteTherapistId) {
           setFavoriteTherapistId(c.favoriteTherapistId);
         }
+        if (c?.gender) setCrmGender(c.gender);
       }).catch(() => {});
     }
 
@@ -456,6 +458,21 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
               <div className="truncate">
                 Area: <strong>{booking.area}</strong>
               </div>
+            </div>
+            <div className="text-slate-700">
+              Gender Pelanggan:{' '}
+              <strong
+                className={`inline-block font-bold px-2 py-0.5 rounded text-[10px] ${
+                  (booking.customerGender || crmGender) === 'Perempuan'
+                    ? 'bg-rose-100 text-rose-800'
+                    : (booking.customerGender || crmGender) === 'Laki-laki'
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {booking.customerGender || crmGender || '—'}
+              </strong>
+              <span className="text-[10px] text-slate-400"> (dasar penugasan terapis)</span>
             </div>
             <div className="text-[11px] text-slate-500 truncate">
               Alamat: {booking.address}

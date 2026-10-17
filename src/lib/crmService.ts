@@ -339,6 +339,7 @@ export async function upsertCustomerFromBooking(
       normalizedPhone,
       email: booking.customerEmail || '',
       genderPreference: booking.genderPreference,
+      gender: booking.customerGender,
       defaultAddress: booking.address,
       defaultArea: booking.area,
       defaultLatitude: booking.latitude,
@@ -430,6 +431,11 @@ export async function upsertCustomerFromBooking(
       updates.defaultLongitude = booking.longitude;
       updates.defaultPlaceId = booking.placeId;
       updates.addressNotes = booking.addressNotes;
+    }
+
+    // Fill gender from the booking only when the profile has none yet
+    if (!existing.gender && booking.customerGender) {
+      updates.gender = booking.customerGender;
     }
 
     await updateDoc(custRef, cleanFirestoreData(updates));

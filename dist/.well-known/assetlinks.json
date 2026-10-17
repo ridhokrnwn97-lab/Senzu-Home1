@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ksbone.senzuhome",
+      "sha256_cert_fingerprints": [
+        "E8:52:96:A2:4F:AC:D7:70:2C:D7:25:B5:38:70:D9:77:25:7E:99:BC:8E:5A:28:82:23:5D:E3:B4:FF:9C:D4:27",
+        "BE:C0:5F:5E:23:B5:65:BF:A0:B0:4F:E5:13:DB:08:C5:88:31:55:37:E1:0B:6A:4E:A3:1D:C2:FA:F7:E1:2A:71"
+      ]
+    }
+  }
+]

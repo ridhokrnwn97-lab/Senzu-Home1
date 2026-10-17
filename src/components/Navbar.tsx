@@ -195,6 +195,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isTrackingActive = !!isTrackingOpen;
 
   return (
+    <>
     <header className="sticky top-0 z-40 bg-[#082A4F]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all">
       {/* Top Banner / Announcement - Hidden on mobile to save vertical viewport */}
       <div className="hidden sm:flex bg-[#051C34] text-[11px] sm:text-xs py-1 px-3 sm:px-4 text-center border-b border-white/5 text-slate-300 items-center justify-center gap-1.5 sm:gap-2">
@@ -544,10 +545,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* LOGOUT CONFIRMATION MODAL */}
-      {/* ========================================================================= */}
-      {isLogoutConfirmOpen && (
+    </header>
+
+    {/* ========================================================================= */}
+    {/* LOGOUT CONFIRMATION MODAL (outside navbar so `fixed` is viewport-anchored) */}
+    {/* ========================================================================= */}
+    {isLogoutConfirmOpen && (
         <div
           id="modal-logout-confirm"
           className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4"
@@ -620,6 +623,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 };

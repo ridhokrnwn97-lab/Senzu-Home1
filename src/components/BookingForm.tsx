@@ -12,7 +12,6 @@ import {
   Copy,
   ExternalLink,
   ChevronRight,
-  HeartHandshake,
   Info,
   Check,
   ArrowRight,
@@ -25,7 +24,6 @@ import {
 import {
   ServiceItem,
   AppSettings,
-  GenderPreference,
   PaymentMethod,
   PALEMBANG_AREAS,
   Booking,
@@ -87,17 +85,22 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     initialServiceId || safeServices.find((s) => s.isPopular)?.id || safeServices[0]?.id || ''
   );
 
-  // Sync selected service when services list loads or updates
+  // Apply initialServiceId only once per mount; later service-list changes may only repair an invalid id.
+  const initialServiceIdAppliedRef = React.useRef(false);
   useEffect(() => {
-    if (initialServiceId && safeServices.some((s) => s.id === initialServiceId)) {
+    if (!initialServiceIdAppliedRef.current && initialServiceId && safeServices.some((s) => s.id === initialServiceId)) {
+      initialServiceIdAppliedRef.current = true;
       setSelectedServiceId(initialServiceId);
-    } else if (safeServices.length > 0) {
-      if (!selectedServiceId || !safeServices.some((s) => s.id === selectedServiceId)) {
-        const popular = safeServices.find((s) => s.isPopular);
-        setSelectedServiceId(popular ? popular.id : safeServices[0]?.id || '');
-      }
+      return;
     }
-  }, [services, selectedServiceId, initialServiceId]);
+    if (safeServices.length === 0) return;
+    initialServiceIdAppliedRef.current = true;
+    setSelectedServiceId((prev) => {
+      if (prev && safeServices.some((s) => s.id === prev)) return prev;
+      const popular = safeServices.find((s) => s.isPopular);
+      return popular ? popular.id : safeServices[0]?.id || '';
+    });
+  }, [services, initialServiceId]);
 
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsApp, setCustomerWhatsApp] = useState('');
@@ -118,7 +121,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     return today.toISOString().split('T')[0];
   });
   const [scheduleTime, setScheduleTime] = useState('14:00');
-  const [genderPreference, setGenderPreference] = useState<GenderPreference>('Bebas');
+  const [customerGender, setCustomerGender] = useState<'Laki-laki' | 'Perempuan' | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('QRIS');
   const [customerNotes, setCustomerNotes] = useState('');
 
@@ -153,7 +156,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Manager Master Data Areas (Prompt 15B)
   const [serviceAreas, setServiceAreas] = useState<ServiceArea[]>([]);
 
-  const { currentCustomer, firebaseUser } = useCustomerAuth();
+  const { currentCustomer, firebaseUser, updateCustomerProfile } = useCustomerAuth();
   // An editable contact number cannot select somebody else's membership or vouchers.
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +174,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     return () => { cancelled = true; };
   }, [currentCustomer?.id, currentCustomer?.authUserId, firebaseUser?.uid]);
 
-  // Handle Repeat Booking prefill (services, address, notes, gender preference, but NOT dates/time)
+  // Handle Repeat Booking prefill (services, address, notes, but NOT dates/time)
   useEffect(() => {
     if (repeatData) {
       if (repeatData.serviceId && services.some((s) => s.id === repeatData.serviceId)) {
@@ -186,7 +189,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       if (repeatData.longitude != null) setLongitude(repeatData.longitude);
       if (repeatData.placeId) setPlaceId(repeatData.placeId);
       if (repeatData.addressNotes) setAddressNotes(repeatData.addressNotes);
-      if (repeatData.genderPreference) setGenderPreference(repeatData.genderPreference);
       if (repeatData.therapistName) {
         setCustomerNotes(
           (prev) =>
@@ -210,6 +212,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         }
         if (currentCustomer.email) {
           setCustomerEmail((prev) => prev || currentCustomer.email || '');
+        }
+        if (currentCustomer.gender) {
+          setCustomerGender(currentCustomer.gender);
         }
       }
       getCustomerSavedAddresses(currentCustomer.id)
@@ -245,6 +250,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   const selectedService = services.find((s) => s.id === selectedServiceId) || services[0] || null;
   const servicePrice = selectedService ? selectedService.price : 0;
+  // Account gender wins; guests pick in the form.
+  const effectiveCustomerGender = currentCustomer?.gender || customerGender || undefined;
   
   // Match area from Manager Master Data (Prompt 15B)
   const activeAreas = serviceAreas.filter((a) => (a.status === 'ACTIVE' || (a.status as any) === 'active') && a.homeServiceEnabled !== false);
@@ -303,7 +310,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const checkoutFingerprint = JSON.stringify({
     uid: auth.currentUser?.uid || '', customerId: currentCustomer?.id || '', customerName: customerName.trim(),
     phone: normalizedCheckoutPhone, customerEmail: customerEmail.trim(), serviceId: selectedService?.id || '',
-    scheduleDate, scheduleTime, genderPreference, paymentMethod, address: address.trim(), latitude, longitude,
+    scheduleDate, scheduleTime, genderPreference: 'Bebas', customerGender: effectiveCustomerGender || '', paymentMethod, address: address.trim(), latitude, longitude,
     placeId, addressNotes: addressNotes.trim(), distanceKm, distanceMeters, selectedArea,
     areaId: matchedArea?.id || '', areaName: matchedArea?.name || selectedArea,
     customerNotes: customerNotes.trim(), promoId: appliedPromo?.id || '', promoCode: appliedPromo?.code || '',
@@ -514,6 +521,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       setErrorMsg('Harap masukkan alamat lengkap untuk kedatangan terapis.');
       return;
     }
+    if (!effectiveCustomerGender) {
+      setErrorMsg('Harap pilih gender Anda agar terapis dapat ditugaskan sesuai.');
+      return;
+    }
 
     if (isCalculatingRoute) {
       setErrorMsg('Sedang menghitung rute lokasi Anda. Mohon tunggu...');
@@ -613,7 +624,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         scheduleDate,
         scheduleTime,
         scheduleAt: `${scheduleDate} ${scheduleTime}`,
-        genderPreference,
+        genderPreference: 'Bebas',
+        customerGender: effectiveCustomerGender,
         address: address.trim(),
         latitude,
         longitude,
@@ -664,6 +676,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       if (!isCurrentSubmission()) return;
       checkoutAttemptRef.current = null;
       void trackMetaAdsAction('booking_submitted', { entityId: newBooking.id, value: newBooking.totalAmount });
+      // Persist the one-time gender choice so the account supplies it on future bookings.
+      if (currentCustomer && !currentCustomer.gender && effectiveCustomerGender) {
+        updateCustomerProfile({ gender: effectiveCustomerGender }).catch(() => {});
+      }
       setSubmittedBooking(newBooking);
       onBookingSuccess(newBooking);
     } catch (err: any) {
@@ -872,6 +888,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                           Terfavorit
                         </span>
                       )}
+                      {isSelected && (
+                        <span className="absolute -top-2.5 left-3 bg-[#082A4F] text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          Dipilih
+                        </span>
+                      )}
 
                       <div>
                         <div className="flex items-center justify-between">
@@ -898,13 +920,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               </div>
             </div>
 
-            {/* Step 2: Jadwal & Preferensi Terapis */}
+            {/* Step 2: Jadwal Kedatangan */}
             <div className="space-y-4">
               <label className="text-sm sm:text-base font-bold text-[#082A4F] flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-[#082A4F] text-white text-xs flex items-center justify-center font-sans font-bold">
                   2
                 </span>
-                Jadwal Kedatangan & Preferensi Terapis
+                Jadwal Kedatangan
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -967,32 +989,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 </div>
               </div>
 
-              {/* Preferensi Gender Terapis */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1">
-                  <HeartHandshake className="w-3.5 h-3.5 text-[#082A4F]" />
-                  Preferensi Gender Terapis:
-                </label>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                  {(['Bebas', 'Perempuan', 'Laki-laki'] as GenderPreference[]).map((pref) => (
-                    <button
-                      key={pref}
-                      type="button"
-                      onClick={() => setGenderPreference(pref)}
-                      className={`min-h-[44px] py-2.5 px-3 text-xs font-semibold rounded-xl border transition text-center cursor-pointer active:scale-95 ${
-                        genderPreference === pref
-                          ? 'bg-[#082A4F] text-white border-[#082A4F] shadow-sm'
-                          : 'bg-[#FAF9F6] text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {pref === 'Bebas' ? '✨ Bebas (Tersedia)' : pref}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1.5">
-                  Supervisor kami akan menugaskan terapis profesional sesuai preferensi kenyamanan Anda.
-                </p>
-              </div>
+              {/* Preferensi Gender Terapis dihapus: terapis ditugaskan supervisor sesuai gender pelanggan */}
             </div>
 
             {/* Step 3: Alamat & Kontak Pelanggan */}
@@ -1055,6 +1052,40 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white"
                   />
                 </div>
+              </div>
+
+              {/* Gender Pelanggan: dari data akun jika login, wajib dipilih jika belum ada */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-[#082A4F]" />
+                  Gender Pelanggan: <span className="text-red-500">*</span>
+                </label>
+                {currentCustomer?.gender ? (
+                  <div className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium text-slate-700 flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    <span>{currentCustomer.gender} (dari data akun)</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                    {(['Laki-laki', 'Perempuan'] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setCustomerGender(g)}
+                        className={`min-h-[44px] py-2.5 px-3 text-xs font-semibold rounded-xl border transition text-center cursor-pointer active:scale-95 ${
+                          customerGender === g
+                            ? 'bg-[#082A4F] text-white border-[#082A4F] shadow-sm'
+                            : 'bg-[#FAF9F6] text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Terapis akan ditugaskan oleh supervisor sesuai gender Anda.
+                </p>
               </div>
 
               {/* Quick Saved Addresses Selection for Authenticated Customer */}
