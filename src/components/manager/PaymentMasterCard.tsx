@@ -408,18 +408,18 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
               <input
                 type="checkbox"
                 disabled={isReadOnly}
-                checked={paymentSettings.qris.enabled}
+                checked={Boolean(paymentSettings.qris?.enabled)}
                 onChange={() =>
                   setPaymentSettings({
                     ...paymentSettings,
-                    qris: { ...paymentSettings.qris, enabled: !paymentSettings.qris.enabled },
+                    qris: { ...paymentSettings.qris, enabled: !paymentSettings.qris?.enabled },
                   })
                 }
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
               <span className="ml-2 text-xs font-bold text-slate-700">
-                {paymentSettings.qris.enabled ? 'QRIS Aktif' : 'QRIS Nonaktif'}
+                {paymentSettings.qris?.enabled ? 'QRIS Aktif' : 'QRIS Nonaktif'}
               </span>
             </label>
           </div>
@@ -427,9 +427,9 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 p-5 rounded-xl border border-slate-200/80">
             {/* QR Preview Column */}
             <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl border border-slate-200 text-center">
-              {paymentSettings.qris.staticQrImageUrl ? (
+              {paymentSettings.qris?.staticQrImageUrl || paymentSettings.qris?.imageUrl ? (
                 <img
-                  src={paymentSettings.qris.staticQrImageUrl}
+                  src={paymentSettings.qris?.staticQrImageUrl || paymentSettings.qris?.imageUrl}
                   alt="QRIS Preview"
                   className="w-44 h-44 object-contain rounded-lg border border-slate-200 mb-2 p-1 bg-white"
                   referrerPolicy="no-referrer"
@@ -445,13 +445,13 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 </div>
               )}
               <span className="text-xs font-bold text-slate-800">
-                {paymentSettings.qris.merchantName || 'SENZU REFLEXOLOGY & FAMILY MASSAGE'}
+                {paymentSettings.qris?.merchantName || 'SENZU REFLEXOLOGY & FAMILY MASSAGE'}
               </span>
               <span className="text-[10px] text-slate-500 font-mono mt-0.5">
-                NMID: {paymentSettings.qris.nmid || 'ID1025449341847'}
+                NMID: {paymentSettings.qris?.nmid || 'ID1025449341847'}
               </span>
               <span className="text-[10px] text-emerald-700 font-semibold mt-1">
-                A.N: {paymentSettings.qris.accountHolder || 'PT KSBONE UNTUK KITA'}
+                A.N: {paymentSettings.qris?.accountHolder || 'PT KSBONE UNTUK KITA'}
               </span>
             </div>
 
@@ -463,7 +463,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                   <input
                     type="text"
                     disabled={isReadOnly}
-                    value={paymentSettings.qris.merchantName}
+                    value={paymentSettings.qris?.merchantName ?? ''}
                     onChange={(e) =>
                       setPaymentSettings({
                         ...paymentSettings,
@@ -482,7 +482,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                   <input
                     type="text"
                     disabled={isReadOnly}
-                    value={paymentSettings.qris.nmid}
+                    value={paymentSettings.qris?.nmid ?? ''}
                     onChange={(e) =>
                       setPaymentSettings({
                         ...paymentSettings,
@@ -499,7 +499,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                   <input
                     type="text"
                     disabled={isReadOnly}
-                    value={paymentSettings.qris.acquirer}
+                    value={paymentSettings.qris?.acquirer ?? ''}
                     onChange={(e) =>
                       setPaymentSettings({
                         ...paymentSettings,
@@ -517,7 +517,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                   <input
                     type="text"
                     disabled={isReadOnly}
-                    value={paymentSettings.qris.accountHolder}
+                    value={paymentSettings.qris?.accountHolder ?? ''}
                     onChange={(e) =>
                       setPaymentSettings({
                         ...paymentSettings,
@@ -537,7 +537,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 <input
                   type="text"
                   disabled={isReadOnly}
-                  value={paymentSettings.qris.staticQrImageUrl}
+                  value={paymentSettings.qris?.staticQrImageUrl ?? paymentSettings.qris?.imageUrl ?? ''}
                   onChange={(e) =>
                     setPaymentSettings({
                       ...paymentSettings,
@@ -558,7 +558,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 <textarea
                   rows={2}
                   disabled={isReadOnly}
-                  value={paymentSettings.qris.instruction}
+                  value={paymentSettings.qris?.instruction ?? ''}
                   onChange={(e) =>
                     setPaymentSettings({
                       ...paymentSettings,
@@ -662,7 +662,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Pilihan Bank</label>
                 <select
-                  value={bankFormData.bankCode}
+                  value={bankFormData.bankCode ?? 'BNI'}
                   onChange={(e) => {
                     const code = e.target.value;
                     let defaultName = `Bank ${code}`;
@@ -691,7 +691,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nama Tampilan Bank</label>
                 <input
                   type="text"
-                  value={bankFormData.bankName}
+                  value={bankFormData.bankName ?? ''}
                   onChange={(e) => setBankFormData({ ...bankFormData, bankName: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   required
@@ -704,7 +704,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={bankFormData.accountNumber}
+                  value={bankFormData.accountNumber ?? ''}
                   onChange={(e) => setBankFormData({ ...bankFormData, accountNumber: e.target.value })}
                   placeholder="Contoh: 005901003894560 atau 7009999772"
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono font-bold tracking-wider focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -719,7 +719,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1">Atas Nama Rekening</label>
                 <input
                   type="text"
-                  value={bankFormData.accountHolder}
+                  value={bankFormData.accountHolder ?? ''}
                   onChange={(e) => setBankFormData({ ...bankFormData, accountHolder: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   required
@@ -730,7 +730,7 @@ export const PaymentMasterCard: React.FC<PaymentMasterCardProps> = ({
                 <input
                   type="checkbox"
                   id="bankEnabledModal"
-                  checked={bankFormData.enabled}
+                  checked={Boolean(bankFormData.enabled)}
                   onChange={(e) => setBankFormData({ ...bankFormData, enabled: e.target.checked })}
                   className="w-4 h-4 text-amber-600 rounded border-slate-300"
                 />

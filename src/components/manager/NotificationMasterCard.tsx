@@ -188,7 +188,7 @@ export const NotificationMasterCard: React.FC<NotificationMasterCardProps> = ({
                 <input
                   type="text"
                   disabled={isReadOnly}
-                  value={config.customerServiceWhatsApp}
+                  value={config.customerServiceWhatsApp ?? ''}
                   onChange={(e) => setConfig({ ...config, customerServiceWhatsApp: e.target.value })}
                   placeholder="+6289654623347"
                   className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-slate-100 font-semibold"
@@ -214,7 +214,7 @@ export const NotificationMasterCard: React.FC<NotificationMasterCardProps> = ({
               <input
                 type="email"
                 disabled={isReadOnly}
-                value={config.officialEmail}
+                value={config.officialEmail ?? ''}
                 onChange={(e) => setConfig({ ...config, officialEmail: e.target.value })}
                 placeholder="senzureflexology@gmail.com"
                 className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-slate-100"

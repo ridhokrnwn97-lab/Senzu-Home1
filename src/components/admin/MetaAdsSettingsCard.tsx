@@ -78,19 +78,19 @@ export function MetaAdsSettingsCard({ currentUser }: { currentUser: StaffUser })
         {loading && <p role="status" className="text-sm text-slate-500">Memuat pengaturan Meta Pixel...</p>}
         {readOnly && <p className="text-xs text-amber-700">Mode lihat saja. Pengaturan dapat diubah oleh Manager atau Admin aktif.</p>}
         <fieldset disabled={disabled} className="min-w-0 space-y-6">
-          <label className="flex items-center gap-3 text-sm font-semibold text-[#082A4F]"><input type="checkbox" checked={draft.enabled} onChange={event => { setMessage(''); setDraft(value => ({ ...value, enabled: event.target.checked })); }} /> Aktifkan Meta Pixel</label>
+          <label className="flex items-center gap-3 text-sm font-semibold text-[#082A4F]"><input type="checkbox" checked={Boolean(draft.enabled)} onChange={event => { setMessage(''); setDraft(value => ({ ...value, enabled: event.target.checked })); }} /> Aktifkan Meta Pixel</label>
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-bold text-[#082A4F]">Daftar Pixel</h4><button type="button" className={buttonClass} onClick={addPixel} disabled={disabled || draft.pixels.length >= 10}><Plus className="h-4 w-4" /> Tambah Pixel</button></div>
             {!draft.pixels.length && <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Belum ada Pixel. Tambahkan Pixel ID dari Meta Events Manager.</p>}
             {draft.pixels.map((pixel, index) => (
               <div key={pixel.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={pixel.enabled} onChange={event => updatePixel(pixel.id, { enabled: event.target.checked })} /> Pixel {index + 1} aktif</label>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={Boolean(pixel.enabled)} onChange={event => updatePixel(pixel.id, { enabled: event.target.checked })} /> Pixel {index + 1} aktif</label>
                   <button type="button" className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => removePixel(pixel.id)} aria-label={`Hapus Pixel ${index + 1}`}><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="space-y-1 text-xs font-semibold text-slate-600">Nama Pixel<input className={inputClass} value={pixel.name} maxLength={80} onChange={event => updatePixel(pixel.id, { name: event.target.value })} placeholder="Contoh: Senzu Home Utama" /></label>
-                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pixel ID<input className={inputClass} value={pixel.pixelId} inputMode="numeric" maxLength={30} onChange={event => updatePixel(pixel.id, { pixelId: event.target.value.trim() })} placeholder="Masukkan ID angka dari Meta" /></label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">Nama Pixel<input className={inputClass} value={pixel.name ?? ''} maxLength={80} onChange={event => updatePixel(pixel.id, { name: event.target.value })} placeholder="Contoh: Senzu Home Utama" /></label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pixel ID<input className={inputClass} value={pixel.pixelId ?? ''} inputMode="numeric" maxLength={30} onChange={event => updatePixel(pixel.id, { pixelId: event.target.value.trim() })} placeholder="Masukkan ID angka dari Meta" /></label>
                 </div>
               </div>
             ))}
@@ -101,15 +101,15 @@ export function MetaAdsSettingsCard({ currentUser }: { currentUser: StaffUser })
             {draft.events.map((rule, index) => (
               <div key={rule.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={rule.enabled} onChange={event => updateEvent(rule.id, { enabled: event.target.checked })} /> Peristiwa {index + 1} aktif</label>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={Boolean(rule.enabled)} onChange={event => updateEvent(rule.id, { enabled: event.target.checked })} /> Peristiwa {index + 1} aktif</label>
                   <button type="button" className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => { setMessage(''); setDraft(value => ({ ...value, events: value.events.filter(item => item.id !== rule.id) })); }} aria-label={`Hapus Peristiwa ${index + 1}`}><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pemicu<select className={inputClass} value={rule.trigger} onChange={event => updateEvent(rule.id, { trigger: event.target.value as MetaAdsEvent['trigger'] })}>{Object.entries(META_ADS_TRIGGERS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                  <label className="space-y-1 text-xs font-semibold text-slate-600">Jenis Peristiwa<select className={inputClass} value={rule.kind} onChange={event => updateEvent(rule.id, { kind: event.target.value as 'standard' | 'custom', eventName: event.target.value === 'standard' ? 'AddToCart' : 'SenzuEvent' })}><option value="standard">Standard Meta</option><option value="custom">Custom</option></select></label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pemicu<select className={inputClass} value={rule.trigger || 'booking_submitted'} onChange={event => updateEvent(rule.id, { trigger: event.target.value as MetaAdsEvent['trigger'] })}>{Object.entries(META_ADS_TRIGGERS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">Jenis Peristiwa<select className={inputClass} value={rule.kind || 'standard'} onChange={event => updateEvent(rule.id, { kind: event.target.value as 'standard' | 'custom', eventName: event.target.value === 'standard' ? 'AddToCart' : 'SenzuEvent' })}><option value="standard">Standard Meta</option><option value="custom">Custom</option></select></label>
                   <label className="space-y-1 text-xs font-semibold text-slate-600">Nama Peristiwa{rule.kind === 'standard'
-                    ? <select className={inputClass} value={rule.eventName} onChange={event => updateEvent(rule.id, { eventName: event.target.value })}>{META_STANDARD_EVENTS.map(name => <option key={name} value={name}>{name}</option>)}</select>
-                    : <input className={inputClass} value={rule.eventName} maxLength={40} onChange={event => updateEvent(rule.id, { eventName: event.target.value })} placeholder="Contoh: BookingInterest" />}</label>
+                    ? <select className={inputClass} value={rule.eventName ?? 'AddToCart'} onChange={event => updateEvent(rule.id, { eventName: event.target.value })}>{META_STANDARD_EVENTS.map(name => <option key={name} value={name}>{name}</option>)}</select>
+                    : <input className={inputClass} value={rule.eventName ?? ''} maxLength={40} onChange={event => updateEvent(rule.id, { eventName: event.target.value })} placeholder="Contoh: BookingInterest" />}</label>
                   <label className="space-y-1 text-xs font-semibold text-slate-600">Target Pixel<select className={inputClass} value={rule.pixelIds === 'all' ? 'all' : rule.pixelIds[0] || ''} onChange={event => updateEvent(rule.id, { pixelIds: event.target.value === 'all' ? 'all' : event.target.value ? [event.target.value] : [] })}><option value="all">Semua Pixel aktif</option><option value="">Tanpa target</option>{draft.pixels.map(pixel => <option key={pixel.id} value={pixel.id}>{pixel.name || 'Pixel tanpa nama'}</option>)}</select></label>
                 </div>
               </div>

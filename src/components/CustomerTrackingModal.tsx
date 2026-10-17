@@ -309,7 +309,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
     return clone as Booking;
   };
 
-  const [bookingCode, setBookingCode] = useState(initialCode);
+  const [bookingCode, setBookingCode] = useState(initialCode || '');
   const [phone, setPhone] = useState(() => {
     if (isCustomerPreviewMode || !isCustomerAuthenticated) return '';
     return currentCustomer?.phone || '';

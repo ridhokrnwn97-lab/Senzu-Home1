@@ -333,7 +333,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
                       <span className="text-[11px] text-slate-500 font-medium">Shift:</span>
                       <input
                         type="time"
-                        value={conf.shiftStart}
+                        value={conf.shiftStart ?? '10:00'}
                         onChange={(e) =>
                           handleUpdateDay(day, { shiftStart: e.target.value })
                         }
@@ -342,7 +342,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
                       <span className="text-slate-400">-</span>
                       <input
                         type="time"
-                        value={conf.shiftEnd}
+                        value={conf.shiftEnd ?? '22:00'}
                         onChange={(e) =>
                           handleUpdateDay(day, { shiftEnd: e.target.value })
                         }
@@ -356,7 +356,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
                       <label className="flex items-center gap-1 text-[11px] cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={conf.hasBreak}
+                          checked={Boolean(conf.hasBreak)}
                           onChange={(e) =>
                             handleUpdateDay(day, { hasBreak: e.target.checked })
                           }

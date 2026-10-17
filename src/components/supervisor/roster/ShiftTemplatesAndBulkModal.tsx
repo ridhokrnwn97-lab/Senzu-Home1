@@ -597,7 +597,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
               <input
                 type="text"
                 placeholder="cth: Shift Pagi, Shift Siang 12-22, dsb."
-                value={editingTemplateData.name}
+                value={editingTemplateData.name ?? ''}
                 onChange={(e) =>
                   setEditingTemplateData({ ...editingTemplateData, name: e.target.value })
                 }
@@ -610,7 +610,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                 <label className="font-bold text-slate-700 block mb-1">Jam Masuk:</label>
                 <input
                   type="time"
-                  value={editingTemplateData.shiftStart}
+                  value={editingTemplateData.shiftStart ?? '10:00'}
                   onChange={(e) =>
                     setEditingTemplateData({ ...editingTemplateData, shiftStart: e.target.value })
                   }
@@ -621,7 +621,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                 <label className="font-bold text-slate-700 block mb-1">Jam Pulang:</label>
                 <input
                   type="time"
-                  value={editingTemplateData.shiftEnd}
+                  value={editingTemplateData.shiftEnd ?? '22:00'}
                   onChange={(e) =>
                     setEditingTemplateData({ ...editingTemplateData, shiftEnd: e.target.value })
                   }
@@ -634,7 +634,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
               <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                 <input
                   type="checkbox"
-                  checked={editingTemplateData.hasBreak}
+                  checked={Boolean(editingTemplateData.hasBreak)}
                   onChange={(e) =>
                     setEditingTemplateData({
                       ...editingTemplateData,

@@ -281,13 +281,13 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
     setEditingStaff(st);
     const th = therapistMap[st.uid] || (st.therapistId ? therapistMap[st.therapistId] : undefined);
     setFormData({
-      uid: st.uid,
+      uid: st.uid || '',
       employeeCode: st.employeeCode || '',
-      name: st.name,
-      displayName: st.displayName || st.name,
-      email: st.email,
+      name: st.name || '',
+      displayName: st.displayName || st.name || '',
+      email: st.email || '',
       phone: st.phone ? formatWhatsAppDisplay(st.phone).replace('+62 ', '0') : '',
-      role: st.role,
+      role: st.role || 'css',
       gender: (st.gender as 'Perempuan' | 'Laki-laki') || '',
       branchId: st.branchId || branches[0]?.id || 'PLG001',
       branchName: st.branchName || branches[0]?.name || 'Senzu Home Palembang R-01',
@@ -1188,7 +1188,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={formData.employeeCode}
+                    value={formData.employeeCode ?? ''}
                     onChange={(e) => setFormData({ ...formData, employeeCode: e.target.value.toUpperCase() })}
                     placeholder="Contoh: MGR001, SPV001..."
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1201,7 +1201,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                     Cabang Operasional <span className="text-rose-500">*</span>
                   </label>
                   <select
-                    value={formData.branchId}
+                    value={formData.branchId ?? 'PLG001'}
                     onChange={(e) => handleBranchChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 bg-white"
                   >
@@ -1223,7 +1223,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={formData.name}
+                    value={formData.name ?? ''}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Contoh: Hendra Wijaya"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1236,7 +1236,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={formData.displayName}
+                    value={formData.displayName ?? ''}
                     onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                     placeholder="Contoh: Hendra W."
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1254,7 +1254,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   <input
                     type="tel"
                     required
-                    value={formData.phone}
+                    value={formData.phone ?? ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="Contoh: 081273445500"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1269,7 +1269,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   <input
                     type="email"
                     required
-                    value={formData.email}
+                    value={formData.email ?? ''}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     placeholder="Contoh: hendra@senzuhome.com"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1366,7 +1366,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                 <label className="block font-semibold text-slate-700 mb-1">Catatan Internal Perusahaan</label>
                 <textarea
                   rows={2}
-                  value={formData.internalNotes}
+                  value={formData.internalNotes ?? ''}
                   onChange={(e) => setFormData({ ...formData, internalNotes: e.target.value })}
                   placeholder="Catatan penugasan, riwayat kontrak, atau info khusus staf..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1384,7 +1384,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.isActive}
+                    checked={Boolean(formData.isActive)}
                     onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                     className="sr-only peer"
                   />

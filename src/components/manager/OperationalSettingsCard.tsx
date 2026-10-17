@@ -300,7 +300,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                 <input
                   type="time"
                   disabled={isReadOnly}
-                  value={settings.operatingHoursStart}
+                  value={settings.operatingHoursStart ?? '10:00'}
                   onChange={(e) => handleFieldChange('operatingHoursStart', e.target.value)}
                   className="w-full text-xs px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-stone-100"
                   required
@@ -315,7 +315,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                 <input
                   type="time"
                   disabled={isReadOnly}
-                  value={settings.operatingHoursEnd}
+                  value={settings.operatingHoursEnd ?? '22:00'}
                   onChange={(e) => handleFieldChange('operatingHoursEnd', e.target.value)}
                   className="w-full text-xs px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-stone-100"
                   required
@@ -837,7 +837,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                 <input
                   type="checkbox"
                   disabled={isReadOnly}
-                  checked={settings.supervisorAlertsEnabled}
+                  checked={Boolean(settings.supervisorAlertsEnabled)}
                   onChange={(e) => handleFieldChange('supervisorAlertsEnabled', e.target.checked)}
                   className="sr-only peer"
                 />
@@ -1057,7 +1057,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                   <input
                     type="checkbox"
                     disabled={isReadOnly}
-                    checked={settings.customerNotificationsEnabled}
+                    checked={Boolean(settings.customerNotificationsEnabled)}
                     onChange={(e) => handleFieldChange('customerNotificationsEnabled', e.target.checked)}
                     className="sr-only peer"
                   />
@@ -1080,7 +1080,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                   <input
                     type="checkbox"
                     disabled={isReadOnly}
-                    checked={settings.whatsappConfirmationEnabled}
+                    checked={Boolean(settings.whatsappConfirmationEnabled)}
                     onChange={(e) => handleFieldChange('whatsappConfirmationEnabled', e.target.checked)}
                     className="sr-only peer"
                   />
@@ -1101,7 +1101,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                   <input
                     type="checkbox"
                     disabled={isReadOnly}
-                    checked={settings.whatsappOnTheWayEnabled}
+                    checked={Boolean(settings.whatsappOnTheWayEnabled)}
                     onChange={(e) => handleFieldChange('whatsappOnTheWayEnabled', e.target.checked)}
                     className="sr-only peer"
                   />
@@ -1122,7 +1122,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                   <input
                     type="checkbox"
                     disabled={isReadOnly}
-                    checked={settings.whatsappNearbyEnabled}
+                    checked={Boolean(settings.whatsappNearbyEnabled)}
                     onChange={(e) => handleFieldChange('whatsappNearbyEnabled', e.target.checked)}
                     className="sr-only peer"
                   />
@@ -1143,7 +1143,7 @@ export const OperationalSettingsCard: React.FC<OperationalSettingsCardProps> = (
                   <input
                     type="checkbox"
                     disabled={isReadOnly}
-                    checked={settings.whatsappCompletedEnabled}
+                    checked={Boolean(settings.whatsappCompletedEnabled)}
                     onChange={(e) => handleFieldChange('whatsappCompletedEnabled', e.target.checked)}
                     className="sr-only peer"
                   />

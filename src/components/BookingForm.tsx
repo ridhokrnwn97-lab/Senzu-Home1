@@ -102,7 +102,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsApp, setCustomerWhatsApp] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [selectedArea, setSelectedArea] = useState<string>(PALEMBANG_AREAS[0]);
+  const [selectedArea, setSelectedArea] = useState<string>(PALEMBANG_AREAS[0] || '');
   const [address, setAddress] = useState('');
   const [latitude, setLatitude] = useState<number>(settings?.baseLatitude ?? -2.976074);
   const [longitude, setLongitude] = useState<number>(settings?.baseLongitude ?? 104.757305);
@@ -203,13 +203,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     if (currentCustomer) {
       if (!repeatData) {
         if (currentCustomer.displayName || currentCustomer.name) {
-          setCustomerName((prev) => prev || currentCustomer.displayName || currentCustomer.name);
+          setCustomerName((prev) => prev || currentCustomer.displayName || currentCustomer.name || '');
         }
         if (currentCustomer.phone) {
-          setCustomerWhatsApp((prev) => prev || currentCustomer.phone);
+          setCustomerWhatsApp((prev) => prev || currentCustomer.phone || '');
         }
         if (currentCustomer.email) {
-          setCustomerEmail((prev) => prev || currentCustomer.email);
+          setCustomerEmail((prev) => prev || currentCustomer.email || '');
         }
       }
       getCustomerSavedAddresses(currentCustomer.id)
@@ -218,10 +218,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           if (!repeatData && addrs.length > 0) {
             const defaultAddr = addrs.find((a) => a.isDefault) || addrs[0];
             if (defaultAddr) {
-              setAddress((prev) => prev || defaultAddr.address);
-              if (defaultAddr.area) setSelectedArea((prev) => prev || defaultAddr.area);
+              if (defaultAddr.address) setAddress((prev) => prev || defaultAddr.address || '');
+              if (defaultAddr.area) setSelectedArea((prev) => prev || defaultAddr.area || '');
               const noteVal = defaultAddr.addressNotes || defaultAddr.notes;
-              if (noteVal) setAddressNotes((prev) => prev || noteVal);
+              if (noteVal) setAddressNotes((prev) => prev || noteVal || '');
               if (defaultAddr.latitude != null) setLatitude((prev) => prev ?? defaultAddr.latitude);
               if (defaultAddr.longitude != null) setLongitude((prev) => prev ?? defaultAddr.longitude);
               if (defaultAddr.placeId) setPlaceId((prev) => prev || defaultAddr.placeId);
@@ -1014,7 +1014,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     id="input-customer-name"
                     type="text"
                     placeholder="Contoh: Ibu Amanda / Bpk. David"
-                    value={customerName}
+                    value={customerName ?? ''}
                     onChange={(e) => setCustomerName(e.target.value)}
                     required
                     className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
@@ -1030,7 +1030,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     id="input-customer-wa"
                     type="tel"
                     placeholder="Contoh: 08965462xxxx"
-                    value={customerWhatsApp}
+                    value={customerWhatsApp ?? ''}
                     onChange={(e) => setCustomerWhatsApp(e.target.value)}
                     required
                     className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
@@ -1050,7 +1050,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     id="input-customer-email"
                     type="email"
                     placeholder="email@domain.com"
-                    value={customerEmail}
+                    value={customerEmail ?? ''}
                     onChange={(e) => setCustomerEmail(e.target.value)}
                     className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white"
                   />
@@ -1351,11 +1351,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       </span>
                       <input
                         type="checkbox"
-                        checked={isRedeemingPoints}
+                        checked={Boolean(isRedeemingPoints)}
                         onChange={(e) => {
                           setIsRedeemingPoints(e.target.checked);
                           if (e.target.checked) {
-                            setPointsToRedeem(customerLoyalty.pointsBalance);
+                            setPointsToRedeem(customerLoyalty.pointsBalance || 0);
                           } else {
                             setPointsToRedeem(0);
                           }
@@ -1375,9 +1375,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       <input
                         type="range"
                         min={loyaltySettings?.minimumPointsToRedeem || 50}
-                        max={customerLoyalty.pointsBalance}
+                        max={customerLoyalty.pointsBalance || 0}
                         step={10}
-                        value={pointsToRedeem}
+                        value={pointsToRedeem ?? 0}
                         onChange={(e) => setPointsToRedeem(Number(e.target.value))}
                         className="w-full accent-[#082A4F] cursor-pointer"
                       />

@@ -285,7 +285,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
               ref={inputRef}
               type="text"
               required
-              value={address}
+              value={address ?? ''}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="Ketik nama jalan, perumahan, atau gedung di Palembang..."
               className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 transition-all shadow-sm"
@@ -325,7 +325,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
         </label>
         <div className="relative">
           <select
-            value={area}
+            value={area || PALEMBANG_AREAS[0]}
             onChange={(e) => setArea(e.target.value)}
             className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 shadow-sm appearance-none cursor-pointer"
           >
@@ -395,7 +395,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
         </label>
         <input
           type="text"
-          value={addressNotes}
+          value={addressNotes ?? ''}
           onChange={(e) => setAddressNotes(e.target.value)}
           placeholder="Contoh: Seberang Indomaret, rumah pagar hitam no. 12, ada pohon mangga"
           className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 placeholder:text-slate-400 shadow-sm"
@@ -908,7 +908,7 @@ const AutocompleteGoogleInput: React.FC<AutocompleteGoogleInputProps> = ({
           ref={inputRef}
           type="text"
           required
-          value={address}
+          value={address ?? ''}
           onChange={(e) => setAddress(e.target.value)}
           onFocus={() => {
             if (suggestions.length > 0) setIsSuggestionOpen(true);

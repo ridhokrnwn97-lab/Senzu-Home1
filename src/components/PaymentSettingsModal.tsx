@@ -172,7 +172,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={settings.qris.enabled}
+                    checked={Boolean(settings.qris?.enabled)}
                     onChange={(e) => handleQrisChange('enabled', e.target.checked)}
                     className="rounded text-[#082A4F] focus:ring-[#082A4F]"
                   />
@@ -185,7 +185,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                   <label className="block text-slate-600 font-medium mb-1">Nama Merchant:</label>
                   <input
                     type="text"
-                    value={settings.qris.merchantName}
+                    value={settings.qris?.merchantName ?? ''}
                     onChange={(e) => handleQrisChange('merchantName', e.target.value)}
                     required
                     className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
@@ -195,7 +195,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                   <label className="block text-slate-600 font-medium mb-1">NMID Resmi:</label>
                   <input
                     type="text"
-                    value={settings.qris.nmid}
+                    value={settings.qris?.nmid ?? ''}
                     onChange={(e) => handleQrisChange('nmid', e.target.value)}
                     required
                     className="w-full p-2.5 rounded-xl border border-slate-300 font-mono font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
@@ -205,7 +205,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                   <label className="block text-slate-600 font-medium mb-1">Atas Nama Rekening:</label>
                   <input
                     type="text"
-                    value={settings.qris.accountHolder}
+                    value={settings.qris?.accountHolder ?? ''}
                     onChange={(e) => handleQrisChange('accountHolder', e.target.value)}
                     required
                     className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
@@ -215,7 +215,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                   <label className="block text-slate-600 font-medium mb-1">Acquirer / Bank:</label>
                   <input
                     type="text"
-                    value={settings.qris.acquirer}
+                    value={settings.qris?.acquirer ?? ''}
                     onChange={(e) => handleQrisChange('acquirer', e.target.value)}
                     required
                     className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"

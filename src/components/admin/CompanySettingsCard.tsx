@@ -41,29 +41,29 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
 
   // Form fields
-  const [legalName, setLegalName] = useState(company.companyLegalName);
-  const [brandName, setBrandName] = useState(company.brandName);
-  const [email, setEmail] = useState(company.officialEmail);
-  const [whatsapp, setWhatsapp] = useState(company.customerServiceWhatsApp);
-  const [timezone, setTimezone] = useState(company.timezone);
-  const [status, setStatus] = useState(company.status);
-  const [address, setAddress] = useState(company.address || '');
-  const [taxId, setTaxId] = useState(company.taxId || '');
-  const [nib, setNib] = useState(company.businessRegistrationNumber || '');
-  const [notes, setNotes] = useState(company.notes || '');
+  const [legalName, setLegalName] = useState(company?.companyLegalName || '');
+  const [brandName, setBrandName] = useState(company?.brandName || '');
+  const [email, setEmail] = useState(company?.officialEmail || '');
+  const [whatsapp, setWhatsapp] = useState(company?.customerServiceWhatsApp || '');
+  const [timezone, setTimezone] = useState(company?.timezone || 'Asia/Jakarta');
+  const [status, setStatus] = useState(company?.status || 'ACTIVE');
+  const [address, setAddress] = useState(company?.address || '');
+  const [taxId, setTaxId] = useState(company?.taxId || '');
+  const [nib, setNib] = useState(company?.businessRegistrationNumber || '');
+  const [notes, setNotes] = useState(company?.notes || '');
 
   const handleStartEdit = () => {
     if (isReadOnly) return;
-    setLegalName(company.companyLegalName);
-    setBrandName(company.brandName);
-    setEmail(company.officialEmail);
-    setWhatsapp(company.customerServiceWhatsApp);
-    setTimezone(company.timezone);
-    setStatus(company.status);
-    setAddress(company.address || '');
-    setTaxId(company.taxId || '');
-    setNib(company.businessRegistrationNumber || '');
-    setNotes(company.notes || '');
+    setLegalName(company?.companyLegalName || '');
+    setBrandName(company?.brandName || '');
+    setEmail(company?.officialEmail || '');
+    setWhatsapp(company?.customerServiceWhatsApp || '');
+    setTimezone(company?.timezone || 'Asia/Jakarta');
+    setStatus(company?.status || 'ACTIVE');
+    setAddress(company?.address || '');
+    setTaxId(company?.taxId || '');
+    setNib(company?.businessRegistrationNumber || '');
+    setNotes(company?.notes || '');
     setErrorMsg('');
     setIsEditing(true);
   };

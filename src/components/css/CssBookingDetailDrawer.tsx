@@ -128,8 +128,8 @@ export const CssBookingDetailDrawer: React.FC<CssBookingDetailDrawerProps> = ({
     }
 
     // Initialize edit address
-    setEditAddress(booking.address);
-    setEditArea(booking.area);
+    setEditAddress(booking.address || '');
+    setEditArea(booking.area || '');
 
     // Initialize WA message
     const initialWa = generateWhatsAppMessage('confirm_payment_details', booking);

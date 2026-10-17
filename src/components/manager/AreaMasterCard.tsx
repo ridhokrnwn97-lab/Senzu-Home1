@@ -697,7 +697,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                 <input
                   type="text"
                   disabled={isReadOnly}
-                  value={areaConfig.baseLocationName}
+                  value={areaConfig.baseLocationName ?? ''}
                   onChange={(e) => setAreaConfig({ ...areaConfig, baseLocationName: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-slate-100"
                 />
@@ -709,7 +709,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   type="number"
                   step="any"
                   disabled={isReadOnly}
-                  value={areaConfig.baseLatitude}
+                  value={areaConfig.baseLatitude ?? 0}
                   onChange={(e) => setAreaConfig({ ...areaConfig, baseLatitude: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono disabled:bg-slate-100"
                 />
@@ -721,7 +721,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   type="number"
                   step="any"
                   disabled={isReadOnly}
-                  value={areaConfig.baseLongitude}
+                  value={areaConfig.baseLongitude ?? 0}
                   onChange={(e) => setAreaConfig({ ...areaConfig, baseLongitude: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono disabled:bg-slate-100"
                 />
@@ -733,7 +733,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   type="number"
                   step="5000"
                   disabled={isReadOnly}
-                  value={areaConfig.fallbackHomeServiceFee}
+                  value={areaConfig.fallbackHomeServiceFee ?? 0}
                   onChange={(e) => setAreaConfig({ ...areaConfig, fallbackHomeServiceFee: parseInt(e.target.value, 10) || 0 })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold text-amber-900 disabled:bg-slate-100"
                 />
@@ -772,7 +772,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                             type="number"
                             step="5000"
                             disabled={isReadOnly}
-                            value={tier.fee}
+                            value={tier.fee ?? 0}
                             onChange={(e) => handleUpdateTierFee(idx, parseInt(e.target.value, 10) || 0)}
                             className="w-28 px-2 py-1 rounded border border-slate-300 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:bg-slate-100"
                           />
@@ -837,7 +837,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                     type="text"
                     required
                     placeholder="Contoh: Ilir Barat I / Demang Daun"
-                    value={modalForm.name}
+                    value={modalForm.name ?? ''}
                     onChange={(e) => setModalForm({ ...modalForm, name: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
@@ -851,7 +851,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                     type="text"
                     required
                     placeholder="Contoh: Ilir Barat I"
-                    value={modalForm.kecamatan}
+                    value={modalForm.kecamatan ?? ''}
                     onChange={(e) => setModalForm({ ...modalForm, kecamatan: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
@@ -862,7 +862,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={modalForm.city}
+                    value={modalForm.city ?? ''}
                     onChange={(e) => setModalForm({ ...modalForm, city: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none uppercase"
                   />
@@ -873,7 +873,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={modalForm.province}
+                    value={modalForm.province ?? ''}
                     onChange={(e) => setModalForm({ ...modalForm, province: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none uppercase"
                   />
@@ -887,7 +887,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={modalForm.homeServiceEnabled}
+                      checked={Boolean(modalForm.homeServiceEnabled)}
                       onChange={(e) => setModalForm({ ...modalForm, homeServiceEnabled: e.target.checked })}
                       className="sr-only peer"
                     />
@@ -910,7 +910,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                       <input
                         type="text"
                         placeholder="Contoh: 25000 (Kosongkan jika belum diatur)"
-                        value={modalForm.homeServiceFeeInput}
+                        value={modalForm.homeServiceFeeInput ?? ''}
                         onChange={(e) => {
                           const clean = e.target.value.replace(/\D/g, '');
                           setModalForm({ ...modalForm, homeServiceFeeInput: clean });
@@ -926,7 +926,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Status Area</label>
                     <select
-                      value={modalForm.status}
+                      value={modalForm.status || 'ACTIVE'}
                       onChange={(e) => setModalForm({ ...modalForm, status: e.target.value as ServiceAreaStatus })}
                       className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold focus:ring-2 focus:ring-amber-500 focus:outline-none"
                     >
@@ -946,7 +946,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <input
                     type="text"
                     placeholder="Contoh: 100000"
-                    value={modalForm.minimumOrderInput}
+                    value={modalForm.minimumOrderInput ?? ''}
                     onChange={(e) => {
                       const clean = e.target.value.replace(/\D/g, '');
                       setModalForm({ ...modalForm, minimumOrderInput: clean });
@@ -963,7 +963,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                     type="number"
                     step="0.1"
                     placeholder="Contoh: 15"
-                    value={modalForm.maximumDistanceInput}
+                    value={modalForm.maximumDistanceInput ?? ''}
                     onChange={(e) => setModalForm({ ...modalForm, maximumDistanceInput: e.target.value })}
                     className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
@@ -973,7 +973,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">Urutan Tampil (Sort Order)</label>
                   <input
                     type="number"
-                    value={modalForm.sortOrder}
+                    value={modalForm.sortOrder ?? 1}
                     onChange={(e) => setModalForm({ ...modalForm, sortOrder: parseInt(e.target.value, 10) || 1 })}
                     className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
@@ -986,7 +986,7 @@ export const AreaMasterCard: React.FC<AreaMasterCardProps> = ({
                 <textarea
                   rows={2}
                   placeholder="Contoh: Akses via Jembatan Musi IV, jalan sering padat sore hari..."
-                  value={modalForm.internalNote}
+                  value={modalForm.internalNote ?? ''}
                   onChange={(e) => setModalForm({ ...modalForm, internalNote: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />

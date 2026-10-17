@@ -202,11 +202,11 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
   const handleOpenEdit = (th: Therapist) => {
     setEditingTherapist(th);
     setFormData({
-      id: th.id,
+      id: th.id || '',
       staffId: th.staffId || `staff-${th.id}`,
       employeeCode: th.employeeCode || '',
-      name: th.name,
-      displayName: th.displayName || th.name,
+      name: th.name || '',
+      displayName: th.displayName || th.name || '',
       gender: th.gender || 'Perempuan',
       phone: th.phone ? formatWhatsAppDisplay(th.phone).replace('+62 ', '0') : '',
       email: th.email || '',
@@ -1077,7 +1077,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={formData.employeeCode}
+                    value={formData.employeeCode ?? ''}
                     onChange={(e) => setFormData({ ...formData, employeeCode: e.target.value.toUpperCase() })}
                     placeholder="Contoh: TRP001"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1125,7 +1125,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                   <input
                     type="text"
                     required
-                    value={formData.name}
+                    value={formData.name ?? ''}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Contoh: Rina Anggraini"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1138,7 +1138,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={formData.displayName}
+                    value={formData.displayName ?? ''}
                     onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                     placeholder="Contoh: Rina A."
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1156,7 +1156,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                   <input
                     type="tel"
                     required
-                    value={formData.phone}
+                    value={formData.phone ?? ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="Contoh: 081273445501"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
@@ -1168,7 +1168,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                     Cabang Home Base <span className="text-rose-500">*</span>
                   </label>
                   <select
-                    value={formData.branchId}
+                    value={formData.branchId ?? 'PLG001'}
                     onChange={(e) => {
                       const sel = branches.find((b) => b.id === e.target.value);
                       setFormData({
@@ -1352,7 +1352,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.customerDisplayEnabled}
+                    checked={Boolean(formData.customerDisplayEnabled)}
                     onChange={(e) => setFormData({ ...formData, customerDisplayEnabled: e.target.checked })}
                     className="sr-only peer"
                   />
@@ -1373,7 +1373,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={formData.isActive}
+                    checked={Boolean(formData.isActive)}
                     onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                     className="sr-only peer"
                   />
@@ -1386,7 +1386,7 @@ export const TherapistMasterCard: React.FC<TherapistMasterCardProps> = ({
                 <label className="block font-semibold text-slate-700 mb-1">Catatan Internal Terapis</label>
                 <textarea
                   rows={2}
-                  value={formData.internalNotes}
+                  value={formData.internalNotes ?? ''}
                   onChange={(e) => setFormData({ ...formData, internalNotes: e.target.value })}
                   placeholder="Catatan sertifikasi pijat, preferensi area rute, atau riwayat kerja..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"

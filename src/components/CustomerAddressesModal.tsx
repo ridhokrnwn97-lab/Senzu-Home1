@@ -88,10 +88,10 @@ export const CustomerAddressesModal: React.FC<CustomerAddressesModalProps> = ({
   const handleOpenEdit = (addr: CustomerSavedAddress) => {
     setEditingAddr(addr);
     setLabel((addr.label as any) || 'Rumah');
-    setAddressText(addr.address);
+    setAddressText(addr.address || '');
     setArea(addr.area || PALEMBANG_AREAS[0]);
     setAddressNotes(addr.addressNotes || '');
-    setIsDefault(addr.isDefault);
+    setIsDefault(Boolean(addr.isDefault));
     setFormError(null);
     setIsFormOpen(true);
   };

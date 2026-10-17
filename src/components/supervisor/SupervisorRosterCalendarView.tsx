@@ -1111,7 +1111,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                     <span className="text-[10px] text-slate-500 block mb-1">Mulai Shift (HH:mm)</span>
                     <input
                       type="time"
-                      value={drawerRoster.shiftStart}
+                      value={drawerRoster.shiftStart ?? '10:00'}
                       onChange={(e) => setDrawerRoster({ ...drawerRoster, shiftStart: e.target.value })}
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-slate-900"
                     />
@@ -1120,7 +1120,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                     <span className="text-[10px] text-slate-500 block mb-1">Selesai Shift (HH:mm)</span>
                     <input
                       type="time"
-                      value={drawerRoster.shiftEnd}
+                      value={drawerRoster.shiftEnd ?? '22:00'}
                       onChange={(e) => setDrawerRoster({ ...drawerRoster, shiftEnd: e.target.value })}
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-slate-900"
                     />

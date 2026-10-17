@@ -35,6 +35,9 @@ export const OFFICIAL_SENZU_QRIS = {
   acquirer: 'BNI Merchant',
   type: 'static' as const,
   imageUrl: '/assets/payment/qris-senzu.jpg',
+  staticQrImageUrl: '/assets/payment/qris-senzu.jpg',
+  instruction:
+    'Buka aplikasi perbankan atau e-wallet Anda, pilih fitur Scan QRIS, lalu unggah bukti pembayaran.',
   sortOrder: 0,
   printedBy: '93600009',
 };

@@ -914,7 +914,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.spendPerPoint}
+                value={settingsForm.spendPerPoint ?? 10000}
                 onChange={(e) => setSettingsForm({ ...settingsForm, spendPerPoint: Number(e.target.value) })}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
@@ -927,7 +927,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.pointValueInRupiah}
+                value={settingsForm.pointValueInRupiah ?? 100}
                 onChange={(e) => setSettingsForm({ ...settingsForm, pointValueInRupiah: Number(e.target.value) })}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
@@ -940,8 +940,15 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.maxRedeemDiscountPercent}
-                onChange={(e) => setSettingsForm({ ...settingsForm, maxRedeemDiscountPercent: Number(e.target.value) })}
+                value={settingsForm.maxRedeemDiscountPercent ?? settingsForm.maximumRedemptionPercentage ?? 30}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setSettingsForm({
+                    ...settingsForm,
+                    maxRedeemDiscountPercent: val,
+                    maximumRedemptionPercentage: val,
+                  });
+                }}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
               <span className="text-[10px] text-slate-400">Default: 30% dari subtotal</span>
@@ -953,8 +960,15 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.minPointsToRedeem}
-                onChange={(e) => setSettingsForm({ ...settingsForm, minPointsToRedeem: Number(e.target.value) })}
+                value={settingsForm.minPointsToRedeem ?? settingsForm.minimumPointsToRedeem ?? 50}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setSettingsForm({
+                    ...settingsForm,
+                    minPointsToRedeem: val,
+                    minimumPointsToRedeem: val,
+                  });
+                }}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
               <span className="text-[10px] text-slate-400">Default: 50 Poin (Rp 5.000)</span>
@@ -966,7 +980,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.pointsValidityDays}
+                value={settingsForm.pointsValidityDays ?? 365}
                 onChange={(e) => setSettingsForm({ ...settingsForm, pointsValidityDays: Number(e.target.value) })}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
@@ -979,7 +993,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
               </label>
               <input
                 type="number"
-                value={settingsForm.referrerRewardPoints}
+                value={settingsForm.referrerRewardPoints ?? 100}
                 onChange={(e) => setSettingsForm({ ...settingsForm, referrerRewardPoints: Number(e.target.value) })}
                 className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
               />
@@ -1210,7 +1224,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Kode Promo (Caps):</label>
                   <input
                     type="text"
-                    value={voucherForm.code}
+                    value={voucherForm.code ?? ''}
                     onChange={(e) => setVoucherForm({ ...voucherForm, code: e.target.value.toUpperCase() })}
                     placeholder="SENZUHEMAT20"
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-mono font-bold uppercase"
@@ -1221,7 +1235,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Nama Voucher:</label>
                   <input
                     type="text"
-                    value={voucherForm.name}
+                    value={voucherForm.name ?? ''}
                     onChange={(e) => setVoucherForm({ ...voucherForm, name: e.target.value })}
                     placeholder="Diskon Pembukaan Palembang"
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-semibold"
@@ -1234,7 +1248,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <div>
                   <label className="block text-slate-600 mb-1 font-semibold">Tipe Diskon:</label>
                   <select
-                    value={voucherForm.voucherType}
+                    value={voucherForm.voucherType || 'fixed_discount'}
                     onChange={(e) => setVoucherForm({ ...voucherForm, voucherType: e.target.value as any })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 bg-white"
                   >
@@ -1248,7 +1262,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   </label>
                   <input
                     type="number"
-                    value={voucherForm.value}
+                    value={voucherForm.value ?? 0}
                     onChange={(e) => setVoucherForm({ ...voucherForm, value: Number(e.target.value) })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                     required
@@ -1261,7 +1275,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Minimal Belanja (Rp):</label>
                   <input
                     type="number"
-                    value={voucherForm.minimumSpend}
+                    value={voucherForm.minimumSpend ?? 0}
                     onChange={(e) => setVoucherForm({ ...voucherForm, minimumSpend: Number(e.target.value) })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                   />
@@ -1270,7 +1284,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Maksimal Diskon (Rp):</label>
                   <input
                     type="number"
-                    value={voucherForm.maximumDiscount}
+                    value={voucherForm.maximumDiscount ?? 0}
                     onChange={(e) => setVoucherForm({ ...voucherForm, maximumDiscount: Number(e.target.value) })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                   />
@@ -1282,7 +1296,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Total Kuota Penggunaan:</label>
                   <input
                     type="number"
-                    value={voucherForm.usageLimitTotal}
+                    value={voucherForm.usageLimitTotal ?? 100}
                     onChange={(e) => setVoucherForm({ ...voucherForm, usageLimitTotal: Number(e.target.value) })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                   />
@@ -1291,7 +1305,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   <label className="block text-slate-600 mb-1 font-semibold">Berlaku Sampai Tanggal:</label>
                   <input
                     type="date"
-                    value={voucherForm.validUntil}
+                    value={voucherForm.validUntil ?? ''}
                     onChange={(e) => setVoucherForm({ ...voucherForm, validUntil: e.target.value })}
                     className="w-full p-2.5 rounded-xl border border-slate-200"
                   />
@@ -1340,8 +1354,11 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <label className="block text-slate-600 mb-1 font-semibold">Syarat Belanja Minimum (Rp):</label>
                 <input
                   type="number"
-                  value={editingTier.minimumSpend}
-                  onChange={(e) => setEditingTier({ ...editingTier, minimumSpend: Number(e.target.value) })}
+                  value={editingTier.minimumSpend ?? editingTier.minimumQualifiedSpend ?? 0}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setEditingTier({ ...editingTier, minimumSpend: val, minimumQualifiedSpend: val });
+                  }}
                   className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                 />
               </div>
@@ -1350,8 +1367,11 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <label className="block text-slate-600 mb-1 font-semibold">Syarat Booking Selesai (Sesi):</label>
                 <input
                   type="number"
-                  value={editingTier.minimumBookings}
-                  onChange={(e) => setEditingTier({ ...editingTier, minimumBookings: Number(e.target.value) })}
+                  value={editingTier.minimumBookings ?? editingTier.minimumCompletedBookings ?? 0}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setEditingTier({ ...editingTier, minimumBookings: val, minimumCompletedBookings: val });
+                  }}
                   className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                 />
               </div>
@@ -1360,7 +1380,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <label className="block text-slate-600 mb-1 font-semibold">Diskon Otomatis (%):</label>
                 <input
                   type="number"
-                  value={editingTier.discountPercentage}
+                  value={editingTier.discountPercentage ?? 0}
                   onChange={(e) => setEditingTier({ ...editingTier, discountPercentage: Number(e.target.value) })}
                   className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                 />
@@ -1371,8 +1391,11 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <input
                   type="number"
                   step="0.1"
-                  value={editingTier.pointMultiplier}
-                  onChange={(e) => setEditingTier({ ...editingTier, pointMultiplier: Number(e.target.value) })}
+                  value={editingTier.pointMultiplier ?? editingTier.earningMultiplier ?? 1}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setEditingTier({ ...editingTier, pointMultiplier: val, earningMultiplier: val });
+                  }}
                   className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                 />
               </div>
@@ -1381,8 +1404,11 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <label className="block text-slate-600 mb-1 font-semibold">Bonus Poin Ulang Tahun:</label>
                 <input
                   type="number"
-                  value={editingTier.birthdayBonusPoints}
-                  onChange={(e) => setEditingTier({ ...editingTier, birthdayBonusPoints: Number(e.target.value) })}
+                  value={editingTier.birthdayBonusPoints ?? editingTier.birthdayBenefitValue ?? 0}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setEditingTier({ ...editingTier, birthdayBonusPoints: val, birthdayBenefitValue: val });
+                  }}
                   className="w-full p-2.5 rounded-xl border border-slate-200 font-mono"
                 />
               </div>
