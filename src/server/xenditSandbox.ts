@@ -13,6 +13,12 @@ const ATTEMPT_ID = /^[a-zA-Z0-9_-]{16,100}$/;
 const REFERENCE = /^szt_[a-f0-9]{48}$/;
 const matches = (value: unknown, pattern: RegExp): value is string => typeof value === 'string' && pattern.test(value);
 const STATUSES = ['ACTIVE', 'COMPLETED', 'EXPIRED', 'CANCELED'];
+const REVIEW_WAIT_MS = 2 * 60 * 1000;
+const UPSTREAM_ERRORS = new Set(['API_VALIDATION_ERROR', 'INVALID_AMOUNT', 'INVALID_PAYMENT_CHANNEL',
+  'INVALID_PRIMARY_PAYMENT_CHANNEL', 'INVALID_METADATA', 'INVALID_ITEM_METADATA', 'INVALID_CURRENCY',
+  'INVALID_COUNTRY', 'INVALID_CUSTOMER_ID', 'INVALID_URL', 'MISSING_CUSTOMER', 'DISALLOWED_CAPTURE_METHOD',
+  'INVALID_EXPIRY_DATE', 'ITEMS_NOT_SUPPORTED', 'SESSION_TYPE_NOT_SUPPORTED', 'MODE_NOT_SUPPORTED',
+  'INVALID_API_KEY', 'DATA_NOT_FOUND', 'DUPLICATE_ERROR']);
 const WEBHOOK_PATH = '/api/integrations/xendit/test/webhook';
 const fail = (status: number, code: string, message = 'Layanan uji Xendit belum dapat memproses permintaan.') =>
   Object.assign(new Error(message), { status, code });
@@ -104,9 +110,19 @@ export function createXenditSandbox(deps: Dependencies) {
       });
     } catch { throw fail(503, 'XENDIT_REQUEST_UNCERTAIN', 'Respons Xendit belum pasti. Gunakan percobaan yang sama; jangan membuat transaksi baru.'); }
     if (!response.ok) {
-      const definite = [400, 401, 403, 404, 422].includes(response.status);
+      // Only retain a documented error code, never raw gateway messages/headers.
+      let upstreamCode: string | null = null;
+      try {
+        const value = await response.json();
+        if (UPSTREAM_ERRORS.has(value?.error_code)) upstreamCode = value.error_code;
+      } catch { /* An unreadable/unknown 409 remains uncertain. */ }
+      const definite = [400, 401, 403, 404, 422].includes(response.status) ||
+        (payload !== undefined && response.status === 409 && upstreamCode === 'DUPLICATE_ERROR');
       throw Object.assign(fail(502, definite ? 'XENDIT_REQUEST_REJECTED' : 'XENDIT_REQUEST_UNCERTAIN',
-        definite ? 'Xendit menolak permintaan. Periksa izin API key dan akses Payment Sessions Mode Tes.' : 'Hasil permintaan Xendit belum pasti. Periksa kembali percobaan yang sama.'), { definite });
+        upstreamCode === 'DUPLICATE_ERROR' ? 'Referensi pelanggan Test sudah digunakan. Percobaan ini ditolak Xendit; gunakan percobaan Test baru.'
+          : definite ? `Xendit menolak permintaan${upstreamCode ? ` (${upstreamCode})` : ''}. Periksa konfigurasi Mode Tes.`
+            : 'Hasil permintaan Xendit belum pasti. Pulihkan percobaan yang sama terlebih dahulu.'),
+      { definite, upstreamStatus: response.status, upstreamCode });
     }
     try { return await response.json(); }
     catch { throw fail(503, 'XENDIT_REQUEST_UNCERTAIN'); }
@@ -130,20 +146,43 @@ export function createXenditSandbox(deps: Dependencies) {
         !matches(intent.referenceId, REFERENCE) || typeof intent.ownerUid !== 'string' ||
         !intent.ownerUid || (uid && intent.ownerUid !== uid)) throw fail(403, 'TEST_SESSION_FORBIDDEN');
   }
+  function validReview(intent: any): boolean {
+    const review = intent.manualReview;
+    return Boolean(review && review.actorUid === intent.ownerUid && review.referenceId === intent.referenceId &&
+      review.decision === 'not_found_in_test_dashboard' && review.source === 'manager_dashboard_review' &&
+      ['creating', 'uncertain'].includes(review.previousState) &&
+      typeof review.reviewedAt === 'string' && Number.isFinite(Date.parse(review.reviewedAt)));
+  }
+  function canReviewClose(intent: any): boolean {
+    const created = typeof intent.createdAt === 'string' ? Date.parse(intent.createdAt) : NaN;
+    return !intent.sessionId && !intent.candidateSessionId && !intent.sessionStatus &&
+      ['creating', 'uncertain'].includes(intent.creationState) && Number.isFinite(created) &&
+      clock() - created >= REVIEW_WAIT_MS;
+  }
   function publicSession(intent: any) {
     return { referenceId: intent.referenceId, sessionId: intent.sessionId || null,
       checkoutUrl: intent.checkoutUrl ? safeTestCheckoutUrl(intent.checkoutUrl) : null,
       sessionStatus: intent.sessionStatus || null, creationState: intent.creationState,
       amount: AMOUNT, currency: 'IDR', environment: 'test', expiresAt: intent.expiresAt || null,
       lastWebhookAt: intent.lastWebhookAt || null, lastCheckedAt: intent.lastCheckedAt || null,
+      reviewCloseAllowed: canReviewClose(intent),
+      lastError: ['creating', 'uncertain', 'rejected'].includes(intent.creationState) && intent.lastError ? {
+        code: ['XENDIT_REQUEST_REJECTED', 'XENDIT_REQUEST_UNCERTAIN', 'XENDIT_SESSION_CONFLICT',
+          'XENDIT_INVALID_CHECKOUT', 'XENDIT_TEST_UNAVAILABLE'].includes(intent.lastError.code)
+          ? intent.lastError.code : 'XENDIT_TEST_UNAVAILABLE',
+        upstreamStatus: Number.isInteger(intent.lastError.upstreamStatus) && intent.lastError.upstreamStatus >= 400 &&
+          intent.lastError.upstreamStatus <= 599 ? intent.lastError.upstreamStatus : null,
+        upstreamCode: UPSTREAM_ERRORS.has(intent.lastError.upstreamCode) ? intent.lastError.upstreamCode : null,
+      } : null,
       realBookingAffected: false };
   }
-  async function persistSession(referenceId: string, session: any, webhook?: { event: string; businessId: string }) {
+  async function persistSession(referenceId: string, session: any, webhook?: { event: string; businessId: string }, ownerUid?: string) {
     const ref = deps.db!.collection(SESSIONS).doc(referenceId);
     return deps.db!.runTransaction(async t => {
       const snap = await t.get(ref);
       if (!snap.exists) throw fail(503, 'TEST_SESSION_PENDING');
-      const intent = snap.data()!; assertIntent(intent);
+      const intent = snap.data()!; assertIntent(intent, ownerUid);
+      if (ownerUid) await deps.authorizeManager(t, ownerUid);
       if (intent.referenceId !== referenceId) throw fail(409, 'TEST_REFERENCE_CONFLICT');
       const verified = validateSession(session, intent);
       if (webhook && webhook.businessId !== verified.businessId) throw fail(409, 'XENDIT_MERCHANT_CONFLICT');
@@ -198,7 +237,8 @@ export function createXenditSandbox(deps: Dependencies) {
           if (!previous.exists) throw fail(409, 'TEST_LOCK_CONFLICT');
           const prior = previous.data()!; assertIntent(prior, caller.uid);
           if (prior.referenceId !== previousId) throw fail(409, 'TEST_REFERENCE_CONFLICT');
-          if (prior.creationState !== 'rejected' && !['COMPLETED', 'EXPIRED', 'CANCELED'].includes(prior.sessionStatus)) {
+          const reviewedClosed = prior.creationState === 'review_closed' && validReview(prior) && !prior.sessionId && !prior.sessionStatus;
+          if (prior.creationState !== 'rejected' && !reviewedClosed && !['COMPLETED', 'EXPIRED', 'CANCELED'].includes(prior.sessionStatus)) {
             throw fail(409, 'TEST_ATTEMPT_PENDING', 'Masih ada percobaan aktif atau belum pasti. Periksa percobaan sebelumnya dahulu.');
           }
         }
@@ -208,19 +248,20 @@ export function createXenditSandbox(deps: Dependencies) {
         return { send: true, intent };
       });
       if (!claim.send) return { session: publicSession(claim.intent), isIdempotent: true };
+      let receivedSession: any;
       try {
         const cfg = config();
-        const session = await api('/sessions', {
+        receivedSession = await api('/sessions', {
           reference_id: referenceId, session_type: 'PAY', mode: 'PAYMENT_LINK', capture_method: 'AUTOMATIC',
           allow_save_payment_method: 'DISABLED', amount: AMOUNT, currency: 'IDR', country: 'ID', locale: 'id',
-          customer: { reference_id: `senzutest${HASH(caller.uid).slice(0, 32)}`, type: 'INDIVIDUAL', individual_detail: { given_names: 'Senzu Test' } },
+          customer: { reference_id: `senzutest${HASH(referenceId).slice(0, 40)}`, type: 'INDIVIDUAL', individual_detail: { given_names: 'Senzu Test' } },
           description: 'SIMULASI SENZU HOME - BUKAN PEMBAYARAN BOOKING',
           allowed_payment_channels: ['BNI_VIRTUAL_ACCOUNT', 'BRI_VIRTUAL_ACCOUNT', 'MANDIRI_VIRTUAL_ACCOUNT', 'PERMATA_VIRTUAL_ACCOUNT'],
           expires_at: new Date(clock() + 30 * 60 * 1000).toISOString(),
           success_return_url: cfg.returnUrl, cancel_return_url: cfg.returnUrl,
           metadata: { environment: 'test', purpose: 'isolated_senzu_integration_test' },
         });
-        return { session: await persistSession(referenceId, session), isIdempotent: false };
+        return { session: await persistSession(referenceId, receivedSession, undefined, caller.uid), isIdempotent: false };
       } catch (error: any) {
         // No automatic POST retry: Payment Sessions documentation does not promise
         // an idempotency header. An ambiguous create must be reconciled, not repeated.
@@ -228,6 +269,10 @@ export function createXenditSandbox(deps: Dependencies) {
           const snap = await t.get(ref);
           if (snap.exists && snap.data()!.creationState === 'creating') t.update(ref, {
             creationState: error.definite ? 'rejected' : 'uncertain', lastCheckedAt: now(),
+            lastError: { code: error.status && error.code ? error.code : 'XENDIT_TEST_UNAVAILABLE',
+              upstreamStatus: error.upstreamStatus || null, upstreamCode: error.upstreamCode || null },
+            ...(receivedSession?.reference_id === referenceId && matches(receivedSession.payment_session_id, SESSION_ID)
+              ? { candidateSessionId: receivedSession.payment_session_id } : {}),
           });
         }).catch(() => {});
         throw error;
@@ -235,18 +280,54 @@ export function createXenditSandbox(deps: Dependencies) {
     },
     async read(req: Request) {
       const caller = await actor(req); config();
-      bodyOnly(req.body, ['referenceId']);
+      bodyOnly(req.body, ['referenceId', 'sessionId']);
       if (!matches(req.body.referenceId, REFERENCE)) throw fail(400, 'INVALID_REFERENCE');
+      if (req.body.sessionId !== undefined && !matches(req.body.sessionId, SESSION_ID)) throw fail(400, 'INVALID_SESSION_ID');
       const snap = await deps.db!.collection(SESSIONS).doc(req.body.referenceId).get();
       if (!snap.exists) throw fail(404, 'TEST_SESSION_NOT_FOUND');
       const intent = snap.data()!; assertIntent(intent, caller.uid);
       if (intent.referenceId !== req.body.referenceId) throw fail(409, 'TEST_REFERENCE_CONFLICT');
-      if (!intent.sessionId) return { session: publicSession(intent) };
-      if (!matches(intent.sessionId, SESSION_ID)) throw fail(409, 'XENDIT_SESSION_CONFLICT');
-      const session = await api(`/sessions/${encodeURIComponent(intent.sessionId)}`);
-      // Re-check live role and ownership after the external request, before returning.
-      await deps.db!.runTransaction(t => deps.authorizeManager(t, caller.uid));
-      return { session: await persistSession(intent.referenceId, session) };
+      if (intent.sessionId && req.body.sessionId && intent.sessionId !== req.body.sessionId) throw fail(409, 'XENDIT_SESSION_CONFLICT');
+      const sessionId = intent.sessionId || req.body.sessionId || intent.candidateSessionId;
+      if (!sessionId) {
+        if (intent.creationState === 'rejected' || (intent.creationState === 'review_closed' && validReview(intent))) {
+          return { session: publicSession(intent) };
+        }
+        throw fail(409, 'TEST_RECOVERY_REQUIRED', 'ID sesi belum tersimpan. Gunakan pemulihan di bawah: cocokkan ID sesi dari dashboard Xendit, atau tutup catatan Test setelah memastikan referensinya tidak ditemukan di Mode Tes.');
+      }
+      if (!matches(sessionId, SESSION_ID)) throw fail(409, 'XENDIT_SESSION_CONFLICT');
+      const session = await api(`/sessions/${encodeURIComponent(sessionId)}`);
+      if (session?.payment_session_id !== sessionId) throw fail(409, 'XENDIT_SESSION_CONFLICT');
+      // The supplied ID is only a lookup hint; the Test API and persisted intent
+      // must agree on reference, amount, merchant and ownership before any write.
+      return { session: await persistSession(intent.referenceId, session, undefined, caller.uid) };
+    },
+    async reviewClose(req: Request) {
+      const caller = await actor(req); config();
+      bodyOnly(req.body, ['referenceId', 'confirmedReference', 'checkedTestDashboard']);
+      if (!matches(req.body.referenceId, REFERENCE) || req.body.confirmedReference !== req.body.referenceId ||
+          req.body.checkedTestDashboard !== true) throw fail(400, 'TEST_REVIEW_CONFIRMATION_REQUIRED');
+      const ref = deps.db!.collection(SESSIONS).doc(req.body.referenceId);
+      return deps.db!.runTransaction(async t => {
+        await deps.authorizeManager(t, caller.uid);
+        const snap = await t.get(ref);
+        const lock = await t.get(deps.db!.collection(SESSIONS).doc(`owner_${HASH(caller.uid)}`));
+        if (!snap.exists) throw fail(404, 'TEST_SESSION_NOT_FOUND');
+        const intent = snap.data()!; assertIntent(intent, caller.uid);
+        if (intent.referenceId !== req.body.referenceId) throw fail(409, 'TEST_REFERENCE_CONFLICT');
+        if (intent.creationState === 'review_closed' && validReview(intent)) return { session: publicSession(intent), isIdempotent: true };
+        if (!lock.exists || lock.data()!.referenceId !== intent.referenceId || !canReviewClose(intent)) {
+          throw fail(409, 'TEST_REVIEW_NOT_ALLOWED', 'Percobaan ini belum dapat ditutup. Tunggu minimal dua menit; jika ID sesi sudah tersedia, periksa statusnya melalui API Xendit.');
+        }
+        // A recorded human review, NOT proof of API absence, rejection, expiry,
+        // cancellation or payment. Keep the intent/lock and accept late webhooks.
+        const update = { creationState: 'review_closed', lastCheckedAt: now(), manualReview: {
+          actorUid: caller.uid, referenceId: intent.referenceId, reviewedAt: now(), previousState: intent.creationState,
+          decision: 'not_found_in_test_dashboard', source: 'manager_dashboard_review',
+        } };
+        t.update(ref, update);
+        return { session: publicSession({ ...intent, ...update }), isIdempotent: false };
+      });
     },
     async latest(req: Request) {
       const caller = await actor(req);
@@ -316,5 +397,6 @@ export function registerXenditSandbox(app: Express, deps: Dependencies) {
   app.post('/api/integrations/xendit/test/checkout', route('checkout'));
   app.post('/api/integrations/xendit/test/read', route('read'));
   app.post('/api/integrations/xendit/test/latest', route('latest'));
+  app.post('/api/integrations/xendit/test/review-close', route('reviewClose'));
   app.post(WEBHOOK_PATH, route('webhook'));
 }

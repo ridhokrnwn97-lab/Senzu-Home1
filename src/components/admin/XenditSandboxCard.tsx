@@ -3,19 +3,22 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { CreditCard, ExternalLink, RefreshCw } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import type { StaffUser } from '../../types';
-import { createXenditTestSession, getLatestXenditTestSession, getXenditTestStatus, readXenditTestSession,
+import { closeReviewedXenditTestAttempt, createXenditTestSession, getLatestXenditTestSession, getXenditTestStatus, readXenditTestSession,
   safeXenditTestLink, type XenditTestSession, type XenditTestStatus } from '../../lib/xenditSandboxService';
 
 const button = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-[#082A4F] hover:bg-slate-50 disabled:opacity-50';
 const labels: Record<string, string> = { ACTIVE: 'Menunggu simulasi pembayaran', COMPLETED: 'Sesi Test selesai',
   EXPIRED: 'Sesi Test kedaluwarsa', CANCELED: 'Sesi Test dibatalkan', creating: 'Sedang dibuat',
-  uncertain: 'Hasil pembuatan belum pasti', rejected: 'Permintaan ditolak Xendit' };
+  uncertain: 'Hasil pembuatan belum pasti', rejected: 'Permintaan ditolak Xendit',
+  review_closed: 'Catatan percobaan Test ditutup setelah pemeriksaan' };
 
 export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
   const [status, setStatus] = useState<XenditTestStatus | null>(null);
   const [session, setSession] = useState<XenditTestSession | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [ready, setReady] = useState(false);
+  const [recoverySessionId, setRecoverySessionId] = useState('');
+  const [dashboardChecked, setDashboardChecked] = useState(false);
   const generation = useRef(0), attempt = useRef(''), inFlight = useRef(false);
   const allowed = ['manager', 'admin'].includes(currentUser.role);
 
@@ -26,6 +29,7 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
       controller?.abort(); controller = new AbortController();
       attempt.current = ''; inFlight.current = false;
       setStatus(null); setSession(null); setReady(false); setBusy(false); setError('');
+      setRecoverySessionId(''); setDashboardChecked(false);
       if (!allowed || !user) return;
       setBusy(true);
       Promise.all([getXenditTestStatus(controller.signal), getLatestXenditTestSession(controller.signal)])
@@ -38,8 +42,9 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
     });
     return () => { generation.current++; controller?.abort(); off(); };
   }, [currentUser.uid, currentUser.role, allowed]);
+  useEffect(() => { setRecoverySessionId(''); setDashboardChecked(false); }, [session?.referenceId]);
 
-  const act = async (action: 'load' | 'create' | 'read' | 'new') => {
+  const act = async (action: 'load' | 'create' | 'read' | 'new' | 'recover' | 'review-close') => {
     if (!allowed || inFlight.current) return;
     const gen = generation.current, owner = auth.currentUser;
     if (!owner) { setError('Silakan masuk sebagai Manager atau Admin.'); return; }
@@ -49,9 +54,12 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
       if (action === 'load') {
         const [configuration, latest] = await Promise.all([getXenditTestStatus(), getLatestXenditTestSession()]);
         if (stable()) { setStatus(configuration); setSession(latest); setReady(true); }
-      } else if (action === 'read' && session) {
-        const value = await readXenditTestSession(session.referenceId);
+      } else if ((action === 'read' || action === 'recover') && session) {
+        const value = await readXenditTestSession(session.referenceId, action === 'recover' ? recoverySessionId.trim() : undefined);
         if (stable()) setSession(value);
+      } else if (action === 'review-close' && session && dashboardChecked && session.reviewCloseAllowed) {
+        const value = await closeReviewedXenditTestAttempt(session.referenceId);
+        if (stable()) { setSession(value); setDashboardChecked(false); }
       } else if (action === 'create' || action === 'new') {
         if (action === 'new') attempt.current = '';
         if (!attempt.current) attempt.current = crypto.randomUUID();
@@ -59,11 +67,20 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
         if (stable()) setSession(value);
       }
     } catch (problem: any) {
-      if (stable()) setError(problem.message || 'Permintaan gagal. Muat ulang untuk memeriksa percobaan sebelumnya.');
+      if (stable()) {
+        setError(problem.message || 'Permintaan gagal. Muat ulang untuk memeriksa percobaan sebelumnya.');
+        // Creation can succeed at the server even when its response is lost.
+        // Refresh the persisted intent; never silently leave the old expired card.
+        if (action === 'create' || action === 'new') {
+          try { const latest = await getLatestXenditTestSession(); if (stable()) setSession(latest); }
+          catch { /* Keep the original error and allow an explicit reload. */ }
+        }
+      }
     } finally { if (stable()) { inFlight.current = false; setBusy(false); } }
   };
   if (!allowed) return null;
-  const terminal = session?.creationState === 'rejected' || ['COMPLETED', 'EXPIRED', 'CANCELED'].includes(session?.sessionStatus || '');
+  const terminal = ['rejected', 'review_closed'].includes(session?.creationState || '') || ['COMPLETED', 'EXPIRED', 'CANCELED'].includes(session?.sessionStatus || '');
+  const recoverable = session && !session.sessionId && ['creating', 'uncertain'].includes(session.creationState);
   return <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="xendit-test-heading">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 p-5 sm:p-6">
       <div className="flex items-center gap-3"><CreditCard className="h-6 w-6 text-[#082A4F]" /><div>
@@ -91,7 +108,26 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
         {session.expiresAt && <p className="text-xs">Batas sesi: {new Date(session.expiresAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</p>}
         <p className="text-xs">Webhook: {session.lastWebhookAt ? 'Sudah diterima dan dicocokkan dengan API Xendit' : 'Belum diterima'}</p>
         <p className="text-xs">Sesi Test selesai tetap tidak mengubah status pembayaran pesanan asli.</p>
-        {['creating', 'uncertain'].includes(session.creationState) && <p className="text-xs text-amber-800">Jangan membuat transaksi pengganti. Periksa sesi di dashboard Xendit dan tunggu webhook; permintaan dengan hasil belum pasti tidak dikirim ulang otomatis.</p>}
+        {session.lastError && <p className="text-xs text-amber-800">Hasil terakhir: {session.lastError.upstreamCode || session.lastError.code}{session.lastError.upstreamStatus ? ` (HTTP ${session.lastError.upstreamStatus})` : ''}.</p>}
+        {recoverable && <p className="text-xs text-amber-800">ID sesi belum tersimpan. Periksa referensi ini di Tautan Pembayaran pada dashboard Xendit Mode Tes, lalu gunakan pemulihan di bawah. Tombol periksa status tidak akan membuat sesi baru.</p>}
+        {session.creationState === 'review_closed' && <p className="text-xs text-slate-600">Penutupan ini mencatat hasil pemeriksaan Manager. Ini bukan konfirmasi pembatalan atau pembayaran di Xendit. Catatan lama dan penerimaan webhook tetap dipertahankan.</p>}
+      </div>}
+      {recoverable && <div className="space-y-3 rounded-xl border border-slate-200 p-4 text-sm text-slate-700">
+        <p className="font-semibold">Pemulihan percobaan Test</p>
+        <label className="block space-y-1 text-xs">Jika sesi ditemukan, masukkan Payment Session ID dari detail Xendit.
+          <input aria-label="Payment Session ID" value={recoverySessionId} onChange={event => setRecoverySessionId(event.target.value)}
+            placeholder="ps-..." disabled={busy} className="w-full rounded-lg border border-slate-300 px-3 py-2" />
+        </label>
+        <button type="button" className={button} disabled={busy || !status?.configured || !/^ps-[a-zA-Z0-9-]{16,80}$/.test(recoverySessionId.trim())}
+          onClick={() => act('recover')}>Cocokkan Sesi Xendit</button>
+        <label className="flex items-start gap-2 text-xs">
+          <input type="checkbox" checked={dashboardChecked} disabled={busy} onChange={event => setDashboardChecked(event.target.checked)} />
+          <span>Saya sudah mencari referensi percobaan ini di Xendit Mode Tes dan tidak menemukan sesinya.</span>
+        </label>
+        <button type="button" className={button} disabled={busy || !status?.configured || !dashboardChecked || !session.reviewCloseAllowed}
+          onClick={() => act('review-close')}>Tutup Percobaan yang Tidak Ditemukan</button>
+        {!session.reviewCloseAllowed && <p className="text-xs text-slate-500">Penutupan memerlukan jeda minimal dua menit. Jika ID sesi sudah diterima server, gunakan pemeriksaan status untuk memulihkannya.</p>}
+        <p className="text-xs text-slate-500">Tidak mengirim ulang permintaan checkout. Setelah ditutup, percobaan baru hanya dibuat jika Anda menekan tombolnya.</p>
       </div>}
       <div className="flex flex-wrap gap-3">
         {!session && <button type="button" className={button} disabled={busy || !ready || !status?.configured} onClick={() => act('create')}>Buat Checkout Test Rp10.000</button>}

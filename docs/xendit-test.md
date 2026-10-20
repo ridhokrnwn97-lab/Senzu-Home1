@@ -1,5 +1,104 @@
 # Senzu Home — Xendit Test, tahap 1
 
+## Paket pemulihan percobaan macet — 20 Oktober 2026
+
+Baseline paket pemulihan: GitHub `main` commit
+`10e2498` (merge PR #7). Paket pembaruan ini berisi **5 file**:
+
+1. `src/server/xenditSandbox.ts`
+2. `src/lib/xenditSandboxService.ts`
+3. `src/components/admin/XenditSandboxCard.tsx`
+4. `tests/xenditSandbox.test.mjs`
+5. `docs/xendit-test.md`
+
+Jangan unggah ulang `server.ts`, `firebaseAdmin.ts`, `ManagerPortal.tsx`, App,
+Rules, package/lockfile, dist, Secrets atau cadangan dari paket lama. Struktur
+folder kelima file ini harus tetap sama. Ini pembaruan sebagian; jangan hapus
+repository. Unggah pada branch baru, tinjau tepat lima file tersebut, merge dan
+Pull Changes. Publikasi aplikasi tetap dilakukan oleh pemilik saat siap.
+
+### Yang diperbaiki
+
+- Setiap percobaan baru memakai `customer.reference_id` sintetis yang unik
+  berdasarkan referensi percobaan, bukan referensi tetap per Manager.
+- HTTP 409 dengan kode resmi `DUPLICATE_ERROR` dari POST /sessions dikenali
+  sebagai penolakan pasti. 409 tidak dikenal, timeout, 5xx dan respons hilang
+  tetap belum pasti; tidak otomatis dikirim ulang.
+- Kode error resmi yang diizinkan dan HTTP status disimpan untuk diagnosis,
+  tanpa menyimpan/mengirim pesan gateway mentah, API key atau token.
+- Bila respons create memuat ID sesi tetapi validasi/persist gagal, ID kandidat
+  disimpan bila memungkinkan. Tombol Periksa Status mengambil ulang sesi itu
+  melalui GET dengan Test key dan memvalidasi seluruh linkage.
+- Tanpa ID, tombol Periksa Status memberi instruksi pemulihan yang jelas;
+  tidak lagi mengembalikan status lama seolah pemeriksaan ke Xendit sudah terjadi.
+- Jika create gagal atau respons hilang, panel memuat intent terbaru agar
+  tidak terus menampilkan sesi lama yang kedaluwarsa.
+
+### Memulihkan percobaan lama yang terlanjur belum pasti
+
+1. Pada aplikasi publik yang sudah memuat patch, buka panel Xendit Mode Tes,
+   klik **Muat Ulang**. Gunakan referensi percobaan yang tampil.
+2. Cari referensi itu di Xendit **Mode Tes → Terima Pembayaran → Tautan
+   Pembayaran**. Periksa filter/paginasi dan detail sesi yang cocok.
+3. **Jika sesi ditemukan**, salin Payment Session ID (`ps-...`) dari detailnya
+   ke panel pemulihan, lalu klik **Cocokkan Sesi Xendit**. ID hanya petunjuk
+   pencarian, bukan bukti kepemilikan. Server GET /sessions/{session_id}, lalu
+   mencocokkan ref, merchant, PAY, nominal Rp10.000, IDR, country, checkout Test,
+   kepemilikan dan role Manager terkini sebelum menyimpan hasil. Ini tidak
+   membuat sesi baru dan tidak membatalkan sesi Xendit.
+4. **Jika pemeriksaan manual tidak menemukan sesi**, centang pernyataan
+   pemeriksaan pada referensi yang tampil, lalu klik **Tutup Percobaan yang
+   Tidak Ditemukan**. Server mensyaratkan pemilik Manager/Admin aktif yang
+   sama, pointer percobaan terkini, hasil belum pasti/tahap creating tanpa ID
+   atau ID kandidat, dan usia minimal dua menit.
+5. Penutupan menambahkan `manualReview` (UID pemeriksa, waktu server, ref,
+   keadaan sebelumnya, keputusan dan sumber pemeriksaan) serta state
+   `review_closed`. Tidak ada ledger/lock yang dihapus, tidak ada status
+   EXPIRED/FAILED/CANCELED/PAID yang dikarang, dan tidak ada API create/cancel
+   yang dikirim. Sesudah itu **Buat Percobaan Test Baru** adalah tindakan
+   terpisah yang hanya berjalan jika pengguna menekannya.
+
+Pemeriksaan dashboard oleh Manager **bukan bukti mesin bahwa sesi tidak ada**.
+API resmi yang diverifikasi mendokumentasikan GET berdasarkan session ID;
+paket ini tidak mengarang endpoint pencarian berdasarkan reference_id. Karena
+itu, jangan menutup catatan hanya untuk melewati pengaman tanpa memeriksa
+dashboard. Penutupan ini khusus simulasi terisolasi dan **tidak boleh dijadikan
+pola retry untuk pembayaran pelanggan/live**. Apabila ada keraguan atau filter
+dashboard tidak jelas, pertahankan percobaan dan minta pemeriksaan Xendit.
+
+Webhook terlambat tetap dapat memperbarui intent lama setelah review. Review
+tetap disimpan; callback lama tidak memindahkan pointer ke percobaan terbaru.
+Penutupan berulang idempoten dan tidak menambah tulisan. Konflik dengan
+pemulihan ID/callback ditangani transaksi; sesi yang sudah terverifikasi tidak
+dapat ditimpa menjadi review_closed. Pembayaran asli, booking, dispatch,
+Accurate dan kode Meta Pixel tidak digunakan oleh jalur pemulihan ini.
+
+Endpoint tambahan: POST `/api/integrations/xendit/test/review-close`;
+Bearer Manager/Admin, ref milik sendiri, konfirmasi ref yang identik serta
+`checkedTestDashboard: true` wajib. Ini pernyataan manusia yang diaudit,
+bukan klaim server telah mencari seluruh sesi Xendit. Tidak menerima actor
+atau status keuangan dari browser. Semua akses tetap lewat Admin SDK yang ada.
+
+Pengujian paket ini menggunakan fixture terisolasi dan HTTP loopback; tidak
+mengakses Xendit/Firebase dengan secret asli. Tidak ada deploy/publish, push,
+merge, perubahan credentials, mutasi produksi atau transaksi baru oleh patcher.
+Verifikasi aktual: 31 grup server/client/HTTP lulus; panel React aktual lulus
+uji JSDOM terisolasi (konfirmasi review, cegah double click, pemulihan ID,
+muat intent baru saat create gagal, logout/pergantian akun, dan respons lambat).
+Seluruh 31 grup juga lulus dengan Node.js 22.23.2 native TypeScript stripping,
+tanpa memulai server aplikasi yang dapat mengakses Firebase produksi.
+`tsc --noEmit` dan build Vite produksi lulus. Suite ini bukan Firestore Emulator
+atau browser E2E dan tidak membuktikan hasil panggilan merchant nyata.
+Tes merchant nyata tetap perlu setelah pemasangan. Penyebab respons create
+percobaan lama tidak dapat dibuktikan dari record lama yang belum menyimpan
+kode error; referensi duplikat dan misklasifikasi 409 adalah cacat source yang
+diperbaiki, bukan klaim hasil pemeriksaan log gateway produksi.
+
+---
+
+Dokumentasi di bawah menjelaskan paket Stage 1 awal dan koreksi webhook yang
+sudah terpasang; daftar tujuh/tiga file di bagian tersebut adalah riwayat paket.
+
 Tanggal: 20 Oktober 2026. Baseline GitHub `main`:
 `ebdae602d264c1767f38064a25faf7df8f712f05`.
 
@@ -108,9 +207,10 @@ Payment Sessions. Ini mencegah retry otomatis menggandakan sesi saat timeout.
 Jika respons create hilang, Muat Ulang memulihkan referensi dari server. Webhook
 valid bisa memulihkan sesi dari intent yang telah tersimpan. Jika belum ada sessionId
 dan webhook tidak pernah datang, percobaan dikunci untuk pemeriksaan manual di
-dashboard; **tidak ada tombol reset yang otomatis membuat tagihan pengganti**.
+dashboard. Paket pemulihan di atas menambahkan pencocokan ID dan penutupan
+catatan berdasarkan review Manager; **tidak ada reset yang otomatis membuat tagihan pengganti**.
 Jangan menghapus ledger/lock untuk memaksa retry tanpa memeriksa sesi Xendit dulu.
-Penolakan create yang pasti (HTTP 400/401/403/404/422) mengizinkan percobaan baru
+Penolakan create yang pasti (HTTP 400/401/403/404/422, atau 409 DUPLICATE_ERROR) mengizinkan percobaan baru
 secara eksplisit; hasil ambigu tetap dikunci. Status expired dikonfirmasi API,
 bukan berdasarkan jam browser.
 
