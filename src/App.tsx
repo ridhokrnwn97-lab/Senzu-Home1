@@ -1018,6 +1018,11 @@ function MainApp() {
             </div>
           </div>
 
+          <p className="text-xs leading-relaxed text-slate-300 text-center sm:text-left">
+            Senzu Home merupakan layanan pijat dan refleksi panggilan di Palembang yang dikelola oleh{' '}
+            <span className="font-semibold text-white">PT KSBONE UNTUK KITA</span>.
+          </p>
+
           <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2">
             <div>
               © {new Date().getFullYear()} Senzu Reflexology & Family Massage Palembang. Seluruh Hak Cipta Dilindungi.
