@@ -83,6 +83,7 @@ function seedManager(db, uid = 'manager1', role = 'manager') {
 }
 function fixture(overrides = {}) {
   const db = new MemoryDB(); seedManager(db);
+  let time = Date.parse('2026-10-20T13:00:00Z');
   const remote = new Map(); const calls = []; let postMode = 'ok', getPatch = {}, gate;
   const fetch = async (url, init) => {
     assert.equal(new URL(url).origin, 'https://api.xendit.co');
@@ -93,10 +94,14 @@ function fixture(overrides = {}) {
       if (gate) await gate;
       if (postMode === 'network') throw new Error('uncertain');
       if (postMode === 'reject') return new Response('{}', { status: 422 });
+      if (postMode === 'duplicate') return Response.json({ error_code: 'DUPLICATE_ERROR',
+        message: `Do not expose this gateway message: ${key} ${token}` }, { status: 409 });
+      if (postMode === 'unknown409') return Response.json({ error_code: 'UNRECOGNIZED_CONFLICT', message: key }, { status: 409 });
       const body = JSON.parse(init.body);
       const value = { ...body, payment_session_id: `ps-${String(remote.size + 1).padStart(24, '0')}`, status: 'ACTIVE',
         business_id: 'merchant_fixture', payment_link_url: 'https://dev.xen.to/fixture', payment_id: null };
       remote.set(value.payment_session_id, value);
+      if (postMode === 'lostResponse') throw new Error('Response lost after upstream creation');
       if (postMode === 'commitFail') db.failCommit = true;
       if (postMode === 'badUrl') value.payment_link_url = 'https://xen.to/live';
       return Response.json(value, { status: 201 });
@@ -109,9 +114,9 @@ function fixture(overrides = {}) {
     if (value === 'outage') throw Object.assign(new Error('offline'), { code: 'auth/internal-error' });
     return { uid: value };
   };
-  const deps = { db, verify, authorizeManager: managerFactory(db), env: { ...env }, fetch, ...overrides };
+  const deps = { db, verify, authorizeManager: managerFactory(db), env: { ...env }, fetch, clock: () => time, ...overrides };
   const service = createXenditSandbox(deps);
-  return { db, remote, calls, deps, service, setMode: value => { postMode = value; }, setGate: value => { gate = value; }, patchGet: value => { getPatch = value; } };
+  return { db, remote, calls, deps, service, advance: ms => { time += ms; }, setMode: value => { postMode = value; }, setGate: value => { gate = value; }, patchGet: value => { getPatch = value; } };
 }
 const rejectCode = (promise, status, code) => assert.rejects(promise, e => e.status === status && (!code || e.code === code));
 function webhook(value, event = 'payment_session.completed', header = token) {
@@ -354,4 +359,170 @@ test('browser helper rejects unsafe URL, wrong reference and malformed success p
   assert.throws(() => g.client.safeXenditTestLink('https://xen.to/live'));
   const h = clientFixture(async () => Response.json({ success: true, session: { ...result.session, referenceId: `szt_${'b'.repeat(48)}` } }));
   await assert.rejects(h.client.readXenditTestSession(result.session.referenceId), /tidak sesuai/);
+});
+
+test('successive explicit Test attempts use distinct alphanumeric customer references', async () => {
+  const f = fixture();
+  const first = await f.service.checkout(req({ attemptId: attempt }));
+  f.remote.get(first.session.sessionId).status = 'EXPIRED';
+  await f.service.read(req({ referenceId: first.session.referenceId }));
+  await f.service.checkout(req({ attemptId: 'attempt_000000000002' }));
+  const posts = f.calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.notEqual(posts[0].body.customer.reference_id, posts[1].body.customer.reference_id);
+  for (const call of posts) assert.match(call.body.customer.reference_id, /^[a-zA-Z0-9]+$/);
+});
+test('documented duplicate-customer 409 is a definite rejection; unknown 409 stays uncertain without leaking raw errors', async () => {
+  for (const [mode, state] of [['duplicate', 'rejected'], ['unknown409', 'uncertain']]) {
+    const f = fixture(); f.setMode(mode);
+    let error;
+    try { await f.service.checkout(req({ attemptId: attempt })); } catch (value) { error = value; }
+    assert.ok(error); assert.equal(error.definite, mode === 'duplicate');
+    assert.ok(!error.message.includes(key)); assert.ok(!error.message.includes(token));
+    const latest = (await f.service.latest(req())).session;
+    assert.equal(latest.creationState, state); assert.equal(latest.lastError.upstreamStatus, 409);
+    assert.equal(latest.lastError.upstreamCode, mode === 'duplicate' ? 'DUPLICATE_ERROR' : null);
+    assert.ok(!JSON.stringify(latest).includes(key));
+    f.setMode('ok');
+    if (mode === 'duplicate') await f.service.checkout(req({ attemptId: 'attempt_000000000002' }));
+    else await rejectCode(f.service.checkout(req({ attemptId: 'attempt_000000000002' })), 409, 'TEST_ATTEMPT_PENDING');
+    assert.equal(f.calls.filter(call => call.method === 'POST').length, mode === 'duplicate' ? 2 : 1);
+  }
+});
+test('missing-session status read reports actionable recovery instead of silently returning the same unknown state', async () => {
+  const f = fixture(); f.setMode('network');
+  await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const referenceId = (await f.service.latest(req())).session.referenceId;
+  const before = f.calls.length;
+  await rejectCode(f.service.read(req({ referenceId })), 409, 'TEST_RECOVERY_REQUIRED');
+  assert.equal(f.calls.length, before);
+});
+test('lost response can be recovered with a dashboard session ID using GET only and current Manager ownership checks', async () => {
+  const f = fixture(); f.setMode('lostResponse');
+  await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const referenceId = (await f.service.latest(req())).session.referenceId;
+  const remote = [...f.remote.values()][0];
+  const recovered = await f.service.read(req({ referenceId, sessionId: remote.payment_session_id }));
+  assert.equal(recovered.session.sessionStatus, 'ACTIVE'); assert.equal(recovered.session.creationState, 'created');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+  assert.equal(f.calls.filter(call => call.method === 'GET').length, 1);
+  await rejectCode(f.service.checkout(req({ attemptId: 'attempt_000000000002' })), 409, 'TEST_ATTEMPT_PENDING');
+});
+test('candidate session returned before validation failure is retained and re-fetched rather than re-created or manually closed', async () => {
+  const f = fixture(); f.setMode('badUrl');
+  await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const latest = (await f.service.latest(req())).session;
+  const stored = f.db.data.get(`xendit_test_sessions/${latest.referenceId}`);
+  assert.ok(stored.candidateSessionId); f.advance(180000);
+  assert.equal((await f.service.latest(req())).session.reviewCloseAllowed, false);
+  f.patchGet({ payment_link_url: 'https://dev.xen.to/recovered' });
+  const recovered = await f.service.read(req({ referenceId: latest.referenceId }));
+  assert.equal(recovered.session.creationState, 'created');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+});
+test('recovery rejects foreign refs/merchant/amount, unsafe IDs and changed roles without writes', async () => {
+  for (const patch of [{ reference_id: `szt_${'b'.repeat(48)}` }, { amount: 1 }, { currency: 'PHP' },
+    { country: 'PH' }, { session_type: 'SAVE' }, { business_id: 'foreign_merchant' }, { capture_method: 'MANUAL' }]) {
+    const f = fixture({ env: { ...env, XENDIT_BUSINESS_ID: 'merchant_fixture' } }); f.setMode('lostResponse');
+    await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+    const latest = (await f.service.latest(req())).session;
+    const sessionId = [...f.remote.keys()][0]; f.patchGet(patch); const before = f.db.writes.length;
+    await rejectCode(f.service.read(req({ referenceId: latest.referenceId, sessionId })), 409);
+    assert.equal(f.db.writes.length, before);
+  }
+  const f = fixture(); f.setMode('lostResponse'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const referenceId = (await f.service.latest(req())).session.referenceId; const before = f.calls.length;
+  await rejectCode(f.service.read(req({ referenceId, sessionId: '../escape' })), 400);
+  seedManager(f.db, 'other');
+  await rejectCode(f.service.read(req({ referenceId, sessionId: [...f.remote.keys()][0] }, 'other')), 403);
+  assert.equal(f.calls.length, before);
+  const fetcher = f.deps.fetch;
+  const changed = createXenditSandbox({ ...f.deps, fetch: async (...args) => {
+    const result = await fetcher(...args); f.db.data.get('staff_roles/manager1').isActive = false; return result;
+  } });
+  const writes = f.db.writes.length;
+  await rejectCode(changed.read(req({ referenceId, sessionId: [...f.remote.keys()][0] })), 403);
+  assert.equal(f.db.writes.length, writes);
+});
+const reviewBody = referenceId => ({ referenceId, confirmedReference: referenceId, checkedTestDashboard: true });
+test('legacy unknown intent requires explicit aged Manager review, retains its lock and audit, then permits only an explicit new attempt', async () => {
+  const f = fixture(); f.setMode('network'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const referenceId = (await f.service.latest(req())).session.referenceId;
+  // Match already-installed legacy records, which did not persist diagnostics.
+  delete f.db.data.get(`xendit_test_sessions/${referenceId}`).lastError;
+  await rejectCode(f.service.reviewClose(req(reviewBody(referenceId))), 409, 'TEST_REVIEW_NOT_ALLOWED');
+  f.advance(120000);
+  for (const body of [{ referenceId }, { ...reviewBody(referenceId), checkedTestDashboard: false },
+    { ...reviewBody(referenceId), confirmedReference: 'other' }, { ...reviewBody(referenceId), actorUid: 'spoof' }]) {
+    await rejectCode(f.service.reviewClose(req(body)), 400);
+  }
+  const lockPath = [...f.db.data.keys()].find(path => path.startsWith('xendit_test_sessions/owner_'));
+  const beforeCalls = f.calls.length;
+  const closed = await f.service.reviewClose(req(reviewBody(referenceId)));
+  assert.equal(closed.session.creationState, 'review_closed'); assert.equal(closed.session.sessionStatus, null);
+  assert.equal(f.calls.length, beforeCalls); assert.equal(f.db.data.get(lockPath).referenceId, referenceId);
+  const review = f.db.data.get(`xendit_test_sessions/${referenceId}`).manualReview;
+  assert.equal(review.actorUid, 'manager1'); assert.equal(review.source, 'manager_dashboard_review');
+  const writes = f.db.writes.length;
+  assert.equal((await f.service.reviewClose(req(reviewBody(referenceId)))).isIdempotent, true);
+  assert.equal(f.db.writes.length, writes);
+  f.setMode('ok');
+  const newer = await f.service.checkout(req({ attemptId: 'attempt_000000000002' }));
+  assert.equal(newer.session.sessionStatus, 'ACTIVE'); assert.equal(f.db.data.get(lockPath).referenceId, newer.session.referenceId);
+  assert.ok(f.db.data.has(`xendit_test_sessions/${referenceId}`));
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 2);
+});
+test('review closure denies foreign/inactive/customer callers, known sessions, stale owner pointers and failed commits', async () => {
+  const f = fixture(); f.setMode('network'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  f.advance(120000); const referenceId = (await f.service.latest(req())).session.referenceId;
+  const before = f.db.writes.length;
+  seedManager(f.db, 'other'); await rejectCode(f.service.reviewClose(req(reviewBody(referenceId), 'other')), 403);
+  seedManager(f.db, 'css1', 'css'); await rejectCode(f.service.reviewClose(req(reviewBody(referenceId), 'css1')), 403);
+  const lock = [...f.db.data.values()].find(value => value.ownerUid === 'manager1' && !value.creationState);
+  const original = lock.referenceId; lock.referenceId = `szt_${'c'.repeat(48)}`;
+  await rejectCode(f.service.reviewClose(req(reviewBody(referenceId))), 409); lock.referenceId = original;
+  f.db.failCommit = true; await assert.rejects(f.service.reviewClose(req(reviewBody(referenceId))));
+  assert.equal(f.db.writes.length, before); f.db.failCommit = false;
+  f.db.data.get('staff_roles/manager1').isActive = false;
+  await rejectCode(f.service.reviewClose(req(reviewBody(referenceId))), 403);
+  const known = fixture(); const created = await known.service.checkout(req({ attemptId: attempt })); known.advance(120000);
+  const knownWrites = known.db.writes.length;
+  await rejectCode(known.service.reviewClose(req(reviewBody(created.session.referenceId))), 409);
+  assert.equal(known.db.writes.length, knownWrites);
+});
+test('late webhook recovers a reviewed old intent without changing the newer owner pointer or real bookings/payments', async () => {
+  const f = fixture(); f.setMode('lostResponse'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  const referenceId = (await f.service.latest(req())).session.referenceId; const old = [...f.remote.values()][0];
+  f.advance(120000); await f.service.reviewClose(req(reviewBody(referenceId)));
+  f.setMode('ok'); const newer = await f.service.checkout(req({ attemptId: 'attempt_000000000002' }));
+  old.status = 'COMPLETED'; await f.service.webhook(webhook(old));
+  assert.equal(f.db.data.get(`xendit_test_sessions/${referenceId}`).sessionStatus, 'COMPLETED');
+  assert.ok(f.db.data.get(`xendit_test_sessions/${referenceId}`).manualReview);
+  assert.equal((await f.service.latest(req())).session.referenceId, newer.session.referenceId);
+  assert.ok(f.db.writes.every(item => ['xendit_test_sessions', 'xendit_test_webhook_events'].includes(item.ref.name)));
+});
+test('concurrent review-close and known-ID recovery never overwrite an accepted canonical session', async () => {
+  const f = fixture(); f.setMode('lostResponse'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  f.advance(120000); const referenceId = (await f.service.latest(req())).session.referenceId;
+  const sessionId = [...f.remote.keys()][0];
+  const results = await Promise.allSettled([f.service.reviewClose(req(reviewBody(referenceId))), f.service.read(req({ referenceId, sessionId }))]);
+  assert.ok(results.some(result => result.status === 'fulfilled'));
+  const current = f.db.data.get(`xendit_test_sessions/${referenceId}`);
+  assert.equal(current.creationState, 'created'); assert.equal(current.sessionId, sessionId);
+  assert.equal(current.sessionStatus, 'ACTIVE');
+});
+test('browser recovery helper validates IDs and owner reference; review is explicit, one request, with session-switch protection', async () => {
+  const f = fixture(); f.setMode('network'); await assert.rejects(f.service.checkout(req({ attemptId: attempt })));
+  f.advance(120000); const referenceId = (await f.service.latest(req())).session.referenceId;
+  const closed = (await f.service.reviewClose(req(reviewBody(referenceId)))).session;
+  const calls = [];
+  const g = clientFixture(async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return Response.json({ success: true, session: closed }); });
+  await assert.rejects(g.client.readXenditTestSession(referenceId, 'https://evil.invalid/'), /tidak valid/);
+  assert.equal(calls.length, 0);
+  await g.client.closeReviewedXenditTestAttempt(referenceId);
+  assert.equal(calls.length, 1); assert.ok(calls[0].url.endsWith('/review-close'));
+  assert.deepEqual(calls[0].body, reviewBody(referenceId));
+  let switched;
+  switched = clientFixture(async () => { switched.auth.currentUser = null; return Response.json({ success: true, session: closed }); });
+  await assert.rejects(switched.client.closeReviewedXenditTestAttempt(referenceId), /Sesi berubah/);
 });

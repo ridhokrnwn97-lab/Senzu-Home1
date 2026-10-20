@@ -5,13 +5,15 @@ export type XenditTestSession = {
   sessionId: string | null;
   checkoutUrl: string | null;
   sessionStatus: 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELED' | null;
-  creationState: 'creating' | 'created' | 'uncertain' | 'rejected';
+  creationState: 'creating' | 'created' | 'uncertain' | 'rejected' | 'review_closed';
   amount: 10000;
   currency: 'IDR';
   environment: 'test';
   expiresAt: string | null;
   lastWebhookAt: string | null;
   lastCheckedAt: string | null;
+  reviewCloseAllowed?: boolean;
+  lastError?: { code: string; upstreamStatus: number | null; upstreamCode: string | null } | null;
   realBookingAffected: false;
 };
 export type XenditTestStatus = {
@@ -27,10 +29,17 @@ export function safeXenditTestLink(raw: string): string {
 function validateSession(value: any): XenditTestSession {
   if (!value || !/^szt_[a-f0-9]{48}$/.test(value.referenceId || '') || value.environment !== 'test' ||
       value.amount !== 10000 || value.currency !== 'IDR' || value.realBookingAffected !== false ||
-      !['creating', 'created', 'uncertain', 'rejected'].includes(value.creationState) ||
+      !['creating', 'created', 'uncertain', 'rejected', 'review_closed'].includes(value.creationState) ||
       ![null, 'ACTIVE', 'COMPLETED', 'EXPIRED', 'CANCELED'].includes(value.sessionStatus) ||
       (value.sessionId !== null && (typeof value.sessionId !== 'string' || !/^ps-[a-zA-Z0-9-]{16,80}$/.test(value.sessionId))) ||
       (value.checkoutUrl !== null && typeof value.checkoutUrl !== 'string') ||
+      (value.reviewCloseAllowed !== undefined && typeof value.reviewCloseAllowed !== 'boolean') ||
+      (value.lastError !== undefined && value.lastError !== null &&
+        (!value.lastError || typeof value.lastError.code !== 'string' || !/^[A-Z_]{1,64}$/.test(value.lastError.code) ||
+          (value.lastError.upstreamStatus !== null && (!Number.isInteger(value.lastError.upstreamStatus) ||
+            value.lastError.upstreamStatus < 400 || value.lastError.upstreamStatus > 599)) ||
+          (value.lastError.upstreamCode !== null && (typeof value.lastError.upstreamCode !== 'string' ||
+            !/^[A-Z_]{1,64}$/.test(value.lastError.upstreamCode))))) ||
       ['expiresAt', 'lastWebhookAt', 'lastCheckedAt'].some(field => value[field] !== null &&
         (typeof value[field] !== 'string' || !Number.isFinite(Date.parse(value[field]))))) throw new Error('Respons sesi uji Xendit tidak valid.');
   if (value.checkoutUrl) safeXenditTestLink(value.checkoutUrl);
@@ -71,9 +80,18 @@ export async function createXenditTestSession(attemptId: string): Promise<Xendit
   if (!/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId)) throw new Error('ID percobaan tidak valid.');
   return validateSession((await request('checkout', { attemptId })).session);
 }
-export async function readXenditTestSession(referenceId: string): Promise<XenditTestSession> {
+export async function readXenditTestSession(referenceId: string, sessionId?: string): Promise<XenditTestSession> {
   if (!/^szt_[a-f0-9]{48}$/.test(referenceId)) throw new Error('Referensi percobaan tidak valid.');
-  const value = validateSession((await request('read', { referenceId })).session);
+  if (sessionId !== undefined && !/^ps-[a-zA-Z0-9-]{16,80}$/.test(sessionId)) throw new Error('ID sesi Xendit tidak valid.');
+  const value = validateSession((await request('read', { referenceId, ...(sessionId ? { sessionId } : {}) })).session);
   if (value.referenceId !== referenceId) throw new Error('Referensi respons Xendit tidak sesuai.');
+  return value;
+}
+export async function closeReviewedXenditTestAttempt(referenceId: string): Promise<XenditTestSession> {
+  if (!/^szt_[a-f0-9]{48}$/.test(referenceId)) throw new Error('Referensi percobaan tidak valid.');
+  const value = validateSession((await request('review-close', {
+    referenceId, confirmedReference: referenceId, checkedTestDashboard: true,
+  })).session);
+  if (value.referenceId !== referenceId || value.creationState !== 'review_closed') throw new Error('Respons penutupan percobaan tidak sesuai.');
   return value;
 }
