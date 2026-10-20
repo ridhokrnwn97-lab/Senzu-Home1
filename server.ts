@@ -1,4 +1,5 @@
 import { registerPaymentAcceptance, assertPaymentLink } from './src/server/paymentAcceptance.ts';
+import { registerXenditSandbox } from './src/server/xenditSandbox.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
@@ -1684,6 +1685,37 @@ async function startServer() {
   });
 
   registerPaymentAcceptance(app, adminDb, token => adminAuth!.verifyIdToken(token));
+
+  // Isolated Test ledger only; reuse the current Stage 7D Manager identity policy.
+  registerXenditSandbox(app, {
+    db: adminDb,
+    verify: token => {
+      if (!adminAuth) throw Object.assign(new Error('Auth unavailable'), { code: 'auth/internal-error' });
+      return adminAuth.verifyIdToken(token);
+    },
+    authorizeManager: async (transaction, uid) => {
+      const [roleSnap, canonical, legacy, direct] = await Promise.all([
+        transaction.get(adminDb.collection('staff_roles').doc(uid)),
+        transaction.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').doc(uid)),
+      ]);
+      const matches = new Map<string, any>();
+      for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+      const role = roleSnap.data() || {};
+      for (const linked of [role.staffId, role.staffUserId]) {
+        if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !matches.has(linked)) {
+          const snap = await transaction.get(adminDb.collection('staff_users').doc(linked));
+          if (snap.exists) matches.set(snap.id, snap);
+        }
+      }
+      const result = validateStage7dActiveManagerIdentity(uid, roleSnap.exists, role, matches);
+      if (!result.ok) throw Object.assign(new Error(result.message || 'Akses Manager/Admin diperlukan.'), {
+        status: result.status || 403, code: result.code || 'MANAGER_ROLE_REQUIRED',
+      });
+      return result;
+    },
+  });
 
   // Loyalty point earning + account provisioning run server-side; Firestore rules keep client writes staff-only.
   const loyaltyAccounts = registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));

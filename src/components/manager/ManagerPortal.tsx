@@ -50,6 +50,7 @@ import { BranchSettingsCard } from '../admin/BranchSettingsCard';
 import { ServiceMasterCard } from '../admin/ServiceMasterCard';
 import { BusinessSettingsCard } from '../admin/BusinessSettingsCard';
 import { MetaAdsSettingsCard } from '../admin/MetaAdsSettingsCard';
+import { XenditSandboxCard } from '../admin/XenditSandboxCard';
 import { AreaMasterCard } from './AreaMasterCard';
 import { PaymentMasterCard } from './PaymentMasterCard';
 import { StaffMasterCard } from './StaffMasterCard';
@@ -590,6 +591,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
                 isReadOnly={!isManagerOrAdmin}
               />
               <MetaAdsSettingsCard currentUser={currentUser} />
+              <XenditSandboxCard currentUser={currentUser} />
             </div>
           )}
 
