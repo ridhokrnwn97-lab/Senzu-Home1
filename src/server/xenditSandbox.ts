@@ -268,8 +268,20 @@ export function createXenditSandbox(deps: Dependencies) {
       const body = req.body;
       if (!body || !['payment_session.completed', 'payment_session.expired'].includes(body.event)) throw fail(400, 'WEBHOOK_EVENT_UNSUPPORTED');
       const data = body.data;
-      if (!data || !matches(data.payment_session_id, SESSION_ID) || !matches(data.reference_id, REFERENCE) ||
+      // The dashboard's Test-and-save example uses the legacy data.id alias
+      // and a foreign SAVE reference. Acknowledge unrelated, authenticated probes
+      // without reading/importing sessions or claiming a payment was verified.
+      const sessionId = data?.payment_session_id ?? data?.id;
+      if (data?.payment_session_id !== undefined && data?.id !== undefined && data.payment_session_id !== data.id) {
+        throw fail(409, 'WEBHOOK_SESSION_ID_CONFLICT');
+      }
+      if (!data || !matches(sessionId, SESSION_ID) || typeof data.reference_id !== 'string' ||
+          !data.reference_id || data.reference_id.length > 64 || /[\x00-\x1F\x7F]/.test(data.reference_id) ||
           typeof body.business_id !== 'string' || !body.business_id) throw fail(400, 'WEBHOOK_INVALID_PAYLOAD');
+      if (!matches(data.reference_id, REFERENCE)) {
+        if (data.reference_id.startsWith('szt_')) throw fail(400, 'WEBHOOK_INVALID_REFERENCE');
+        return { received: true, ignored: true, reason: 'UNRELATED_TEST_SESSION', environment: 'test', realBookingAffected: false };
+      }
       const snap = await deps.db!.collection(SESSIONS).doc(data.reference_id).get();
       // Never import unrelated sessions, including events from a Live integration.
       if (!snap.exists) return { ignored: true };
@@ -280,8 +292,8 @@ export function createXenditSandbox(deps: Dependencies) {
           data.status !== (body.event === 'payment_session.completed' ? 'COMPLETED' : 'EXPIRED')) throw fail(409, 'WEBHOOK_LINKAGE_CONFLICT');
       // Authenticated callback is a wake-up signal, not financial truth. Re-fetch
       // using our Test credential and compare merchant, amount and session linkage.
-      const session = await api(`/sessions/${encodeURIComponent(data.payment_session_id)}`);
-      if (session?.payment_session_id !== data.payment_session_id) throw fail(409, 'WEBHOOK_LINKAGE_CONFLICT');
+      const session = await api(`/sessions/${encodeURIComponent(sessionId)}`);
+      if (session?.payment_session_id !== sessionId) throw fail(409, 'WEBHOOK_LINKAGE_CONFLICT');
       await persistSession(intent.referenceId, session, { event: body.event, businessId: body.business_id });
       return { received: true, environment: 'test', realBookingAffected: false };
     },

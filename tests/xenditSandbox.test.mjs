@@ -213,6 +213,45 @@ test('webhook token rejected before any reads, unknown sessions ignored without 
   assert.equal(f.db.reads.length, 0); assert.equal(f.calls.length, 0);
   assert.equal((await f.service.webhook(webhook(value))).ignored, true); assert.equal(f.db.writes.length, 0);
 });
+test('exact dashboard SAVE probe is acknowledged as ignored: zero database reads/writes and zero API calls', async () => {
+  const f = fixture();
+  const probe = { headers: { 'x-callback-token': token }, rawHeaders: ['x-callback-token', token], body: {
+    event: 'payment_session.completed', business_id: '5781d19b2e2385880609791c', created: '2020-04-20T16:25:52Z', data: {
+      id: 'ps-579c8d61f23fa4ca35e52da4', reference_id: 'test_session', session_type: 'SAVE', status: 'COMPLETED',
+      amount: 100000, currency: 'IDR', country: 'ID', mode: 'PAYMENT_LINK',
+      payment_link_url: 'https://checkout.xendit.co/latest/example',
+    },
+  } };
+  const result = await f.service.webhook(probe);
+  assert.equal(result.ignored, true); assert.equal(result.reason, 'UNRELATED_TEST_SESSION');
+  assert.equal(result.realBookingAffected, false);
+  assert.equal(f.db.reads.length, 0); assert.equal(f.db.writes.length, 0); assert.equal(f.calls.length, 0);
+  probe.headers['x-callback-token'] = 'wrong'; probe.rawHeaders[1] = 'wrong';
+  await rejectCode(f.service.webhook(probe), 401);
+  assert.equal(f.db.reads.length, 0);
+});
+test('legacy id alias on a genuine Test callback retains canonical API and ownership validation', async () => {
+  const f = fixture(); await f.service.checkout(req({ attemptId: attempt }));
+  const value = [...f.remote.values()][0]; value.status = 'COMPLETED';
+  const callback = webhook(value);
+  callback.body.data.id = callback.body.data.payment_session_id; delete callback.body.data.payment_session_id;
+  await f.service.webhook(callback);
+  assert.equal((await f.service.latest(req())).session.sessionStatus, 'COMPLETED');
+  assert.equal(f.calls.filter(c => c.method === 'GET').length, 1);
+});
+test('conflicting id aliases, malformed Senzu references and SAVE/amount spoofing on our intent fail closed', async () => {
+  const f = fixture(); await f.service.checkout(req({ attemptId: attempt }));
+  const value = [...f.remote.values()][0]; const before = f.db.writes.length;
+  const both = webhook(value); both.body.data.id = 'ps-999999999999999999999999';
+  await rejectCode(f.service.webhook(both), 409, 'WEBHOOK_SESSION_ID_CONFLICT');
+  const malformed = webhook(value); malformed.body.data.reference_id = 'szt_broken';
+  await rejectCode(f.service.webhook(malformed), 400, 'WEBHOOK_INVALID_REFERENCE');
+  for (const patch of [{ session_type: 'SAVE' }, { amount: 100000 }, { currency: 'PHP' }]) {
+    const forged = webhook(value); Object.assign(forged.body.data, patch);
+    await rejectCode(f.service.webhook(forged), 409, 'WEBHOOK_LINKAGE_CONFLICT');
+  }
+  assert.equal(f.db.writes.length, before);
+});
 test('webhook re-fetches canonical session, deduplicates events and cannot regress completed Test state', async () => {
   const f = fixture(); await f.service.checkout(req({ attemptId: attempt }));
   const value = [...f.remote.values()][0]; value.status = 'COMPLETED'; value.payment_id = 'py-fixture';
@@ -271,6 +310,14 @@ test('actual HTTP routes return JSON/no-store, no secrets, 401 and 503 without s
     const good = await fetch(`${origin}/api/integrations/xendit/test/status`, { method: 'POST', headers: { Authorization: 'Bearer manager1' } });
     assert.equal(good.status, 200); assert.equal(good.headers.get('cache-control'), 'no-store');
     const text = await good.text(); assert.ok(!text.includes(key)); assert.ok(!text.includes(token));
+    const counts = [f.db.reads.length, f.db.writes.length, f.calls.length];
+    const probe = await fetch(`${origin}/api/integrations/xendit/test/webhook`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-callback-token': token }, body: JSON.stringify({
+        event: 'payment_session.completed', business_id: '5781d19b2e2385880609791c',
+        data: { id: 'ps-579c8d61f23fa4ca35e52da4', reference_id: 'test_session', session_type: 'SAVE', amount: 100000 },
+      }) });
+    assert.equal(probe.status, 200); assert.equal((await probe.json()).ignored, true);
+    assert.deepEqual([f.db.reads.length, f.db.writes.length, f.calls.length], counts);
     f.db.failCommit = true;
     const failed = await fetch(`${origin}/api/integrations/xendit/test/checkout`, { method: 'POST', headers: { Authorization: 'Bearer manager1', 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId: attempt }) });
     assert.equal(failed.status, 503); assert.equal((await failed.json()).code, 'XENDIT_TEST_UNAVAILABLE');

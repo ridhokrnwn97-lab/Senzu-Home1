@@ -135,7 +135,7 @@ npm run build
 node --test tests/xenditSandbox.test.mjs
 ```
 
-17 grup test server/client/HTTP terisolasi lulus. Suite memuat callback otorisasi
+20 grup test server/client/HTTP terisolasi lulus. Suite memuat callback otorisasi
 aktual dari server.ts dan validator Manager Stage 7D aktual melalui TypeScript AST.
 Fixture memeriksa transaksi read-before-write, rollback, retry callback, dua request
 bersamaan, role nonaktif/konflik/duplikat, token invalid, timeout, ownership asing,
@@ -148,7 +148,7 @@ Ini simulasi DOM lokal, **bukan** browser E2E atau pengujian perangkat fisik.
 Lint/build lulus. Build QA diletakkan di luar repository supaya dist yang sudah
 ada tidak tertimpa. Tidak ada perubahan package.json, lockfile, Rules, Admin SDK,
 autentikasi, booking/payment workflow, Meta Pixel, chat atau notifikasi.
-Modul baru juga berhasil di-import dan seluruh 17 test lulus pada Node.js 22
+Modul baru juga berhasil di-import dan seluruh 20 test lulus pada Node.js 22
 dengan native TypeScript stripping, sesuai cara backend dijalankan saat ini.
 
 Belum dijalankan: koneksi Xendit memakai secret asli, webhook dashboard nyata,
@@ -166,3 +166,33 @@ deployment aplikasi/Rules, dan Accurate Online.
 
 Payment Session dibuat dengan PAY + AUTOMATIC, bukan SAVE atau MANUAL authorization.
 Hasil simulasi tidak dipakai sebagai bukti dana nyata atau otorisasi dispatch.
+
+## Koreksi kompatibilitas contoh webhook dashboard — 20 Oktober 2026
+
+Payload bawaan “Tes dan simpan” yang diamati pada dashboard menggunakan
+`data.id`, `reference_id: test_session`, `session_type: SAVE`, nominal 100000 dan
+identitas merchant contoh. Itu bukan sesi PAY Rp10.000 milik percobaan Senzu Home.
+Backend kini mengenali alias `data.id` bila `data.payment_session_id` tidak ada;
+dua alias yang konflik tetap ditolak. Setelah validasi token callback, payload
+berstruktur valid untuk referensi di luar namespace Senzu diakui HTTP 200 dengan
+`ignored: true`, **tanpa DB read/write, tanpa API call, tanpa memperbarui status**.
+Referensi yang menyerupai Senzu tetapi malformed (`szt_...` tidak valid) tetap
+ditolak. Callback untuk intent Senzu tetap wajib lolos seluruh pemeriksaan PAY,
+nominal 10000, merchant, linkage dan GET canonical session.
+
+Ini hanya mengatasi kompatibilitas payload contoh. **Tidak memperbaiki DNS,
+akses cookie/login preview, atau membuat URL preview menjadi endpoint publik.**
+Alamat ais-dev yang dicek anonim pada 20 Oktober menampilkan HTML “Cookie check”
+untuk GET health, sehingga akses callback dari server Xendit belum terbukti.
+ENOTFOUND pada dashboard berarti pengiriman gagal sebelum mencapai handler.
+Gunakan backend Test yang dipublikasikan dan dapat dijangkau server tanpa cookie
+browser; verifikasi deployment/configuration terlebih dahulu. Jangan menganggap
+domain produksi sudah memuat modul ini hanya karena /api/health memberi 200.
+Jangan mengganti URL menjadi senzuhome.com secara buta, mengubah DNS/IAM atau
+melemahkan token validation untuk mengatasi masalah jaringan.
+
+Paket koreksi ini berisi **3 file saja**: src/server/xenditSandbox.ts,
+tests/xenditSandbox.test.mjs, docs/xendit-test.md. Terapkan setelah paket Stage 1;
+ini bukan pengganti tujuh file awal dan tidak mengubah keempat file kode lainnya.
+Pengakuan 200 pada probe dashboard hanya membuktikan token dan jalur callback
+berfungsi; keberhasilan transaksi tetap harus diuji dengan sesi PAY nyata Mode Tes.
