@@ -24,7 +24,7 @@ const mock = {
     const customer = { id:'fixture_customer',authUserId:'manager1',name:'Fixture Customer',phone:'081234567890',gender:'Laki-laki' };
     export function useCustomerAuth() {return {currentCustomer:customer,firebaseUser:auth.currentUser,updateCustomerProfile:async()=>{}};}`,
   db: `export { calculateHomeServiceFee } from ${JSON.stringify(path.join(root, 'src/lib/distanceFeeService.ts'))};
-    export async function createBooking(data) { window.__fixture.bookings++; return { ...data,id:'booking_fixture',bookingCode:'BOOK-FIXTURE',
+    export async function createBooking(data) { window.__fixture.bookings++;window.__fixture.bookingInputs.push(data); return { ...data,id:'booking_fixture',bookingCode:'BOOK-FIXTURE',
     status:'Menunggu Pembayaran',paymentStatus:'UNPAID',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString() }; }`,
   loyalty: `export async function getLoyaltySettings(){return null;} export async function getMembershipTiers(){return [];}
     export async function getLoyaltyAccountByCustomerId(){return null;} export async function getCustomerVouchers(){return [];}
@@ -33,7 +33,7 @@ const mock = {
   master: `export async function getServiceAreas(){return [];}`,
   crm: `export async function getCustomerSavedAddresses(){return [];}`,
   meta: `export async function trackMetaAdsAction(action, context){window.__fixture.meta.push({action,context});}`,
-  payment: `import React from 'react'; export function CustomerPaymentPage(){return <div>Manual payment fixture opened</div>;}`,
+  payment: `import React from 'react'; export function CustomerPaymentPage({booking}){return <div>{booking.paymentMethod==='Xendit'?'Live payment fixture opened':'Manual payment fixture opened'}</div>;}`,
   map: `import React,{useEffect} from 'react'; export function AddressAutocompleteMap(p){useEffect(()=>{
     p.setAddress('Fixture address');p.setDistanceKm(12);p.setDistanceMeters(12000);
   },[]);return <input aria-label="Fixture address" value={p.address} onChange={e=>p.setAddress(e.target.value)}/>;}`,
@@ -67,7 +67,7 @@ before(async () => {
     catch {res.type('css').send('');}
   });
   app.get('/',(_,res)=>res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head>
-    <body style="background:#f8fafc;padding:16px"><div id="root"></div><script>window.__fixture={role:new URLSearchParams(location.search).get('role')||'manager',bookings:0,meta:[],successCallbacks:0};</script><script type="module" src="/bundle.js"></script></body></html>`));
+    <body style="background:#f8fafc;padding:16px"><div id="root"></div><script>window.__fixture={role:new URLSearchParams(location.search).get('role')||'manager',bookings:0,bookingInputs:[],meta:[],successCallbacks:0};</script><script type="module" src="/bundle.js"></script></body></html>`));
   server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
   origin=`http://127.0.0.1:${server.address().port}`;
   browser=await playwright.chromium.launch({headless:true,
@@ -76,13 +76,16 @@ before(async () => {
 });
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));if(temporary)await fs.rm(temporary,{recursive:true,force:true});});
 
-async function pageFixture(role='manager', failure=false) {
+async function pageFixture(role='manager', failure=false, live=false) {
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   const state={session:null,calls:[]};
   await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
     if(url.origin!==origin){await route.abort();return;}
     if(!url.pathname.startsWith('/api/')){await route.continue();return;}
+    if(url.pathname==='/api/integrations/xendit/live/availability'){
+      await route.fulfill({json:{success:true,available:live,environment:'live'}});return;
+    }
     const action=url.pathname.split('/').pop();const body=route.request().postDataJSON();state.calls.push({action,body});
     let response;
     if(action==='status')response={configured:true,environment:'test',amount:10000,currency:'IDR',webhookPath:'/api/integrations/xendit/test/webhook',realBookingAffected:false,message:''};
@@ -166,4 +169,30 @@ test('uncertain creation survives reload without a duplicate checkout and keeps 
     assert.deepEqual(await page.evaluate(()=>[window.__fixture.bookings,window.__fixture.meta.length]),[0,0]);
     assert.deepEqual(errors,[]);
   } finally {await context.close();}
+});
+test('customer Live selection submits full net booking through server checkout without adding a conversion trigger', async()=>{
+  const {context,page,state,errors}=await pageFixture('customer',false,true);
+  try {
+    await page.locator('#payment-xendit-live').click();
+    await page.locator('#btn-submit-booking').click();await page.getByText('Live payment fixture opened',{exact:true}).waitFor();
+    const [input]=await page.evaluate(()=>window.__fixture.bookingInputs);
+    assert.equal(input.paymentMethod,'Xendit');assert.equal(input.totalAmount,280000);assert.ok(input.checkoutAttemptId);
+    assert.equal(input.customerAuthUid,'manager1');assert.equal(input.authUserId,'manager1');
+    assert.deepEqual(await page.evaluate(()=>window.__fixture.meta.map(e=>e.action)),['booking_submitted']);
+    assert.equal(state.calls.filter(c=>c.action==='checkout').length,0);assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});
+test('available Live option does not replace the default manual booking flow or internal Test option', async()=>{
+  const {context,page,state,errors}=await pageFixture('manager',false,true);
+  try {
+    await page.locator('#payment-xendit-live').waitFor();
+    await page.locator('#payment-xendit-test').click();
+    assert.equal(await page.locator('#btn-submit-booking').isDisabled(),true);
+    await page.locator('#payment-xendit-live').click();
+    assert.equal(await page.locator('#btn-submit-booking').isEnabled(),true);
+    await page.getByText('Transfer BNI',{exact:true}).click();
+    await page.locator('#btn-submit-booking').click();await page.getByText('Manual payment fixture opened',{exact:true}).waitFor();
+    assert.equal((await page.evaluate(()=>window.__fixture.bookingInputs))[0].paymentMethod,'Transfer BNI');
+    assert.equal(state.calls.filter(c=>c.action==='checkout').length,0);assert.deepEqual(errors,[]);
+  }finally{await context.close();}
 });

@@ -39,7 +39,8 @@ export type ActivePaymentMethodName =
   | 'Transfer'
   | 'Transfer BNI'
   | 'Transfer Bank Mandiri'
-  | 'Transfer BRI';
+  | 'Transfer BRI'
+  | 'Xendit';
 
 // Deprecated / historical payment methods (for viewing legacy records only; forbidden for new bookings)
 export type HistoricalPaymentMethodName =
@@ -253,6 +254,11 @@ export interface Booking {
   membershipTierAtBooking?: string;
   totalAmount: number;
   paymentMethod: PaymentMethod;
+  gatewayProvider?: 'xendit';
+  gatewayEnvironment?: 'live';
+  gatewayReceiptId?: string;
+  gatewayQuoteHash?: string;
+  gatewayReviewRequired?: boolean;
   paymentStatus: PaymentStatus;
   status: BookingStatus;
   customerNotes: string;

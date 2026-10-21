@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import express from 'express';
 import { transform } from 'esbuild';
+import { createRequire } from 'node:module';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { createPaymentAcceptance, registerPaymentAcceptance, assertPaymentLink, bookingDeadline } from '../../src/server/paymentAcceptance';
+import { createPaymentAcceptance, registerPaymentAcceptance, assertPaymentLink, assertManualPayment } from '../../src/server/paymentAcceptance';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8187') throw new Error('Tests only run against local emulator 127.0.0.1:8187');
+// Use the application's compiler API, not firebase-tools' transitive compiler.
+const ts = createRequire(new URL('../../package.json', import.meta.url))('typescript');
 const projectId = 'demo-senzu-payments';
 const admin = initializeApp({ projectId }, 'payment-tests');
 const db = getFirestore(admin);
@@ -26,6 +29,8 @@ async function post(path: string, body: any = {}, token?: string) {
 }
 before(async () => {
   env = await initializeTestEnvironment({ projectId, firestore: { host: '127.0.0.1', port: 8187, rules: fs.readFileSync('firestore.rules','utf8') } });
+  await env.clearFirestore();
+  await db.collection('services').doc('fixture_service').set({price:160000,isActive:true});
   const app = express(); app.use(express.json({ limit: '5mb' }));
   const adminAuth = { verifyIdToken: async (token: string) => {
     if (!['alice','bob','css','manager','therapist','inactive'].includes(token)) throw new Error('invalid');
@@ -33,13 +38,23 @@ before(async () => {
   }};
   // Execute the actual payment endpoint registrations without importing server startup/production sync.
   const source = fs.readFileSync('server.ts','utf8');
-  const start = source.indexOf('  registerPaymentAcceptance(app,');
-  const endpoint = source.indexOf("  app.post('/api/payments/:paymentId/expire'");
-  const end = source.indexOf('\n  });', endpoint) + '\n  });'.length;
-  assert.ok(start > 0 && end > start);
-  const js = (await transform(source.slice(start, end), { loader: 'ts', format: 'cjs', target: 'es2022' })).code;
-  new Function('app','adminDb','adminAuth','registerPaymentAcceptance','assertPaymentLink','ensureServerAuthenticated','emitStructuredLog', js)(app, db, adminAuth, registerPaymentAcceptance, assertPaymentLink, async () => {}, () => {});
-  for (const [uid, role, isActive] of [['css','css',true],['manager','manager',true],['therapist','therapist',true],['inactive','manager',false]] as const) await db.collection('staff_roles').doc(uid).set({ role, isActive, name: uid, staffId: uid });
+  const ast = ts.createSourceFile('server.ts', source, ts.ScriptTarget.Latest, true);
+  const routes: string[] = [];
+  const wanted = new Set(['/api/payments/:paymentId/verify', '/api/payments/:paymentId/reject', '/api/payments/:paymentId/expire']);
+  function visit(node: any) {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === 'app.post'
+      && ts.isStringLiteral(node.arguments[0]) && wanted.has(node.arguments[0].text)) routes.push(node.getText(ast) + ';');
+    ts.forEachChild(node, visit);
+  }
+  visit(ast); assert.equal(routes.length, 3);
+  registerPaymentAcceptance(app, db, token => adminAuth.verifyIdToken(token));
+  const js = (await transform(routes.join('\n'), { loader: 'ts', format: 'cjs', target: 'es2022' })).code;
+  new Function('app','adminDb','adminAuth','assertPaymentLink','assertManualPayment','ensureServerAuthenticated','emitStructuredLog','loyaltyAccounts', js)(
+    app, db, adminAuth, assertPaymentLink, assertManualPayment, async () => {}, () => {}, {creditBookingLoyalty:async () => {}});
+  for (const [uid, role, isActive] of [['css','css',true],['manager','manager',true],['therapist','therapist',true],['inactive','manager',false]] as const) {
+    await db.collection('staff_roles').doc(uid).set({ role, isActive, name: uid, staffId: uid });
+    await db.collection('staff_users').doc(uid).set({ role, isActive, authUserId:uid, name:uid });
+  }
   http = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => http.once('listening', resolve));
   url = `http://127.0.0.1:${http.address().port}`;
 });
@@ -124,7 +139,8 @@ test('client rules deny forged payment creation/proof/deadline and foreign reads
 });
 test('new booking rules require unforgeable clock policy; legacy cannot opt out via update', async () => {
   const alice=env.authenticatedContext('alice').firestore();
-  const payload={status:'Menunggu Pembayaran',paymentStatus:'UNPAID',customerAuthUid:'alice',authUserId:'alice',paymentPolicyVersion:2,paymentDeadline:null};
+  const payload={status:'Menunggu Pembayaran',paymentStatus:'UNPAID',customerAuthUid:'alice',authUserId:'alice',paymentPolicyVersion:2,paymentDeadline:null,
+    serviceId:'fixture_service',servicePrice:160000,homeServiceFee:20000,totalAmount:180000};
   await assertSucceeds(alice.doc('bookings/client-valid').set(payload));
   await assertFails(alice.doc('bookings/client-forged').set({...payload,paymentDeadline:'2099-01-01'}));
   await assertFails(alice.doc('bookings/client-no-policy').set({...payload,paymentPolicyVersion:1}));
@@ -147,7 +163,8 @@ test('rules conflict denial and authorized staff reads/corrections remain availa
   const alice=env.authenticatedContext('alice',{email:'alice@example.test'}).firestore();
   const css=env.authenticatedContext('css',{email:'css@example.test'}).firestore();
   await assertSucceeds(css.collection('payments').where('status','==','unpaid').get());
-  await assertSucceeds(css.doc(`payments/${payment.id}`).update({correctionReason:'test fixture',updatedAt:new Date().toISOString()}));
+  // Current production rules require the authoritative correction endpoint for staff too.
+  await assertFails(css.doc(`payments/${payment.id}`).update({correctionReason:'test fixture',updatedAt:new Date().toISOString()}));
   await assertFails(css.doc(`payments/${payment.id}`).update({paymentDeadline:'2099-01-01'}));
   await db.collection('payments').doc(payment.id).update({authUserId:'bob'});
   await assertFails(alice.doc(`payments/${payment.id}`).get());

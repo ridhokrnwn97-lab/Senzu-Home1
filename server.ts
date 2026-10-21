@@ -1,5 +1,7 @@
-import { registerPaymentAcceptance, assertPaymentLink } from './src/server/paymentAcceptance.ts';
+import { registerPaymentAcceptance, assertPaymentLink, assertManualPayment } from './src/server/paymentAcceptance.ts';
 import { registerXenditSandbox } from './src/server/xenditSandbox.ts';
+import { registerXenditLive } from './src/server/xenditLive.ts';
+import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
@@ -1720,6 +1722,37 @@ async function startServer() {
   // Loyalty point earning + account provisioning run server-side; Firestore rules keep client writes staff-only.
   const loyaltyAccounts = registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));
 
+  const liveXendit = registerXenditLive(app, {
+    db: adminDb,
+    verify: token => {
+      if (!adminAuth) throw Object.assign(new Error('Auth unavailable'), { code: 'auth/internal-error' });
+      return adminAuth.verifyIdToken(token);
+    },
+    authorizeManager: async (transaction, uid) => {
+      const [roleSnap, canonical, legacy, direct] = await Promise.all([
+        transaction.get(adminDb.collection('staff_roles').doc(uid)),
+        transaction.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').doc(uid)),
+      ]);
+      const matches = new Map<string, any>();
+      for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+      const role = roleSnap.data() || {};
+      for (const linked of [role.staffId, role.staffUserId]) {
+        if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !matches.has(linked)) {
+          const snap = await transaction.get(adminDb.collection('staff_users').doc(linked));
+          if (snap.exists) matches.set(snap.id, snap);
+        }
+      }
+      const result = validateStage7dActiveManagerIdentity(uid, roleSnap.exists, role, matches);
+      if (!result.ok) throw Object.assign(new Error(result.message || 'Akses Manager/Admin diperlukan.'), {
+        status: result.status || 403, code: result.code || 'MANAGER_ROLE_REQUIRED',
+      });
+      return result;
+    },
+    onPaid: bookingId => loyaltyAccounts.creditBookingLoyalty(bookingId),
+  });
+
   // Protected Server Endpoint for Payment Verification (Prompt 18 Phase 5)
   app.post('/api/payments/:paymentId/verify', async (req, res) => {
     try {
@@ -1770,6 +1803,7 @@ async function startServer() {
           throw { status: 404, message: 'Data pembayaran tidak ditemukan.' };
         }
         const payment = paymentSnap.data() as any;
+        assertManualPayment(payment);
 
         // Authoritative linkage: Resolve booking strictly from persisted payment record
         if (bookingId && bookingId !== payment.bookingId) {
@@ -1975,6 +2009,7 @@ async function startServer() {
           throw { status: 404, message: 'Data pembayaran tidak ditemukan.' };
         }
         const payment = paymentSnap.data() as any;
+        assertManualPayment(payment);
 
         // Authoritative linkage: Resolve booking strictly from persisted payment record
         if (bookingId && bookingId !== payment.bookingId) {
@@ -2132,6 +2167,7 @@ async function startServer() {
           throw { status: 404, message: 'Data pembayaran tidak ditemukan.' };
         }
         const payment = paymentSnap.data() as any;
+        assertManualPayment(payment);
 
         // Authoritative linkage: Resolve booking strictly from persisted payment record
         if (bookingId && bookingId !== payment.bookingId) {
@@ -3197,6 +3233,7 @@ async function startServer() {
           };
         }
         const paymentData = paymentSnap.data() || {};
+        assertManualPayment(paymentData);
         if (
           paymentData.id !== undefined &&
           paymentData.id !== null &&
@@ -7709,6 +7746,7 @@ async function startServer() {
         });
       }
 
+      const isLiveCheckout = paymentMethodTrimmed === 'Xendit';
       const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
       if (!serviceId || !isValidDocId(serviceId, 128)) {
         return res.status(400).json({
@@ -7913,7 +7951,8 @@ async function startServer() {
             : 0;
 
       const pointsOnlyCheckout = !personalCvId && !effectivePromoCode && !generalPromoId && requestedPoints > 0;
-      if (!personalCvId && !effectivePromoCode && !generalPromoId && !pointsOnlyCheckout) {
+      const plainLiveCheckout = isLiveCheckout && !personalCvId && !effectivePromoCode && !generalPromoId && requestedPoints === 0;
+      if (!personalCvId && !effectivePromoCode && !generalPromoId && !pointsOnlyCheckout && !plainLiveCheckout) {
         return res.status(400).json({
           success: false,
           code: 'VOUCHER_REQUIRED',
@@ -7966,6 +8005,7 @@ async function startServer() {
         customerNotes: text(req.body?.customerNotes).slice(0, 1000),
         referredByCustomerId: text(req.body?.referredByCustomerId), referralCodeUsed: text(req.body?.referralCodeUsed).toUpperCase(),
         personalCvId, generalPromoId, effectivePromoCode, requestedPoints,
+        ...(isLiveCheckout ? { customerGender: text(req.body?.customerGender) } : {}),
       };
       const checkoutReceiptId = `vchk_${createHash('sha256').update(JSON.stringify([verifiedUid, checkoutAttemptId])).digest('hex')}`;
       const checkoutReceiptRef = adminDb.collection('voucher_checkout_receipts').doc(checkoutReceiptId);
@@ -7973,6 +8013,9 @@ async function startServer() {
       const candidateBookingCode = deriveDeterministicBookingCode(verifiedUid, checkoutAttemptId);
       const candidateBookingId = `bk_${candidateBookingCode}`;
       const candidateBookingRef = adminDb.collection('bookings').doc(candidateBookingId);
+      // API work stays outside a retryable Firestore transaction; replay never requotes.
+      const needsLiveQuote = isLiveCheckout && req.body?.recoverOnly !== true && !(await checkoutReceiptRef.get()).exists;
+      const liveRoute = needsLiveQuote ? await liveXendit.prepareBookingRoute(latitude, longitude) : null;
 
       // 3. Authoritative Native Admin Transaction (All reads precede all writes)
       const txOutcome: any = await adminDb.runTransaction(async (transaction: any) => {
@@ -7990,10 +8033,14 @@ async function startServer() {
           const conflict = (code = 'VOUCHER_RECEIPT_CONFLICT') => ({ status: 409, code,
             error: 'Bukti checkout tidak lengkap atau detail pesanan berbeda. Hubungi Customer Service untuk peninjauan.' });
           const pointsReceipt = receipt.schemaVersion === 2 && receipt.benefitType === 'points';
+          const plainLiveReceipt = receipt.schemaVersion === 2 && receipt.benefitType === 'xendit';
           if (![1, 2].includes(receipt.schemaVersion) || receipt.checkoutAttemptId !== checkoutAttemptId
             || receipt.customerAuthUid !== verifiedUid || !isValidDocId(receipt.bookingId, 256)
             || !isValidDocId(receipt.redemptionId, 256)
-            || (pointsReceipt ? (receipt.voucherId !== null || receipt.voucherCode !== null
+            || (plainLiveReceipt ? (receipt.gatewayEnvironment !== 'live' || receipt.paymentMethod !== 'Xendit'
+              || receipt.voucherId !== null || receipt.voucherCode !== null || receipt.discountAmount !== 0
+              || receipt.pointsRedeemed !== 0 || receipt.redemptionId !== `xpay_${receipt.bookingId}`)
+              : pointsReceipt ? (receipt.voucherId !== null || receipt.voucherCode !== null
               || receipt.discountAmount !== 0 || !isFinitePositiveNumber(receipt.pointsRedeemed)
               || receipt.redemptionId !== receipt.loyaltyTransactionId)
               : (!isValidDocId(receipt.voucherId, 128) || !isFinitePositiveNumber(receipt.discountAmount)))
@@ -8063,10 +8110,10 @@ async function startServer() {
             if (applied.length === 0 && !receipt.personalCustomerVoucherId) applied.push({kind: 'general',
               voucherId: receipt.voucherId, voucherCode: receipt.voucherCode, redemptionId: receipt.redemptionId, discountAmount: receipt.discountAmount});
           }
-          if (!Array.isArray(applied) || (pointsReceipt ? applied.length !== 0 : applied.length < 1) || applied.length > 2
+          if (!Array.isArray(applied) || ((pointsReceipt || plainLiveReceipt) ? applied.length !== 0 : applied.length < 1) || applied.length > 2
             || applied.some(item => !item || typeof item !== 'object')
             || new Set(applied.map(item => item.redemptionId)).size !== applied.length
-            || (!pointsReceipt && !applied.some(item => item.redemptionId === receipt.redemptionId))
+            || (!pointsReceipt && !plainLiveReceipt && !applied.some(item => item.redemptionId === receipt.redemptionId))
             || applied.reduce((sum, item) => sum + item.discountAmount, 0) !== receipt.discountAmount) return conflict();
           for (const item of applied) {
             if (!['general', 'personal'].includes(item.kind) || !isValidDocId(item.voucherId, 128)
@@ -8123,6 +8170,7 @@ async function startServer() {
         // --- PHASE 2: COMPLETE ALL TRANSACTION READS BEFORE ANY WRITES ---
         const candidateBookingSnap = await transaction.get(candidateBookingRef);
         const serviceSnap = await transaction.get(adminDb.collection('services').doc(serviceId));
+        const liveOperational = isLiveCheckout ? await transaction.get(adminDb.collection('settings').doc('operational')) : null;
 
         const vouchersByPromoCodeSnap = effectivePromoCode
           ? await transaction.get(adminDb.collection('vouchers').where('code', '==', effectivePromoCode))
@@ -8446,7 +8494,7 @@ async function startServer() {
           ...DEFAULT_LOYALTY_SETTINGS,
           ...rawLoyaltySettings,
         };
-        if (!pointsOnlyCheckout && loyaltySettings.voucherEnabled === false) {
+        if (!pointsOnlyCheckout && !plainLiveCheckout && loyaltySettings.voucherEnabled === false) {
           return {
             status: 409,
             code: 'VOUCHER_DISABLED',
@@ -8827,7 +8875,7 @@ async function startServer() {
           resolvedGeneralPromoCode = gpCode;
         }
 
-        if (!resolvedGeneralPromoMaster && !resolvedPersonalCv && !pointsOnlyCheckout) {
+        if (!resolvedGeneralPromoMaster && !resolvedPersonalCv && !pointsOnlyCheckout && !plainLiveCheckout) {
           return {
             status: 409,
             code: 'VOUCHER_BOOKING_MISMATCH',
@@ -8896,7 +8944,7 @@ async function startServer() {
             ? req.body.distanceKm
             : 0;
 
-        if (needsVerifiedHomeServiceFee) {
+        if (needsVerifiedHomeServiceFee && !isLiveCheckout) {
           if (
             rawDistKm < 0 ||
             rawDistKm < minStraightKm * 0.95 ||
@@ -8919,8 +8967,8 @@ async function startServer() {
           }
         }
 
-        const finalDistanceKm =
-          rawDistKm <= 0 || rawDistKm < minStraightKm * 0.95 ? minStraightKm : rawDistKm;
+        const finalDistanceKm = isLiveCheckout ? liveRoute!.distanceKm
+          : rawDistKm <= 0 || rawDistKm < minStraightKm * 0.95 ? minStraightKm : rawDistKm;
         if (minStraightKm > 0.2 && finalDistanceKm === 0) {
           return {
             status: 400,
@@ -8928,7 +8976,7 @@ async function startServer() {
             error: 'Jarak lokasi belum dapat dihitung. Silakan periksa titik lokasi Anda.',
           };
         }
-        const finalDistanceMeters =
+        const finalDistanceMeters = isLiveCheckout ? liveRoute!.distanceMeters :
           typeof req.body?.distanceMeters === 'number' &&
           Number.isFinite(req.body.distanceMeters) &&
           req.body.distanceMeters >= Math.round(minStraightKm * 950)
@@ -9048,7 +9096,7 @@ async function startServer() {
           });
         }
 
-        if (voucherTargets.length === 0 && !(pointsOnlyCheckout && pricingBreakdown.pointsRedeemed > 0)) {
+        if (voucherTargets.length === 0 && !plainLiveCheckout && !(pointsOnlyCheckout && pricingBreakdown.pointsRedeemed > 0)) {
           return { status: 409, code: 'VOUCHER_INELIGIBLE', error: 'Voucher tidak menghasilkan potongan untuk pesanan ini.' };
         }
 
@@ -9500,11 +9548,20 @@ async function startServer() {
           };
         }
 
+        if (isLiveCheckout) {
+          liveXendit.assertBookingAllowed();
+          if (serviceData.isActive !== true || serviceData.serviceType === 'OUTLET' ||
+              !Number.isInteger(pricingBreakdown.finalAmount) || pricingBreakdown.finalAmount < 10000 || pricingBreakdown.finalAmount > 10000000) {
+            return { status: 409, code: 'LIVE_AMOUNT_UNAVAILABLE', error: 'Pembayaran online tersedia untuk layanan aktif dengan total Rp10.000 sampai Rp10.000.000.' };
+          }
+          validateLiveSchedule(req.body, serviceData.duration, liveOperational?.data());
+        }
+
         // --- PHASE 4: ATOMIC TRANSACTION WRITES ---
         const primaryTarget = voucherTargets[0];
         const appliedGeneral = voucherTargets.find(target => target.kind === 'general');
         const appliedPersonal = voucherTargets.find(target => target.kind === 'personal');
-        const primaryRedemptionId = primaryTarget ? `vred_${primaryTarget.code}_${candidateBookingId}` : loyaltyTxId;
+        const primaryRedemptionId = primaryTarget ? `vred_${primaryTarget.code}_${candidateBookingId}` : plainLiveCheckout ? `xpay_${candidateBookingId}` : loyaltyTxId;
 
         const newBookingData = cleanBookingRecord({
           id: candidateBookingId,
@@ -9567,6 +9624,7 @@ async function startServer() {
           membershipTierAtBooking: resolvedTier.name || 'Member',
           totalAmount: pricingBreakdown.finalAmount,
           paymentMethod: paymentMethodTrimmed,
+          ...(isLiveCheckout ? { gatewayProvider: 'xendit', gatewayEnvironment: 'live', gatewayReceiptId: checkoutReceiptRef.id } : {}),
           customerNotes: typeof req.body?.customerNotes === 'string' ? req.body.customerNotes.trim().slice(0, 1000) : '',
           status: 'Menunggu Pembayaran',
           paymentStatus: 'UNPAID',
@@ -9576,6 +9634,7 @@ async function startServer() {
           updatedAt: nowIso,
         });
 
+        if (isLiveCheckout) newBookingData.gatewayQuoteHash = liveQuoteSeal(newBookingData);
         transaction.set(candidateBookingRef, newBookingData);
 
         // These existing handoff records commit with the booking. A lost HTTP response cannot skip or duplicate them.
@@ -9791,7 +9850,8 @@ async function startServer() {
 
         transaction.set(checkoutReceiptRef, {
           schemaVersion: 2,
-          benefitType: pointsOnlyCheckout ? 'points' : 'voucher',
+          benefitType: plainLiveCheckout ? 'xendit' : pointsOnlyCheckout ? 'points' : 'voucher',
+          ...(isLiveCheckout ? { gatewayProvider: 'xendit', gatewayEnvironment: 'live', gatewayQuoteHash: newBookingData.gatewayQuoteHash } : {}),
           initialHistoryId, bookingEventId, crmRecorded: Boolean(verifiedCustomerId),
           intent: checkoutIntent,
           appliedVouchers: voucherTargets.map(target => cleanBookingRecord({
@@ -9875,6 +9935,9 @@ async function startServer() {
         ...(txOutcome.pricingBreakdown ? { pricingBreakdown: txOutcome.pricingBreakdown } : {}),
       });
     } catch (err: any) {
+      if (err?.status && /^(XENDIT_LIVE|LIVE_|INVALID_LIVE|INVALID_COORDINATES)/.test(err.code || '')) {
+        return res.status(err.status).json({ success: false, code: err.code, error: err.message });
+      }
       if (err?.code === 'LOYALTY_OWNERSHIP_CONFLICT') return res.status(409).json({success: false, code: err.code, error: err.message, errorMessage: err.message});
       console.error('[VoucherCheckout] Transaction or infrastructure failure:', err?.code || err?.message || err);
       return res.status(503).json({

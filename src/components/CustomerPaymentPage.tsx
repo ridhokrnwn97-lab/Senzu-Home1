@@ -46,13 +46,18 @@ import { CustomerRegisterModal } from './CustomerRegisterModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { trackMetaAdsAction } from '../lib/metaPixel';
 
+import { XenditLivePaymentPage } from './customer/XenditLivePaymentPage';
+
 interface CustomerPaymentPageProps {
   booking: Booking;
   onBackToBooking?: () => void;
   onOpenTracking?: (code: string) => void;
 }
 
-export const CustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
+export const CustomerPaymentPage: React.FC<CustomerPaymentPageProps> = props => props.booking.paymentMethod === 'Xendit'
+  ? <XenditLivePaymentPage {...props} /> : <ManualCustomerPaymentPage {...props} />;
+
+const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
   booking,
   onBackToBooking,
   onOpenTracking,
