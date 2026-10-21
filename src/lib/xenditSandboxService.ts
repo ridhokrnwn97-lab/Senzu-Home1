@@ -1,4 +1,6 @@
 import { auth } from './firebase';
+import { isXenditBookingPreview, normalizeXenditBookingPreview, type XenditBookingPreview,
+  type XenditBookingPreviewInput } from './xenditBookingPreview';
 
 export type XenditTestSession = {
   referenceId: string;
@@ -6,7 +8,8 @@ export type XenditTestSession = {
   checkoutUrl: string | null;
   sessionStatus: 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELED' | null;
   creationState: 'creating' | 'created' | 'uncertain' | 'rejected' | 'review_closed';
-  amount: 10000;
+  amount: number;
+  bookingPreview?: XenditBookingPreview;
   currency: 'IDR';
   environment: 'test';
   expiresAt: string | null;
@@ -28,7 +31,9 @@ export function safeXenditTestLink(raw: string): string {
 }
 function validateSession(value: any): XenditTestSession {
   if (!value || !/^szt_[a-f0-9]{48}$/.test(value.referenceId || '') || value.environment !== 'test' ||
-      value.amount !== 10000 || value.currency !== 'IDR' || value.realBookingAffected !== false ||
+      (value.bookingPreview === undefined ? value.amount !== 10000
+        : !isXenditBookingPreview(value.bookingPreview) || value.amount !== value.bookingPreview.totalAmount) ||
+      value.currency !== 'IDR' || value.realBookingAffected !== false ||
       !['creating', 'created', 'uncertain', 'rejected', 'review_closed'].includes(value.creationState) ||
       ![null, 'ACTIVE', 'COMPLETED', 'EXPIRED', 'CANCELED'].includes(value.sessionStatus) ||
       (value.sessionId !== null && (typeof value.sessionId !== 'string' || !/^ps-[a-zA-Z0-9-]{16,80}$/.test(value.sessionId))) ||
@@ -76,9 +81,10 @@ export async function getLatestXenditTestSession(signal?: AbortSignal): Promise<
   const data = await request('latest', {}, signal);
   return data.session === null ? null : validateSession(data.session);
 }
-export async function createXenditTestSession(attemptId: string): Promise<XenditTestSession> {
+export async function createXenditTestSession(attemptId: string, bookingPreview?: XenditBookingPreviewInput): Promise<XenditTestSession> {
   if (!/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId)) throw new Error('ID percobaan tidak valid.');
-  return validateSession((await request('checkout', { attemptId })).session);
+  return validateSession((await request('checkout', { attemptId,
+    ...(bookingPreview ? { bookingPreview: normalizeXenditBookingPreview(bookingPreview) } : {}) })).session);
 }
 export async function readXenditTestSession(referenceId: string, sessionId?: string): Promise<XenditTestSession> {
   if (!/^szt_[a-f0-9]{48}$/.test(referenceId)) throw new Error('Referensi percobaan tidak valid.');

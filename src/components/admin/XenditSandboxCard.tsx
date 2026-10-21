@@ -3,6 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { CreditCard, ExternalLink, RefreshCw } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import type { StaffUser } from '../../types';
+import { normalizeXenditBookingPreview, type XenditBookingPreviewInput } from '../../lib/xenditBookingPreview';
 import { closeReviewedXenditTestAttempt, createXenditTestSession, getLatestXenditTestSession, getXenditTestStatus, readXenditTestSession,
   safeXenditTestLink, type XenditTestSession, type XenditTestStatus } from '../../lib/xenditSandboxService';
 
@@ -12,22 +13,32 @@ const labels: Record<string, string> = { ACTIVE: 'Menunggu simulasi pembayaran',
   uncertain: 'Hasil pembuatan belum pasti', rejected: 'Permintaan ditolak Xendit',
   review_closed: 'Catatan percobaan Test ditutup setelah pemeriksaan' };
 
-export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
+export function XenditSandboxCard({ currentUser, bookingPreview }: {
+  currentUser: StaffUser; bookingPreview?: XenditBookingPreviewInput | null;
+}) {
   const [status, setStatus] = useState<XenditTestStatus | null>(null);
   const [session, setSession] = useState<XenditTestSession | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [recoverySessionId, setRecoverySessionId] = useState('');
   const [dashboardChecked, setDashboardChecked] = useState(false);
-  const generation = useRef(0), attempt = useRef(''), inFlight = useRef(false);
+  const generation = useRef(0), attempt = useRef(''), attemptInput = useRef(''), inFlight = useRef(false);
   const allowed = ['manager', 'admin'].includes(currentUser.role);
+  const bookingCheckout = bookingPreview !== undefined;
+  const headingId = React.useId();
+  let previewError = '';
+  if (bookingCheckout) {
+    try { normalizeXenditBookingPreview(bookingPreview); }
+    catch (problem: any) { previewError = problem.message; }
+  }
+  const rupiah = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(value);
 
   useEffect(() => {
     let controller: AbortController | null = null;
     const off = onAuthStateChanged(auth, user => {
       const gen = ++generation.current;
       controller?.abort(); controller = new AbortController();
-      attempt.current = ''; inFlight.current = false;
+      attempt.current = ''; attemptInput.current = ''; inFlight.current = false;
       setStatus(null); setSession(null); setReady(false); setBusy(false); setError('');
       setRecoverySessionId(''); setDashboardChecked(false);
       if (!allowed || !user) return;
@@ -61,9 +72,15 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
         const value = await closeReviewedXenditTestAttempt(session.referenceId);
         if (stable()) { setSession(value); setDashboardChecked(false); }
       } else if (action === 'create' || action === 'new') {
-        if (action === 'new') attempt.current = '';
+        const input = bookingCheckout ? normalizeXenditBookingPreview(bookingPreview) : undefined;
+        const fingerprint = JSON.stringify(input || null);
+        if (action === 'new') { attempt.current = ''; attemptInput.current = ''; }
+        if (attempt.current && attemptInput.current !== fingerprint) {
+          throw new Error('Isian berubah setelah percobaan dikirim. Muat ulang dan pulihkan percobaan tersimpan dahulu.');
+        }
         if (!attempt.current) attempt.current = crypto.randomUUID();
-        const value = await createXenditTestSession(attempt.current);
+        attemptInput.current = fingerprint;
+        const value = await createXenditTestSession(attempt.current, input);
         if (stable()) setSession(value);
       }
     } catch (problem: any) {
@@ -81,16 +98,24 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
   if (!allowed) return null;
   const terminal = ['rejected', 'review_closed'].includes(session?.creationState || '') || ['COMPLETED', 'EXPIRED', 'CANCELED'].includes(session?.sessionStatus || '');
   const recoverable = session && !session.sessionId && ['creating', 'uncertain'].includes(session.creationState);
-  return <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="xendit-test-heading">
+  return <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby={headingId}>
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 p-5 sm:p-6">
       <div className="flex items-center gap-3"><CreditCard className="h-6 w-6 text-[#082A4F]" /><div>
-        <h3 id="xendit-test-heading" className="font-serif text-lg font-bold text-[#082A4F]">Xendit — Mode Tes</h3>
+        <h3 id={headingId} className="font-serif text-lg font-bold text-[#082A4F]">{bookingCheckout ? 'Xendit — Uji Checkout Booking' : 'Xendit — Mode Tes'}</h3>
         <p className="mt-1 text-xs text-slate-500">Uji koneksi pembayaran sebelum aktivasi pelanggan.</p>
       </div></div>
       <button type="button" className={button} disabled={busy} onClick={() => act('load')}><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Muat Ulang</button>
     </div>
     <div className="space-y-4 p-5 sm:p-6">
-      <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Simulasi Rp10.000 tanpa uang nyata. Tidak melunasi booking, tidak mengirim terapis, dan tidak masuk pembukuan Accurate. Gunakan simulasi pada checkout Xendit Mode Tes.</p>
+      <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        {bookingCheckout ? 'Uji pembayaran 100% dari ringkasan formulir, khusus Manager/Admin. ' : 'Uji pembayaran tanpa uang nyata. '}
+        Tidak membuat atau melunasi pesanan layanan, tidak mengirim terapis, dan tidak masuk pembukuan Accurate. Gunakan fasilitas simulasi Xendit Mode Tes.
+      </p>
+      {bookingCheckout && <div className="space-y-1 rounded-lg border border-slate-200 p-3 text-xs text-slate-600">
+        <p>Total pada formulir saat ini: <strong>{bookingPreview ? rupiah(bookingPreview.expectedAmount) : 'Belum tersedia'}</strong>.</p>
+        <p>Harga layanan diperiksa ke katalog server. Jarak dan potongan pada formulir hanya disimulasikan; voucher dan poin tidak dipakai atau dikurangi.</p>
+        {previewError && <p role="alert" className="text-amber-800">{previewError}</p>}
+      </div>}
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       {busy && <p role="status" className="text-sm text-slate-500">Memproses permintaan Xendit...</p>}
       {status && <>
@@ -105,6 +130,12 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
       {session && <div className="space-y-2 rounded-xl border border-slate-200 p-4 text-sm text-slate-700">
         <p>Status: <strong>{labels[session.sessionStatus || session.creationState] || 'Belum tersedia'}</strong></p>
         <p className="break-all text-xs">Referensi: {session.referenceId}</p>
+        <p className="text-xs">Nominal sesi tersimpan: <strong>{rupiah(session.amount)}</strong>.</p>
+        {session.bookingPreview && <div className="space-y-1 text-xs">
+          <p>Layanan sesi: {session.bookingPreview.serviceName} — {rupiah(session.bookingPreview.servicePrice)}</p>
+          <p>Biaya kunjungan: {rupiah(session.bookingPreview.homeServiceFee)} · Potongan simulasi: {rupiah(session.bookingPreview.discountAmount)}</p>
+          <p>Ringkasan sesi dikunci saat dibuat. Perubahan formulir berlaku untuk percobaan baru setelah sesi ini selesai.</p>
+        </div>}
         {session.expiresAt && <p className="text-xs">Batas sesi: {new Date(session.expiresAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</p>}
         <p className="text-xs">Webhook: {session.lastWebhookAt ? 'Sudah diterima dan dicocokkan dengan API Xendit' : 'Belum diterima'}</p>
         <p className="text-xs">Sesi Test selesai tetap tidak mengubah status pembayaran pesanan asli.</p>
@@ -130,10 +161,10 @@ export function XenditSandboxCard({ currentUser }: { currentUser: StaffUser }) {
         <p className="text-xs text-slate-500">Tidak mengirim ulang permintaan checkout. Setelah ditutup, percobaan baru hanya dibuat jika Anda menekan tombolnya.</p>
       </div>}
       <div className="flex flex-wrap gap-3">
-        {!session && <button type="button" className={button} disabled={busy || !ready || !status?.configured} onClick={() => act('create')}>Buat Checkout Test Rp10.000</button>}
+        {!session && <button type="button" className={button} disabled={busy || !ready || !status?.configured || Boolean(previewError)} onClick={() => act('create')}>{bookingCheckout ? 'Buat Checkout Test sesuai Ringkasan' : 'Buat Checkout Test Rp10.000'}</button>}
         {session && <button type="button" className={button} disabled={busy || !status?.configured} onClick={() => act('read')}>Periksa Status Xendit</button>}
         {session?.checkoutUrl && session.sessionStatus === 'ACTIVE' && <a className={button} href={safeXenditTestLink(session.checkoutUrl)} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-4 w-4" /> Buka Checkout Test</a>}
-        {terminal && <button type="button" className={button} disabled={busy || !status?.configured} onClick={() => act('new')}>Buat Percobaan Test Baru</button>}
+        {terminal && <button type="button" className={button} disabled={busy || !status?.configured || Boolean(previewError)} onClick={() => act('new')}>{bookingCheckout ? 'Buat Checkout Test sesuai Ringkasan' : 'Buat Percobaan Test Baru'}</button>}
       </div>
     </div>
   </section>;
