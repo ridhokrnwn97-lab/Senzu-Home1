@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { transformSync } from 'esbuild';
 import express from 'express';
 import { createXenditSandbox, registerXenditSandbox, safeTestCheckoutUrl } from '../src/server/xenditSandbox.ts';
+import * as previewHelpers from '../src/lib/xenditBookingPreview.ts';
 
 // Extract the actual existing Manager policy AND the actual injected callback.
 // No application startup, Firebase initialization, credentials or network access.
@@ -119,6 +120,10 @@ function fixture(overrides = {}) {
   return { db, remote, calls, deps, service, advance: ms => { time += ms; }, setMode: value => { postMode = value; }, setGate: value => { gate = value; }, patchGet: value => { getPatch = value; } };
 }
 const rejectCode = (promise, status, code) => assert.rejects(promise, e => e.status === status && (!code || e.code === code));
+const bookingPreviewInput = () => ({ serviceId: 'srv-test', distanceKm: 12, discountAmount: 20000, expectedAmount: 260000 });
+function seedService(f, patch = {}) {
+  f.db.seed('services/srv-test', { name: 'Signature fixture', price: 250000, isActive: true, serviceType: 'HOME_SERVICE', ...patch });
+}
 function webhook(value, event = 'payment_session.completed', header = token) {
   const data = { ...value, status: event.endsWith('completed') ? 'COMPLETED' : 'EXPIRED' };
   return { headers: { 'x-callback-token': header }, rawHeaders: ['x-callback-token', header], body: { event, business_id: value.business_id, data } };
@@ -333,7 +338,8 @@ const clientSource = fs.readFileSync(new URL('../src/lib/xenditSandboxService.ts
 function clientFixture(fetcher, getIdToken = async () => 'fixture_token') {
   const auth = { currentUser: { uid: 'manager1', getIdToken } };
   const js = transformSync(clientSource, { loader: 'ts', format: 'cjs' }).code;
-  const module = { exports: {} }; new Function('auth', 'fetch', 'module', 'exports', js)(auth, fetcher, module, module.exports);
+  const require = path => { assert.equal(path, './xenditBookingPreview'); return previewHelpers; };
+  const module = { exports: {} }; new Function('auth', 'fetch', 'module', 'exports', 'require', js)(auth, fetcher, module, module.exports, require);
   return { auth, client: module.exports };
 }
 test('browser helper refuses missing/switched sessions at token, fetch and JSON boundaries; never retries create', async () => {
@@ -525,4 +531,107 @@ test('browser recovery helper validates IDs and owner reference; review is expli
   let switched;
   switched = clientFixture(async () => { switched.auth.currentUser = null; return Response.json({ success: true, session: closed }); });
   await assert.rejects(switched.client.closeReviewedXenditTestAttempt(referenceId), /Sesi berubah/);
+});
+
+test('booking checkout simulation uses catalogue price + tier fee - simulated discount, with no customer PII or real ledger writes', async () => {
+  const f = fixture(); seedService(f);
+  f.db.seed('bookings/real_fixture', { paymentStatus: 'unpaid', totalAmount: 999999 });
+  f.db.seed('payments/real_fixture', { status: 'unpaid', amount: 999999 });
+  f.db.seed('customer_loyalty_accounts/real_fixture', { points: 800 });
+  const before = [...f.db.data].filter(([path]) => !path.startsWith('xendit_'));
+  const result = await f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() }));
+  assert.equal(result.session.amount, 260000);
+  assert.deepEqual(result.session.bookingPreview, { source: 'internal_booking_simulation', serviceId: 'srv-test',
+    serviceName: 'Signature fixture', servicePrice: 250000, distanceKm: 12, homeServiceFee: 30000,
+    discountAmount: 20000, totalAmount: 260000 });
+  const post = f.calls.find(call => call.method === 'POST');
+  assert.equal(post.body.amount, 260000);
+  assert.equal(post.body.metadata.purpose, 'isolated_senzu_booking_checkout_test');
+  assert.equal(post.body.customer.individual_detail.given_names, 'Senzu Test');
+  assert.equal(post.body.bookingId, undefined); assert.equal(post.body.customer.email, undefined);
+  f.remote.get(result.session.sessionId).status = 'COMPLETED';
+  await f.service.webhook(webhook(f.remote.get(result.session.sessionId)));
+  const loaded = (await f.service.latest(req())).session;
+  assert.equal(loaded.sessionStatus, 'COMPLETED'); assert.ok(loaded.lastWebhookAt);
+  assert.equal(loaded.amount, 260000); assert.equal(loaded.realBookingAffected, false);
+  assert.deepEqual([...f.db.data].filter(([path]) => !path.startsWith('xendit_')), before);
+  assert.ok(!f.db.reads.some(name => /^(bookings|payments|customer_loyalty_accounts|vouchers|notifications)$/.test(name)));
+});
+test('booking simulation rejects unknown fields, invalid money, invalid distances and Live credentials before creation', async () => {
+  for (const patch of [{ bookingId: 'real' }, { customerName: 'private' }, { amount: 1 }, { discountAmount: -1 },
+    { expectedAmount: 0 }, { expectedAmount: 1.5 }, { distanceKm: NaN }, { distanceKm: Infinity },
+    { distanceKm: -1 }, { distanceKm: 501 }, { serviceId: '../real' }]) {
+    const f = fixture(); seedService(f);
+    await rejectCode(f.service.checkout(req({ attemptId: attempt, bookingPreview: { ...bookingPreviewInput(), ...patch } })), 400, 'INVALID_TEST_BOOKING_PREVIEW');
+    assert.equal(f.calls.length, 0); assert.equal(f.db.writes.length, 0);
+  }
+  const f = fixture({ env: { ...env, XENDIT_SECRET_KEY: 'xnd_production_fixture_only' } }); seedService(f);
+  await rejectCode(f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() })), 503, 'XENDIT_TEST_NOT_CONFIGURED');
+  assert.equal(f.calls.length, 0); assert.equal(f.db.writes.length, 0);
+});
+test('inactive/outlet/missing catalogue service and stale quoted total cannot create a checkout or owner lock', async () => {
+  for (const patch of [null, { isActive: false }, { serviceType: 'OUTLET' }, { price: 0 }, { price: Infinity },
+    { price: 250000.5 }, { name: '' }, { price: 260000 }]) {
+    const f = fixture(); if (patch !== null) seedService(f, patch);
+    await rejectCode(f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() })), 409,
+      patch?.price === 260000 ? 'TEST_QUOTE_CHANGED' : 'TEST_SERVICE_UNAVAILABLE');
+    assert.equal(f.calls.length, 0); assert.equal(f.db.writes.length, 0);
+  }
+  const f = fixture(); seedService(f);
+  await rejectCode(f.service.checkout(req({ attemptId: attempt,
+    bookingPreview: { ...bookingPreviewInput(), discountAmount: 300000 } })), 409, 'TEST_QUOTE_CHANGED');
+  assert.equal(f.calls.length, 0); assert.equal(f.db.writes.length, 0);
+});
+test('booking quote binds its attempt to immutable inputs, keeps its snapshot across catalogue edits and blocks double creation', async () => {
+  const f = fixture(); seedService(f);
+  const body = { attemptId: attempt, bookingPreview: bookingPreviewInput() };
+  const first = await f.service.checkout(req(body));
+  seedService(f, { price: 290000 });
+  const again = await f.service.checkout(req(body));
+  assert.equal(again.isIdempotent, true); assert.deepEqual(again.session, first.session);
+  await rejectCode(f.service.checkout(req({ ...body, bookingPreview: { ...bookingPreviewInput(), discountAmount: 10000 } })), 409, 'TEST_ATTEMPT_INPUT_CONFLICT');
+  await rejectCode(f.service.checkout(req({ attemptId: attempt })), 409, 'TEST_ATTEMPT_INPUT_CONFLICT');
+  await rejectCode(f.service.checkout(req({ ...body, attemptId: 'different_attempt_000001' })), 409, 'TEST_ATTEMPT_PENDING');
+  assert.equal(f.calls.filter(c => c.method === 'POST').length, 1);
+});
+test('booking webhook must match its own amount; canonical conflict, expiry and late callbacks stay isolated', async () => {
+  const f = fixture(); seedService(f);
+  const first = await f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() }));
+  const remote = f.remote.get(first.session.sessionId);
+  const forged = webhook(remote); forged.body.data.amount = 10000;
+  await rejectCode(f.service.webhook(forged), 409, 'WEBHOOK_LINKAGE_CONFLICT');
+  remote.status = 'EXPIRED';
+  await f.service.webhook(webhook(remote, 'payment_session.expired'));
+  assert.equal((await f.service.latest(req())).session.sessionStatus, 'EXPIRED');
+  const next = await f.service.checkout(req({ attemptId: 'next_booking_attempt_0001', bookingPreview: bookingPreviewInput() }));
+  remote.status = 'COMPLETED'; await f.service.webhook(webhook(remote));
+  assert.equal((await f.service.latest(req())).session.referenceId, next.session.referenceId);
+  assert.equal(f.db.data.get(`xendit_test_sessions/${first.session.referenceId}`).sessionStatus, 'COMPLETED');
+  assert.ok(f.db.writes.every(write => ['xendit_test_sessions', 'xendit_test_webhook_events'].includes(write.ref.name)));
+});
+test('booking preview requires current Manager ownership and never reads the catalogue for a customer', async () => {
+  const f = fixture(); seedService(f); seedManager(f.db, 'customer', 'customer');
+  await rejectCode(f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() }, 'customer')), 403);
+  assert.ok(!f.db.reads.includes('services')); assert.equal(f.calls.length, 0);
+  const first = await f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() }));
+  seedManager(f.db, 'manager2');
+  await rejectCode(f.service.read(req({ referenceId: first.session.referenceId }, 'manager2')), 403);
+  assert.equal((await f.service.latest(req({}, 'manager2'))).session, null);
+});
+test('browser accepts only a consistent Test booking snapshot and submits the exact simulation input', async () => {
+  const f = fixture(); seedService(f);
+  const result = await f.service.checkout(req({ attemptId: attempt, bookingPreview: bookingPreviewInput() }));
+  const calls = [];
+  const g = clientFixture(async (url, init) => {
+    calls.push(JSON.parse(init.body)); return Response.json({ success: true, session: result.session });
+  });
+  const received = await g.client.createXenditTestSession(attempt, bookingPreviewInput());
+  assert.equal(received.amount, 260000); assert.deepEqual(calls, [{ attemptId: attempt, bookingPreview: bookingPreviewInput() }]);
+  await assert.rejects(g.client.createXenditTestSession(attempt, { ...bookingPreviewInput(), expectedAmount: 1.5 }));
+  assert.equal(calls.length, 1);
+  const malformed = clientFixture(async () => Response.json({ success: true, session: {
+    ...result.session, bookingPreview: { ...result.session.bookingPreview, totalAmount: 1 } } }));
+  await assert.rejects(malformed.client.createXenditTestSession(attempt, bookingPreviewInput()), /tidak valid/);
+  const stripped = clientFixture(async () => Response.json({ success: true, session: { ...result.session, bookingPreview: undefined } }));
+  await assert.rejects(stripped.client.createXenditTestSession(attempt, bookingPreviewInput()), /tidak valid/);
 });

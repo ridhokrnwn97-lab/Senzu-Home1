@@ -1,6 +1,8 @@
 import type { Express, Request } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { calculateHomeServiceFee } from '../lib/distanceFeeService.ts';
+import { isXenditBookingPreview, normalizeXenditBookingPreview } from '../lib/xenditBookingPreview.ts';
 
 // This module deliberately has no access path to bookings, payments, dispatch,
 // notifications or accounting. A Test session can never authorize real service.
@@ -129,7 +131,7 @@ export function createXenditSandbox(deps: Dependencies) {
   }
   function validateSession(session: any, intent: any): any {
     if (!session || !matches(session.payment_session_id, SESSION_ID) || session.reference_id !== intent.referenceId ||
-        session.amount !== AMOUNT || session.currency !== 'IDR' || session.country !== 'ID' ||
+        session.amount !== intent.amount || session.currency !== 'IDR' || session.country !== 'ID' ||
         session.session_type !== 'PAY' || session.mode !== 'PAYMENT_LINK' ||
         (session.capture_method !== undefined && session.capture_method !== 'AUTOMATIC') ||
         !STATUSES.includes(session.status) || typeof session.business_id !== 'string' || !session.business_id ||
@@ -142,7 +144,9 @@ export function createXenditSandbox(deps: Dependencies) {
       expiresAt: session.expires_at, paymentId: typeof session.payment_id === 'string' ? session.payment_id : null };
   }
   function assertIntent(intent: any, uid?: string): void {
-    if (!intent || intent.environment !== 'test' || intent.amount !== AMOUNT || intent.currency !== 'IDR' ||
+    const amountValid = intent?.bookingPreview === undefined ? intent?.amount === AMOUNT
+      : isXenditBookingPreview(intent.bookingPreview) && intent.amount === intent.bookingPreview.totalAmount;
+    if (!intent || intent.environment !== 'test' || !amountValid || intent.currency !== 'IDR' ||
         !matches(intent.referenceId, REFERENCE) || typeof intent.ownerUid !== 'string' ||
         !intent.ownerUid || (uid && intent.ownerUid !== uid)) throw fail(403, 'TEST_SESSION_FORBIDDEN');
   }
@@ -163,7 +167,8 @@ export function createXenditSandbox(deps: Dependencies) {
     return { referenceId: intent.referenceId, sessionId: intent.sessionId || null,
       checkoutUrl: intent.checkoutUrl ? safeTestCheckoutUrl(intent.checkoutUrl) : null,
       sessionStatus: intent.sessionStatus || null, creationState: intent.creationState,
-      amount: AMOUNT, currency: 'IDR', environment: 'test', expiresAt: intent.expiresAt || null,
+      amount: intent.amount, currency: 'IDR', environment: 'test', expiresAt: intent.expiresAt || null,
+      ...(intent.bookingPreview ? { bookingPreview: intent.bookingPreview } : {}),
       lastWebhookAt: intent.lastWebhookAt || null, lastCheckedAt: intent.lastCheckedAt || null,
       reviewCloseAllowed: canReviewClose(intent),
       lastError: ['creating', 'uncertain', 'rejected'].includes(intent.creationState) && intent.lastError ? {
@@ -216,8 +221,14 @@ export function createXenditSandbox(deps: Dependencies) {
     },
     async checkout(req: Request) {
       const caller = await actor(req); config();
-      bodyOnly(req.body, ['attemptId']);
+      bodyOnly(req.body, ['attemptId', 'bookingPreview']);
       if (!matches(req.body.attemptId, ATTEMPT_ID)) throw fail(400, 'INVALID_ATTEMPT_ID');
+      let previewInput;
+      if (req.body.bookingPreview !== undefined) {
+        try { previewInput = normalizeXenditBookingPreview(req.body.bookingPreview); }
+        catch (error: any) { throw fail(400, 'INVALID_TEST_BOOKING_PREVIEW', error.message); }
+      }
+      const previewHash = previewInput ? HASH(JSON.stringify(previewInput)) : null;
       rate(`create:${caller.uid}`, 5);
       const referenceId = `szt_${HASH(`${caller.uid}:${req.body.attemptId}`).slice(0, 48)}`;
       const ref = deps.db!.collection(SESSIONS).doc(referenceId);
@@ -228,6 +239,8 @@ export function createXenditSandbox(deps: Dependencies) {
         if (snap.exists) {
           const value = snap.data()!; assertIntent(value, caller.uid);
           if (value.referenceId !== referenceId) throw fail(409, 'TEST_REFERENCE_CONFLICT');
+          if ((value.bookingPreviewRequestHash || null) !== previewHash) throw fail(409, 'TEST_ATTEMPT_INPUT_CONFLICT',
+            'Isian berbeda dengan percobaan tersimpan. Pulihkan percobaan sebelumnya sebelum membuat uji baru.');
           return { send: false, intent: value };
         }
         if (owner.exists) {
@@ -242,7 +255,28 @@ export function createXenditSandbox(deps: Dependencies) {
             throw fail(409, 'TEST_ATTEMPT_PENDING', 'Masih ada percobaan aktif atau belum pasti. Periksa percobaan sebelumnya dahulu.');
           }
         }
-        const intent = { referenceId, ownerUid: caller.uid, environment: 'test', amount: AMOUNT,
+        let bookingPreview;
+        if (previewInput) {
+          const service = await t.get(deps.db!.collection('services').doc(previewInput.serviceId));
+          const data = service.data();
+          if (!service.exists || data?.isActive !== true || data?.serviceType === 'OUTLET' ||
+              !Number.isSafeInteger(data?.price) || data!.price <= 0 || data!.price > 10_000_000 ||
+              typeof data?.name !== 'string' || !data.name.trim() || data.name.length > 160) {
+            throw fail(409, 'TEST_SERVICE_UNAVAILABLE', 'Layanan uji tidak tersedia. Muat ulang katalog layanan.');
+          }
+          // Distance and discount are explicit INTERNAL SIMULATION inputs. No
+          // customer eligibility, voucher usage, points or real booking is mutated.
+          const fee = calculateHomeServiceFee(previewInput.distanceKm).fee;
+          bookingPreview = { source: 'internal_booking_simulation' as const,
+            serviceId: previewInput.serviceId, serviceName: data.name, servicePrice: data.price,
+            distanceKm: previewInput.distanceKm, homeServiceFee: fee,
+            discountAmount: previewInput.discountAmount, totalAmount: data.price + fee - previewInput.discountAmount };
+          if (!isXenditBookingPreview(bookingPreview) || bookingPreview.totalAmount !== previewInput.expectedAmount) {
+            throw fail(409, 'TEST_QUOTE_CHANGED', 'Total uji tidak sesuai katalog terbaru. Muat ulang formulir dan periksa ringkasannya.');
+          }
+        }
+        const intent = { referenceId, ownerUid: caller.uid, environment: 'test', amount: bookingPreview?.totalAmount ?? AMOUNT,
+          ...(bookingPreview ? { bookingPreview, bookingPreviewRequestHash: previewHash } : {}),
           currency: 'IDR', creationState: 'creating', createdAt: now(), realBookingAffected: false };
         t.create(ref, intent); t.set(ownerRef, { ownerUid: caller.uid, referenceId, environment: 'test' });
         return { send: true, intent };
@@ -253,13 +287,15 @@ export function createXenditSandbox(deps: Dependencies) {
         const cfg = config();
         receivedSession = await api('/sessions', {
           reference_id: referenceId, session_type: 'PAY', mode: 'PAYMENT_LINK', capture_method: 'AUTOMATIC',
-          allow_save_payment_method: 'DISABLED', amount: AMOUNT, currency: 'IDR', country: 'ID', locale: 'id',
+          allow_save_payment_method: 'DISABLED', amount: claim.intent.amount, currency: 'IDR', country: 'ID', locale: 'id',
           customer: { reference_id: `senzutest${HASH(referenceId).slice(0, 40)}`, type: 'INDIVIDUAL', individual_detail: { given_names: 'Senzu Test' } },
-          description: 'SIMULASI SENZU HOME - BUKAN PEMBAYARAN BOOKING',
+          description: claim.intent.bookingPreview ? 'SIMULASI CHECKOUT BOOKING SENZU HOME - TANPA PESANAN LAYANAN'
+            : 'SIMULASI SENZU HOME - BUKAN PEMBAYARAN BOOKING',
           allowed_payment_channels: ['BNI_VIRTUAL_ACCOUNT', 'BRI_VIRTUAL_ACCOUNT', 'MANDIRI_VIRTUAL_ACCOUNT', 'PERMATA_VIRTUAL_ACCOUNT'],
           expires_at: new Date(clock() + 30 * 60 * 1000).toISOString(),
           success_return_url: cfg.returnUrl, cancel_return_url: cfg.returnUrl,
-          metadata: { environment: 'test', purpose: 'isolated_senzu_integration_test' },
+          metadata: { environment: 'test', purpose: claim.intent.bookingPreview
+            ? 'isolated_senzu_booking_checkout_test' : 'isolated_senzu_integration_test' },
         });
         return { session: await persistSession(referenceId, receivedSession, undefined, caller.uid), isIdempotent: false };
       } catch (error: any) {
@@ -368,7 +404,7 @@ export function createXenditSandbox(deps: Dependencies) {
       if (!snap.exists) return { ignored: true };
       const intent = snap.data()!; assertIntent(intent);
       if (intent.referenceId !== data.reference_id) throw fail(409, 'TEST_REFERENCE_CONFLICT');
-      if (data.amount !== AMOUNT || data.currency !== 'IDR' || data.country !== 'ID' || data.session_type !== 'PAY' ||
+      if (data.amount !== intent.amount || data.currency !== 'IDR' || data.country !== 'ID' || data.session_type !== 'PAY' ||
           data.mode !== 'PAYMENT_LINK' || (data.business_id && data.business_id !== body.business_id) ||
           data.status !== (body.event === 'payment_session.completed' ? 'COMPLETED' : 'EXPIRED')) throw fail(409, 'WEBHOOK_LINKAGE_CONFLICT');
       // Authenticated callback is a wake-up signal, not financial truth. Re-fetch

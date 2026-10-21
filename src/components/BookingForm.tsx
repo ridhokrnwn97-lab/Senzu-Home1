@@ -55,6 +55,8 @@ import { auth } from '../lib/firebase';
 import { getCustomerSavedAddresses } from '../lib/crmService';
 import { CustomerSavedAddress } from '../types/crm';
 import { trackMetaAdsAction } from '../lib/metaPixel';
+import { useAuth } from '../context/AuthContext';
+import { XenditSandboxCard } from './admin/XenditSandboxCard';
 import { Gift, Coins, Tag, Ticket, Users, Sparkles as SparklesIcon } from 'lucide-react';
 
 interface BookingFormProps {
@@ -79,6 +81,22 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   initialPromoCode,
 }) => {
   const safeServices = services || [];
+  const { currentUser: staffUser } = useAuth();
+  const canTestXendit = Boolean(staffUser && ['manager', 'admin'].includes(staffUser.role));
+  const [xenditTestSelected, setXenditTestSelected] = useState(false);
+  const testSelectionKey = `senzu:xendit-booking-test:${auth.currentUser?.uid || ''}`;
+  useEffect(() => {
+    let selected = false;
+    try { selected = canTestXendit && sessionStorage.getItem(testSelectionKey) === 'selected'; } catch {}
+    setXenditTestSelected(selected);
+  }, [canTestXendit, staffUser?.uid, testSelectionKey]);
+  const selectXenditTest = (selected: boolean) => {
+    setXenditTestSelected(selected && canTestXendit);
+    try {
+      if (selected && canTestXendit) sessionStorage.setItem(testSelectionKey, 'selected');
+      else sessionStorage.removeItem(testSelectionKey);
+    } catch {}
+  };
 
   // Form State
   const [selectedServiceId, setSelectedServiceId] = useState<string>(
@@ -324,6 +342,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   // Read-only recovery after refresh: an uncommitted draft can never be submitted automatically.
   React.useEffect(() => {
     const uid = auth.currentUser?.uid || '';
+    // A Test checkout must never resume the real voucher-booking workflow.
+    if (xenditTestSelected) return;
+    try { if (canTestXendit && sessionStorage.getItem(testSelectionKey) === 'selected') return; } catch {}
     let cancelled = false;
     let pending: any = null;
     try { pending = JSON.parse(globalThis.sessionStorage?.getItem(`senzu:voucher-checkout:${uid}`) || 'null'); } catch {}
@@ -501,6 +522,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Fail closed even for Enter/programmatic form submission in Test mode.
+    if (xenditTestSelected) {
+      setErrorMsg('Gunakan tombol Buat Checkout Test sesuai Ringkasan pada panel Xendit. Ini hanya simulasi dan tidak mengajukan booking.');
+      return;
+    }
     if (submittingRef.current || isSubmitting) return;
     setErrorMsg('');
 
@@ -1221,12 +1247,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     icon: CreditCard,
                   },
                 ].map((pm) => {
-                  const isSelected = paymentMethod === pm.id;
+                  const isSelected = !xenditTestSelected && paymentMethod === pm.id;
                   const Icon = pm.icon;
                   return (
                     <div
                       key={pm.id}
-                      onClick={() => setPaymentMethod(pm.id as PaymentMethod)}
+                      onClick={() => { selectXenditTest(false); setPaymentMethod(pm.id as PaymentMethod); }}
                       className={`p-3.5 min-h-[64px] rounded-2xl border-2 cursor-pointer transition flex items-center gap-3 active:scale-[0.98] ${
                         isSelected
                           ? 'border-[#082A4F] bg-[#082A4F]/5 shadow-sm ring-1 ring-[#082A4F]'
@@ -1247,13 +1273,25 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     </div>
                   );
                 })}
+                {canTestXendit && <button type="button" id="payment-xendit-test" aria-pressed={xenditTestSelected}
+                  onClick={() => selectXenditTest(true)}
+                  className={`rounded-2xl border-2 p-3.5 text-left ${xenditTestSelected ? 'border-[#082A4F] bg-[#082A4F]/5' : 'border-slate-200 bg-white'}`}>
+                  <span className="block text-xs font-bold text-[#082A4F]">Xendit — Mode Tes</span>
+                  <span className="text-[11px] text-slate-500">Simulasi checkout · Khusus Manager/Admin</span>
+                </button>}
               </div>
+              {xenditTestSelected && canTestXendit && staffUser && <XenditSandboxCard currentUser={staffUser}
+                bookingPreview={selectedService && !isCalculatingRoute && !routeError ? {
+                  serviceId: selectedService.id, distanceKm, discountAmount: pricingBreakdown.totalDiscount,
+                  expectedAmount: pricingBreakdown.finalAmount,
+                } : null} />}
 
               {/* Official Non-Cash Policy Notice */}
               <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-start gap-2.5">
                 <ShieldCheck className="w-4 h-4 text-[#082A4F] flex-shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
-                  <strong>Kebijakan Pembayaran:</strong> Senzu Home hanya menerima pembayaran non-tunai melalui QRIS Resmi Senzu atau Transfer Bank (BNI, Mandiri, BRI) sebelum jadwal dikonfirmasi.
+                  {xenditTestSelected ? <><strong>Mode Tes:</strong> gunakan tombol pada panel Xendit untuk simulasi 100% total ringkasan. Formulir ini tidak mengajukan pesanan layanan selama Mode Tes dipilih.</>
+                    : <><strong>Kebijakan Pembayaran:</strong> Senzu Home hanya menerima pembayaran non-tunai melalui QRIS Resmi Senzu atau Transfer Bank (BNI, Mandiri, BRI) sebelum jadwal dikonfirmasi.</>}
                 </p>
               </div>
             </div>
@@ -1518,10 +1556,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <button
               id="btn-submit-booking"
               type="submit"
-              disabled={isSubmitting || isCalculatingRoute || Boolean(routeError)}
+              disabled={xenditTestSelected || isSubmitting || isCalculatingRoute || Boolean(routeError)}
               className="w-full min-h-[52px] py-3.5 rounded-2xl bg-gradient-to-r from-[#082A4F] via-[#0E3D73] to-[#082A4F] hover:from-[#0B3461] hover:to-[#0B3461] text-white font-semibold text-base shadow-lg shadow-[#082A4F]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer"
             >
-              {isSubmitting ? (
+              {xenditTestSelected ? 'Gunakan panel checkout Test di atas' : isSubmitting ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Sedang Memproses Reservasi...</span>
@@ -1546,7 +1584,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
             <div className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5 pb-2">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>Privasi aman. Kode booking otomatis tercatat dan dapat dilacak kapan saja.</span>
+              <span>{xenditTestSelected ? 'Simulasi tersimpan terpisah dari pesanan pelanggan.' : 'Privasi aman. Kode booking otomatis tercatat dan dapat dilacak kapan saja.'}</span>
             </div>
           </div>
 
@@ -1563,10 +1601,10 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
             <button
               type="submit"
-              disabled={isSubmitting || isCalculatingRoute || Boolean(routeError)}
+              disabled={xenditTestSelected || isSubmitting || isCalculatingRoute || Boolean(routeError)}
               className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0B3461] text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
             >
-              {isSubmitting ? (
+              {xenditTestSelected ? 'Mode Tes' : isSubmitting ? (
                 <span>Memproses...</span>
               ) : isCalculatingRoute ? (
                 <span>Menghitung...</span>
