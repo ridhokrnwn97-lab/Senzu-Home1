@@ -21,6 +21,7 @@ import { CustomerLoginModal } from './components/CustomerLoginModal';
 import { CustomerRegisterModal } from './components/CustomerRegisterModal';
 import { Navbar } from './components/Navbar';
 import { BookingForm } from './components/BookingForm';
+import { XenditLiveReturn } from './components/customer/XenditLiveReturn';
 import { CustomerTrackingModal } from './components/CustomerTrackingModal';
 import { StaffLoginModal } from './components/StaffLoginModal';
 import { CssAdminDashboard } from './components/CssAdminDashboard';
@@ -1223,6 +1224,7 @@ export default function App() {
         <CustomerAuthProvider>
           <GoogleMapsProvider>
             <MainApp />
+            <XenditLiveReturn />
           </GoogleMapsProvider>
         </CustomerAuthProvider>
       </AuthProvider>

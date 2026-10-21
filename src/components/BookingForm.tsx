@@ -57,6 +57,7 @@ import { CustomerSavedAddress } from '../types/crm';
 import { trackMetaAdsAction } from '../lib/metaPixel';
 import { useAuth } from '../context/AuthContext';
 import { XenditSandboxCard } from './admin/XenditSandboxCard';
+import { xenditLiveAvailable } from '../lib/xenditLiveService';
 import { Gift, Coins, Tag, Ticket, Users, Sparkles as SparklesIcon } from 'lucide-react';
 
 interface BookingFormProps {
@@ -84,6 +85,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const { currentUser: staffUser } = useAuth();
   const canTestXendit = Boolean(staffUser && ['manager', 'admin'].includes(staffUser.role));
   const [xenditTestSelected, setXenditTestSelected] = useState(false);
+  const [liveAvailable, setLiveAvailable] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    xenditLiveAvailable(controller.signal).then(value => { if (!controller.signal.aborted) setLiveAvailable(value); }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   const testSelectionKey = `senzu:xendit-booking-test:${auth.currentUser?.uid || ''}`;
   useEffect(() => {
     let selected = false;
@@ -563,11 +570,15 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     }
 
     const canonicalAuthUid = auth.currentUser?.uid || undefined;
+    if (paymentMethod === 'Xendit' && (!liveAvailable || !canonicalAuthUid)) {
+      setErrorMsg(!canonicalAuthUid ? 'Silakan masuk ke akun pelanggan terlebih dahulu untuk membayar melalui Xendit.' : 'Pembayaran online sedang tidak tersedia. Pilih metode pembayaran manual.');
+      return;
+    }
     const requestContext = latestCheckoutContextRef.current;
     const isCurrentSubmission = () => mountedRef.current
       && (auth.currentUser?.uid || '') === (canonicalAuthUid || '')
       && latestCheckoutContextRef.current === requestContext;
-    const usesServerCheckout = Boolean(appliedPromo || selectedCustomerVoucher || pricingBreakdown.pointsRedeemed > 0);
+    const usesServerCheckout = Boolean(paymentMethod === 'Xendit' || appliedPromo || selectedCustomerVoucher || pricingBreakdown.pointsRedeemed > 0);
     if (usesServerCheckout && !canonicalAuthUid) {
       const authErrMsg = 'Silakan login ke akun pelanggan terlebih dahulu untuk menggunakan voucher promo.';
       setPromoError(authErrMsg);
@@ -1273,6 +1284,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     </div>
                   );
                 })}
+                {liveAvailable && pricingBreakdown.finalAmount >= 10000 && <button type="button" id="payment-xendit-live" aria-pressed={!xenditTestSelected && paymentMethod === 'Xendit'}
+                  onClick={() => { selectXenditTest(false); setPaymentMethod('Xendit'); }}
+                  className={`rounded-2xl border-2 p-3.5 text-left ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'border-[#082A4F] bg-[#082A4F]/5' : 'border-slate-200 bg-white'}`}>
+                  <span className="block text-xs font-bold text-[#082A4F]">Bayar Online — Xendit</span>
+                  <span className="text-[11px] text-slate-500">QRIS & Virtual Account · Bayar 100% di awal</span>
+                </button>}
                 {canTestXendit && <button type="button" id="payment-xendit-test" aria-pressed={xenditTestSelected}
                   onClick={() => selectXenditTest(true)}
                   className={`rounded-2xl border-2 p-3.5 text-left ${xenditTestSelected ? 'border-[#082A4F] bg-[#082A4F]/5' : 'border-slate-200 bg-white'}`}>
@@ -1291,6 +1308,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 <ShieldCheck className="w-4 h-4 text-[#082A4F] flex-shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
                   {xenditTestSelected ? <><strong>Mode Tes:</strong> gunakan tombol pada panel Xendit untuk simulasi 100% total ringkasan. Formulir ini tidak mengajukan pesanan layanan selama Mode Tes dipilih.</>
+                    : paymentMethod === 'Xendit' ? <><strong>Pembayaran Online:</strong> bayar 100% melalui Xendit sebelum terapis berangkat. Pesanan dikonfirmasi setelah pembayaran berhasil diverifikasi.</>
                     : <><strong>Kebijakan Pembayaran:</strong> Senzu Home hanya menerima pembayaran non-tunai melalui QRIS Resmi Senzu atau Transfer Bank (BNI, Mandiri, BRI) sebelum jadwal dikonfirmasi.</>}
                 </p>
               </div>

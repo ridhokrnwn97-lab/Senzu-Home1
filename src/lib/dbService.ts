@@ -1627,8 +1627,10 @@ export async function createBooking(
         : pMethod.includes('bri')
         ? 'bri'
         : 'bni';
-      const payment = await createPaymentRecord(committedBooking, { methodType: methodType as any });
-      committedBooking.paymentDeadline = payment.paymentDeadline || undefined;
+      if (committedBooking.paymentMethod !== 'Xendit') {
+        const payment = await createPaymentRecord(committedBooking, { methodType: methodType as any });
+        committedBooking.paymentDeadline = payment.paymentDeadline || undefined;
+      }
     } catch (err) {
       console.warn('Payment record initialization non-blocking warning:', err);
     }

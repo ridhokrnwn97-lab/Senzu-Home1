@@ -4,6 +4,11 @@ import { createHash } from 'node:crypto';
 import { OFFICIAL_SENZU_BANK_ACCOUNTS, OFFICIAL_SENZU_QRIS } from '../lib/paymentDefaults.ts';
 
 export const paymentError = (status: number, message: string) => Object.assign(new Error(message), { status });
+export function assertManualPayment(payment: any) {
+  if (payment?.provider === 'xendit' || payment?.gatewayEnvironment === 'live') {
+    throw paymentError(409, 'Pembayaran Xendit harus diperiksa melalui integrasi Xendit, bukan verifikasi atau koreksi manual.');
+  }
+}
 const uidValue = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : null;
 export function paymentOwner(record: any): string | null {
   const primary = uidValue(record?.customerAuthUid);
@@ -83,6 +88,9 @@ export function createPaymentAcceptance(db: Firestore, clock = Date.now) {
         if (!snap.exists) throw paymentError(404, 'Data reservasi tidak ditemukan.');
         const booking = snap.data()!;
         assertPaymentLink({}, booking, uid);
+        if (booking.paymentMethod === 'Xendit' || booking.gatewayProvider === 'xendit') {
+          throw paymentError(409, 'Pesanan ini menggunakan pembayaran Xendit.');
+        }
         const existing = await t.get(db.collection('payments').where('bookingId', '==', snap.id));
         const settings = await t.get(db.collection('settings').doc('payment'));
         const nowMs = clock();
@@ -125,6 +133,7 @@ export function createPaymentAcceptance(db: Firestore, clock = Date.now) {
         const snap = await t.get(ref);
         if (!snap.exists) throw paymentError(404, 'Data pembayaran tidak ditemukan.');
         const payment = snap.data()!;
+        assertManualPayment(payment);
         validId(payment.bookingId);
         if (input.bookingId && input.bookingId !== payment.bookingId) throw paymentError(400, 'ID reservasi tidak sesuai dengan pembayaran.');
         const bookingRef = db.collection('bookings').doc(payment.bookingId);

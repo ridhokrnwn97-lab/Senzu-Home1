@@ -518,6 +518,42 @@ service cloud.firestore {
     // 6. BOOKINGS (STRICT SCOPE, FIELD-LEVEL & SPOOF PREVENTION)
     // =============================================================
 
+    // Live gateway commercial terms and financial state are Admin-server-only.
+    // Client progress is permitted only after canonical Xendit settlement.
+    function liveGatewayClientUpdateAllowed() {
+      let live = resource.data.get('gatewayProvider', '') == 'xendit'
+        || resource.data.get('paymentMethod', '') == 'Xendit';
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let pendingOrClosed = request.resource.data.get('status', '') in [
+        'Menunggu Pembayaran', 'awaiting_payment', 'Draft', 'Pending', 'Cancelled', 'cancelled'
+      ];
+      let currentClosed = resource.data.get('status', '') in ['Cancelled', 'cancelled', 'Completed', 'expired', 'refunded', 'Rescheduled'];
+      let payPath = /databases/$(database)/documents/payments/$(resource.data.get('activePaymentId', 'missing'));
+      return (!live && request.resource.data.get('paymentMethod', '') != 'Xendit'
+        && !changed.hasAny(['gatewayProvider', 'gatewayEnvironment', 'gatewayReceiptId', 'gatewayQuoteHash',
+          'gatewayReviewRequired', 'gatewayPaymentId'])) || (live &&
+        !changed.hasAny([
+          'id', 'bookingCode', 'paymentMethod', 'customerAuthUid', 'authUserId', 'customerId', 'serviceId', 'serviceName', 'serviceDuration',
+          'servicePrice', 'homeServiceFee', 'discountAmount', 'totalAmount', 'promoDiscount', 'voucherDiscount',
+          'pointsRedeemed', 'pointsDiscount', 'latitude', 'longitude', 'distanceKm', 'distanceMeters',
+          'address', 'placeId', 'area', 'scheduleDate', 'scheduleTime', 'scheduleAt', 'customerGender',
+          'gatewayProvider', 'gatewayEnvironment', 'gatewayReceiptId', 'gatewayQuoteHash', 'gatewayReviewRequired',
+          'gatewayPaymentId', 'paymentStatus', 'paymentVerifiedAt', 'paymentVerifiedBy', 'paidAt', 'activePaymentId'
+        ]) && (!currentClosed || request.resource.data.get('status', '') == resource.data.get('status', ''))
+        && (pendingOrClosed || request.resource.data.get('status', '') == resource.data.get('status', '') || (
+          resource.data.get('paymentStatus', '') in ['PAID', 'paid']
+          && resource.data.get('gatewayReviewRequired', false) == false
+          && exists(payPath) && get(payPath).data.get('provider', '') == 'xendit'
+          && get(payPath).data.get('gatewayEnvironment', '') == 'live'
+          && get(payPath).data.get('status', '') == 'paid'
+          && get(payPath).data.get('amount', -1) == resource.data.get('totalAmount', -2)
+          && get(payPath).data.get('bookingId', '') == resource.data.get('id', 'missing')
+          && get(payPath).data.get('customerAuthUid', '') == resource.data.get('customerAuthUid', 'missing')
+          && get(payPath).data.get('authUserId', '') == resource.data.get('authUserId', 'missing')
+        ))
+      );
+    }
+
     match /bookings/{bookingId} {
       allow get: if isOperationalStaff()
         || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId())
@@ -548,7 +584,9 @@ service cloud.firestore {
 
       // Customer or guest can create a no-voucher booking with SAFE FIELDS ONLY
       // Voucher-bearing bookings must be committed via the authoritative server checkout transaction
-      allow create: if request.resource.data.get('paymentPolicyVersion', 0) == 2
+      allow create: if request.resource.data.get('paymentMethod', '') != 'Xendit'
+        && !request.resource.data.keys().hasAny(['gatewayProvider', 'gatewayEnvironment', 'gatewayReceiptId', 'gatewayQuoteHash', 'gatewayReviewRequired', 'gatewayPaymentId'])
+        && request.resource.data.get('paymentPolicyVersion', 0) == 2
         && request.resource.data.get('paymentDeadline', null) == null
         && (isOperationalStaff() || (
         hasNoClientVoucherBookingIntent(request.resource.data) &&
@@ -579,9 +617,13 @@ service cloud.firestore {
       // - Operational staff (Manager, Supervisor, CSS) can update
       // - Assigned therapist can ONLY update progress status & trip coordinates (cannot alter paymentStatus, price, or therapistId)
       // - Customer can ONLY cancel pending bookings, upload payment proof, or add customer notes
-      allow update: if ((isSupervisor() || isCSS())
+      function bookingUpdateRoleAllowed() {
+        // Evaluate Staff Master authorization once, rather than repeating its
+        // expansion for each role branch and exhausting the Rules budget.
+        let role = isStaffActive() ? getStaffRole().get('role', '') : '';
+        return (((role in ['supervisor', 'css', 'manager', 'admin'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentPolicyVersion', 'paymentDeadline', 'activePaymentId']))
-        || (isTherapist() && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId()
+        || (role == 'therapist' && 'therapistId' in resource.data && resource.data.therapistId == getStaffTherapistId()
             && request.resource.data.paymentStatus == resource.data.paymentStatus
             && request.resource.data.servicePrice == resource.data.servicePrice
             && request.resource.data.homeServiceFee == resource.data.homeServiceFee
@@ -613,7 +655,9 @@ service cloud.firestore {
                request.resource.data.status == resource.data.status ||
                (request.resource.data.status == 'Cancelled' && resource.data.status in ['Menunggu Pembayaran', 'Draft', 'Pending', 'awaiting_payment'])
              )
-           );
+           ));
+      }
+      allow update: if liveGatewayClientUpdateAllowed() && bookingUpdateRoleAllowed();
 
       allow delete: if false; // Prompt 18D: Bookings No-Hard-Delete policy
     }

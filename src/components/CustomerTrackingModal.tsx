@@ -1118,7 +1118,9 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     </p>
 
                     <p className="text-[11px] text-slate-300 mt-2 font-medium">
-                      {displayMeta?.sublabel}
+                      {trackingData.booking.paymentMethod === 'Xendit' && trackingData.booking.status === 'Menunggu Pembayaran'
+                        ? 'Selesaikan pembayaran penuh melalui Xendit. Status diperbarui setelah pembayaran terverifikasi.'
+                        : displayMeta?.sublabel}
                     </p>
                   </div>
 

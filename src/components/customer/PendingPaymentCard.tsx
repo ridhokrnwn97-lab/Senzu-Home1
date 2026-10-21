@@ -32,6 +32,8 @@ import {
 import { formatRupiah, formatDateIndo } from '../../lib/utils';
 import { useCustomerServiceWhatsApp } from '../../lib/supportWhatsApp';
 
+import { XenditLivePaymentPage } from './XenditLivePaymentPage';
+
 export interface PendingPaymentCardProps {
   booking: Booking;
   variant?: 'card' | 'compact' | 'modal';
@@ -40,7 +42,15 @@ export interface PendingPaymentCardProps {
   onClose?: () => void;
 }
 
-export const PendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
+export const PendingPaymentCard: React.FC<PendingPaymentCardProps> = props => {
+  if (props.booking.paymentMethod !== 'Xendit') return <ManualPendingPaymentCard {...props} />;
+  const card = <XenditLivePaymentPage booking={props.booking} onOpenTracking={props.onOpenTracking} />;
+  return props.variant === 'modal' ? <div role="dialog" aria-modal="true" aria-label="Pembayaran pesanan" className="fixed inset-0 z-[90] overflow-y-auto bg-slate-900/70 p-4">
+    <div className="mx-auto my-8 max-w-2xl rounded-3xl bg-white p-4"><div className="flex justify-end"><button type="button" onClick={props.onClose} className="min-h-[44px] px-4 font-semibold">Tutup</button></div>{card}</div>
+  </div> : card;
+};
+
+const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
   booking,
   variant = 'card',
   onPaymentSuccess,
