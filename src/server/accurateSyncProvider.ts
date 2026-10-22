@@ -12,6 +12,21 @@ export function syncCredentialsConfigured(env: NodeJS.ProcessEnv) {
     /^[!-~]{16,512}$/.test(env.ACCURATE_SIGNATURE_SECRET || '') &&
     (env.ACCURATE_DATABASE_ID === undefined || env.ACCURATE_DATABASE_ID === String(ACCURATE_SYNC_DATABASE_ID));
 }
+function itemAccountNo(data: any, prefixes: string[]) {
+  const detail = Array.isArray(data.detailItemAccount) ? data.detailItemAccount.filter((v: any) => (v?.currency?.code || v?.currencyCode) === 'IDR') : [];
+  if (detail.length > 1) return null;
+  const candidates: unknown[] = [];
+  for (const record of [data, ...detail]) for (const prefix of prefixes) {
+    if (record[`${prefix}No`] !== undefined && record[`${prefix}No`] !== null) candidates.push(record[`${prefix}No`]);
+    const nested = record[prefix];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested) && 'no' in nested) candidates.push(nested.no);
+  }
+  // Accurate documents item mappings as salesGlAccountNo / salesDiscountGlAccountNo;
+  // detail responses can expose the corresponding GlAccount object. Keep the
+  // previous shapes compatible, but never select one conflicting alias over another.
+  if (!candidates.length || candidates.some(v => typeof v !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/.test(v)) || new Set(candidates).size !== 1) return null;
+  return candidates[0];
+}
 function cloud(value: unknown) {
   let u: URL;
   try { if (typeof value !== 'string') throw new Error(); u = new URL(value); } catch { throw syncFailure('ACCURATE_HOST_UNVERIFIED', true); }
@@ -98,11 +113,10 @@ export function createAccurateSyncProvider(deps: Dependencies) {
         }
         if (row.kind === 'account' && ['110103', '110301', '210102'].includes(row.code) && (data.currency?.code || data.currencyCode) !== 'IDR') throw syncFailure('ACCURATE_CURRENCY_UNVERIFIED', true);
         if (row.kind === 'item') {
-          const accounts = Array.isArray(data.detailItemAccount) ? data.detailItemAccount.filter((v: any) => (v.currency?.code || v.currencyCode) === 'IDR') : [];
-          const sales = data.salesAccount?.no || data.salesAccountNo || (accounts.length === 1 ? accounts[0].salesAccount?.no || accounts[0].salesAccountNo : null);
-          const discount = data.salesDiscountAccount?.no || data.salesDiscountAccountNo || (accounts.length === 1 ? accounts[0].salesDiscountAccount?.no || accounts[0].salesDiscountAccountNo : null);
+          const sales = itemAccountNo(data, ['salesGlAccount', 'salesAccount']);
+          const discount = itemAccountNo(data, ['salesDiscountGlAccount', 'salesDiscountAccount']);
           if (sales !== '400005' || discount !== '400004') throw syncFailure('ACCURATE_ITEM_ACCOUNTS_UNVERIFIED', true);
-          if (data.tax1?.id || data.tax2?.id || data.tax3?.id || data.tax1Id || data.tax2Id || data.tax3Id) throw syncFailure('ACCURATE_TAX_REVIEW_REQUIRED', true);
+          if (data.tax1?.id || data.tax2?.id || data.tax3?.id || data.tax4?.id || data.tax1Id || data.tax2Id || data.tax3Id || data.tax4Id || data.usePpn === true) throw syncFailure('ACCURATE_TAX_REVIEW_REQUIRED', true);
         }
       }
     }

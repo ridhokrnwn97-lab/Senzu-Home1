@@ -88,7 +88,7 @@ function fixture() {
   const masters = new Map([...ACCURATE_MASTERS, { kind: 'account', code: '110301', name: 'Piutang Usaha IDR', type: 'ACCOUNT_RECEIVABLE' },
     { kind: 'account', code: '400004', name: 'Diskon Penjualan', type: 'REVENUE' }].map((v, index) => [v.code, { id: 1000 + index, no: v.code, name: v.name,
       currency: { code: 'IDR' }, suspended: false, ...(v.kind === 'account' ? { accountType: v.type } : { itemType: v.type, unitPrice: v.price,
-        salesAccount: { no: '400005' }, salesDiscountAccount: { no: '400004' }, tax1: null, tax2: null, tax3: null }) }]));
+        salesGlAccount: { no: '400005' }, salesDiscountGlAccount: { no: '400004' }, tax1: null, tax2: null, tax3: null, tax4: null, usePpn: false }) }]));
   const remote = new Map(), calls = []; let responder = null, lostKind = null, absentKind = null;
   const fetcher = async (input, init) => {
     const url = new URL(input), payload = init.body ? JSON.parse(init.body) : null;
@@ -175,6 +175,42 @@ test('historical booking preview verifies actual mappings without writes or enqu
   const p = await f.service.preview(req({ bookingId: v.booking.id }));
   assert.equal(p.historical, true); assert.equal(p.eligible, false); assert.equal(p.itemCode, 'SH-SIG-030'); assert.equal(p.amount, 160000);
   assert.equal(f.posts().length, 0); assert.deepEqual([...f.db.data], before);
+});
+test('documented GlAccount objects verify the correct sales and discount accounts without writes', async () => {
+  const f = fixture(), v = f.booking(); f.advance(1000);
+  const result = await f.service.preview(req({ bookingId: v.booking.id }));
+  assert.equal(result.itemCode, 'SH-SIG-030'); assert.equal(result.historical, true); assert.equal(f.posts().length, 0);
+});
+test('documented GlAccountNo strings and previous account shapes are compatible', async () => {
+  for (const format of ['gl_no', 'legacy_object', 'legacy_no', 'idr_detail']) {
+    const f = fixture(), v = f.booking(); f.advance(1000);
+    for (const data of f.masters.values()) if (data.itemType === 'SERVICE') {
+      delete data.salesGlAccount; delete data.salesDiscountGlAccount;
+      if (format === 'gl_no') Object.assign(data, { salesGlAccountNo: '400005', salesDiscountGlAccountNo: '400004' });
+      if (format === 'legacy_object') Object.assign(data, { salesAccount: { no: '400005' }, salesDiscountAccount: { no: '400004' } });
+      if (format === 'legacy_no') Object.assign(data, { salesAccountNo: '400005', salesDiscountAccountNo: '400004' });
+      if (format === 'idr_detail') data.detailItemAccount = [{ currency: { code: 'IDR' }, salesGlAccount: { no: '400005' }, salesDiscountGlAccountNo: '400004' }];
+    }
+    assert.equal((await f.service.preview(req({ bookingId: v.booking.id }))).itemCode, 'SH-SIG-030'); assert.equal(f.posts().length, 0);
+  }
+});
+test('consistent aliases agree; conflicting aliases and multiple IDR mappings fail closed', async () => {
+  const f = fixture(), v = f.booking(); f.advance(1000);
+  Object.assign(f.masters.get('SH-SIG-030'), { salesGlAccountNo: '400005', salesAccountNo: '400005', salesDiscountAccount: { no: '400004' } });
+  assert.equal((await f.service.preview(req({ bookingId: v.booking.id }))).itemCode, 'SH-SIG-030');
+  for (const change of [d => d.salesAccountNo = '400006', d => d.salesGlAccountNo = '400006',
+    d => d.salesDiscountAccountNo = '400003', d => d.detailItemAccount = [{ currencyCode: 'IDR' }, { currencyCode: 'IDR' }]]) {
+    const g = fixture(), b = g.booking(); g.advance(1000); change(g.masters.get('SH-SIG-030'));
+    await rejects(g.service.preview(req({ bookingId: b.booking.id })), 'ACCURATE_ITEM_ACCOUNTS_UNVERIFIED'); assert.equal(g.posts().length, 0);
+  }
+});
+test('missing, malformed and unrelated account fields cannot stand in for verified item mappings', async () => {
+  for (const change of [d => delete d.salesGlAccount, d => d.salesGlAccount.no = 400005,
+    d => d.salesGlAccount.no = '', d => d.salesDiscountGlAccount.no = '400003',
+    d => { delete d.salesGlAccount; d.inventoryGlAccount = { no: '400005' }; }]) {
+    const f = fixture(), v = f.booking(); f.advance(1000); change(f.masters.get('SH-SIG-030'));
+    await rejects(f.service.preview(req({ bookingId: v.booking.id })), 'ACCURATE_ITEM_ACCOUNTS_UNVERIFIED'); assert.equal(f.posts().length, 0);
+  }
 });
 test('activation requires server switch, explicit scope, tax policy, correct DB and reauthorized Manager', async () => {
   const f = fixture(); delete f.env.ACCURATE_SYNC_WRITES_ENABLED; await rejects(f.service.activate(req(approve)), 'SYNC_NOT_CONFIGURED'); assert.equal(f.calls.length, 0);
@@ -305,7 +341,8 @@ test('expired processing lease recovers after restart without losing the queued 
 test('wrong DB, app, host, account currency, service GL or tax blocks all financial writes', async () => {
   for (const change of [f => f.meta.database.id++, f => f.meta.application.appKey = 'other',
     f => f.meta.database.host = 'https://evil.invalid', f => f.masters.get('110103').currency.code = 'USD',
-    f => f.masters.get('SH-SIG-030').salesAccount.no = 'other', f => f.masters.get('SH-SIG-030').tax1 = { id: 100 }]) {
+    f => f.masters.get('SH-SIG-030').salesGlAccount.no = 'other', f => f.masters.get('SH-SIG-030').tax1 = { id: 100 },
+    f => f.masters.get('SH-SIG-030').tax4 = { id: 400 }, f => f.masters.get('SH-SIG-030').usePpn = true]) {
     const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v); change(f); await f.service.runOnce();
     assert.equal(f.job(v).state, 'review'); assert.equal(f.posts().length, 0);
   }
