@@ -61,6 +61,8 @@ async function fixture(query = '') {
     state.calls.push({ action, payload, authorization: route.request().headers().authorization });
     const result = structuredClone(action === 'preview' ? state.preview : action === 'netPreview' ? state.net : state.status);
     if (action === 'activate') { result.enabled = true; result.activatedAt = '2026-10-22T04:00:00Z'; result.taxPolicy = 'no_extra_tax'; state.status = structuredClone(result); }
+    if (action === 'activateFees') { result.feesEnabled = true; result.feesActivatedAt ||= '2026-10-22T12:00:00Z'; result.feePolicy = 'expense_including_vat'; state.status = structuredClone(result); }
+    if (action === 'pauseFees') { result.feesEnabled = false; state.status = structuredClone(result); }
     if (action === 'pause') { result.enabled = false; state.status = structuredClone(result); }
     if (state.delay && ['preview', 'netPreview'].includes(action)) await state.delay;
     if (state.html) await route.fulfill({ status: 502, contentType: 'text/html', body: '<html>private provider error</html>' }).catch(() => {});
@@ -261,4 +263,39 @@ test('late diagnostics cannot survive account switch or logout', async () => {
       assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), ''); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
     } finally { release?.(); await f.context.close(); }
   }
+});
+test('fee activation requires separate Finance confirmation, enabled gross sync, and sends no overrides', async () => {
+  const f=await fixture(); try {
+    await ready(f.page); const activate=f.page.getByRole('button',{name:'Aktifkan Jurnal Biaya Xendit',exact:true});
+    const ack=f.page.getByLabel('Konfirmasi Finance biaya Xendit termasuk PPN');
+    assert.equal(await activate.isDisabled(),true); await ack.check(); assert.equal(await activate.isDisabled(),true);
+    f.state.status.enabled=true; f.state.status.activatedAt='2026-10-22T04:00:00Z'; f.state.status.taxPolicy='no_extra_tax';
+    await f.page.getByRole('button',{name:'Muat Ulang Status Pencatatan'}).click(); await ready(f.page);
+    await ack.check(); await activate.click(); await f.page.getByRole('button',{name:'Jeda Jurnal Biaya Xendit'}).waitFor();
+    assert.deepEqual(f.state.calls.at(-1).payload,{acknowledgement:'NEW_LIVE_XENDIT_FEES_AS_EXPENSE_INCLUDING_VAT',feePolicy:'expense_including_vat'});
+    assert.deepEqual(await f.page.evaluate(()=>window.__events),[]);
+    await f.page.getByRole('button',{name:'Jeda Jurnal Biaya Xendit'}).click(); await f.page.getByRole('button',{name:'Lanjutkan Jurnal Biaya Xendit'}).waitFor();
+    assert.deepEqual(f.state.calls.at(-1).payload,{}); assert.equal(await ack.isChecked(),false);
+  }finally{await f.context.close();}
+});
+test('fee confirmation clears on account switch and cannot reuse previous staff approval', async()=>{
+  const f=await fixture();try{
+    await ready(f.page);await f.page.getByLabel('Konfirmasi Finance biaya Xendit termasuk PPN').check();
+    await f.page.evaluate(()=>window.__setAuth('manager2'));await ready(f.page);
+    assert.equal(await f.page.getByLabel('Konfirmasi Finance biaya Xendit termasuk PPN').isChecked(),false);
+    assert.equal(f.state.calls.some(c=>c.action==='activateFees'),false);
+  }finally{await f.context.close();}
+});
+test('fee journal status is distinct from gross documents and historical exclusions',async()=>{
+  const f=await fixture();try{
+    await ready(f.page);f.state.status.jobs=[{id,bookingCode:'SH-261022-FIX01',amount:160000,state:'waiting_fee',
+      createdAt:'2026-10-22T05:42:43Z',updatedAt:'2026-10-22T05:42:43Z',note:'Menunggu biaya final Xendit.',
+      downPaymentNumber:`SHDP-${id.slice(0,24)}`,receiptNumber:`SHRC-${id.slice(0,24)}`,invoiceNumber:`SHIV-${id.slice(0,24)}`,
+      confirmed:['down_payment','receipt','invoice'],feeNumber:`SHXF-${id.slice(0,24)}`,feeState:'pending',feeAmount:null}];
+    await f.page.getByRole('button',{name:'Muat Ulang Status Pencatatan'}).click();await f.page.getByText('Menunggu jurnal biaya',{exact:true}).waitFor();
+    assert.ok(await f.page.getByText(`Biaya Xendit: SHXF-${id.slice(0,24)} (menunggu verifikasi)`,{exact:true}).isVisible());
+    f.state.status.jobs[0].feeState='excluded';await f.page.getByRole('button',{name:'Muat Ulang Status Pencatatan'}).click();
+    await f.page.getByText('Biaya Xendit: di luar cakupan aktivasi biaya',{exact:true}).waitFor();
+    assert.deepEqual(await f.page.evaluate(()=>window.__events),[]);
+  }finally{await f.context.close();}
 });
