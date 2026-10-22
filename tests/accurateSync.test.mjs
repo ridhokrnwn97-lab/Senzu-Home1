@@ -538,14 +538,61 @@ function netFixture() {
   const service = createAccurateSync(deps);
   return { ...f, v, row, state, netCalls: calls, netDeps: deps, net: () => service.netPreview(req({ bookingId: v.booking.id })), netService: service };
 }
-test('settled Mandiri net preview reads one exact Live transaction without accounting credentials, writes, queueing or payment refresh', async () => {
-  const f = netFixture(); delete f.env.ACCURATE_API_TOKEN; delete f.env.ACCURATE_SIGNATURE_SECRET; delete f.env.ACCURATE_SYNC_WRITES_ENABLED;
-  const before = structuredClone([...f.db.data]), result = await f.net();
-  assert.equal(result.grossAmount, 160000); assert.equal(result.xenditFee, 9000); assert.equal(result.valueAddedTax, 990); assert.equal(result.netAmount, 150010);
-  assert.equal(result.productId, f.row.product_id); assert.equal(result.readOnly, true); assert.equal(result.processingFeeIncluded, false); assert.equal(result.bankPayoutVerified, false);
-  assert.equal(result.checkedAt, new Date(f.clock()).toISOString()); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
-  assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []); assert.equal(f.job(f.v), undefined);
-  for (const field of ['business_id', 'account_identifier', 'customer', 'key', 'Authorization', 'fee']) assert.equal(Object.hasOwn(result, field), false);
+test('SUCCESS and observed SUCCESSFUL settled Mandiri payments verify the same net without accounting credentials, writes, queueing or payment refresh', async () => {
+  for (const status of ['SUCCESS', 'SUCCESSFUL']) {
+    const f = netFixture(); f.row.status = status;
+    delete f.env.ACCURATE_API_TOKEN; delete f.env.ACCURATE_SIGNATURE_SECRET; delete f.env.ACCURATE_SYNC_WRITES_ENABLED;
+    const before = structuredClone([...f.db.data]), result = await f.net();
+    assert.equal(result.mode, 'xendit_net_preview_v1');
+    assert.equal(result.grossAmount, 160000); assert.equal(result.xenditFee, 9000); assert.equal(result.valueAddedTax, 990); assert.equal(result.netAmount, 150010);
+    assert.equal(result.productId, f.row.product_id); assert.equal(result.readOnly, true); assert.equal(result.processingFeeIncluded, false); assert.equal(result.bankPayoutVerified, false);
+    assert.equal(result.checkedAt, new Date(f.clock()).toISOString()); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
+    assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []); assert.equal(f.job(f.v), undefined);
+    for (const field of ['business_id', 'account_identifier', 'customer', 'key', 'Authorization', 'fee']) assert.equal(Object.hasOwn(result, field), false);
+  }
+});
+test('similar, nonfinal, refunded, missing and malformed status spellings remain unverified diagnostics without net values', async () => {
+  for (const status of ['SUCCESSFUL ', ' SUCCESSFUL', 'successful', 'Successful', 'success', 'SUCCEEDED', 'COMPLETED', 'SETTLED',
+    'PAID', 'PENDING', 'FAILED', 'VOIDED', 'REVERSED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'REFUND_PENDING', '', null, undefined, true, 1, [], {}]) {
+    const f = netFixture(); f.row.status = status; const before = structuredClone([...f.db.data]), result = await f.net();
+    assert.equal(isAccurateXenditStateDiagnostic(result), true); assert.equal(result.verified, false);
+    for (const field of ['grossAmount', 'netAmount', 'xenditFee', 'valueAddedTax']) assert.equal(Object.hasOwn(result, field), false);
+    assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0); assert.deepEqual(f.db.writes, []); assert.deepEqual([...f.db.data], before);
+  }
+});
+test('SUCCESSFUL still requires matching identity, amounts, currencies, finalized fees, zero withholding and exact net calculation', async () => {
+  for (const [change, code] of [
+    [f => f.row.business_id = 'foreign_business', 'XENDIT_BUSINESS_MISMATCH'],
+    [f => f.row.reference_id = 'foreign_reference', 'XENDIT_REFERENCE_MISMATCH'],
+    [f => f.row.product_id = 'foreign_product', 'XENDIT_PRODUCT_MISMATCH'],
+    [f => f.row.amount++, 'XENDIT_AMOUNT_MISMATCH'],
+    [f => f.row.currency = 'USD', 'XENDIT_CURRENCY_UNVERIFIED'],
+    [f => f.row.net_amount_currency = 'USD', 'XENDIT_CURRENCY_UNVERIFIED'],
+    [f => f.row.fee.status = 'PENDING', 'XENDIT_FEES_PENDING'],
+    [f => f.row.settlement_status = 'PENDING', 'XENDIT_SETTLEMENT_PENDING'],
+    [f => delete f.row.fee.xendit_fee, 'XENDIT_FEE_AMOUNT_UNVERIFIED'],
+    [f => delete f.row.fee.value_added_tax, 'XENDIT_FEE_VAT_UNVERIFIED'],
+    [f => delete f.row.fee.xendit_withholding_tax, 'XENDIT_FEE_WITHHOLDING_UNVERIFIED'],
+    [f => delete f.row.fee.third_party_withholding_tax, 'XENDIT_FEE_WITHHOLDING_UNVERIFIED'],
+    [f => f.row.fee.xendit_withholding_tax = 1, 'XENDIT_WITHHOLDING_REVIEW'],
+    [f => f.row.fee.third_party_withholding_tax = 1, 'XENDIT_WITHHOLDING_REVIEW'],
+    [f => f.row.net_amount--, 'XENDIT_NET_AMOUNT_UNVERIFIED']]) {
+    const f = netFixture(); f.row.status = 'SUCCESSFUL'; change(f); const before = structuredClone([...f.db.data]);
+    await rejects(f.net(), code); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
+    assert.deepEqual(f.db.writes, []); assert.deepEqual([...f.db.data], before);
+  }
+  for (const [field, value] of [['type', 'REFUND'], ['type', 'WITHDRAWAL'], ['type', 'VA_PAYMENT'], ['cashflow', 'MONEY_OUT'], ['cashflow', 'CREDIT']]) {
+    const f = netFixture(); f.row.status = 'SUCCESSFUL'; f.row[field] = value; const d = await f.net();
+    assert.equal(isAccurateXenditStateDiagnostic(d), true); assert.equal(d.verified, false); assert.equal(Object.hasOwn(d, 'netAmount'), false);
+    assert.deepEqual(f.db.writes, []); assert.equal(f.calls.length, 0);
+  }
+});
+test('an otherwise valid SUCCESSFUL payment cannot be mislabeled as a failed state diagnostic', async () => {
+  const f = netFixture(); f.row.status = 'SUCCESSFUL'; f.row.cashflow = 'MONEY_OUT'; const d = await f.net();
+  assert.equal(isAccurateXenditStateDiagnostic(d), true);
+  d.checks.cashflow = { kind: 'known', value: 'MONEY_IN' };
+  assert.equal(isAccurateXenditStateDiagnostic(d), false);
+  d.checks.status.kind = 'case_variant'; assert.equal(isAccurateXenditStateDiagnostic(d), true);
 });
 test('net preview supports canonical payment products, other channel fees and exact fractional IDR amounts without guessing zero', async () => {
   for (const free of [false, true]) {
@@ -656,6 +703,7 @@ test('net API read failures are safe and retrying a preview only performs anothe
 });
 test('net preview route requires Manager auth, has no-store, throttles reads and emits no raw upstream errors', async () => {
   const f = netFixture(), app = express(); app.use(express.json()); const service = registerAccurateSync(app, f.netDeps);
+  f.row.status = 'SUCCESSFUL';
   const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r)); const origin = `http://127.0.0.1:${server.address().port}`;
   const call = (bearer = 'manager') => fetch(`${origin}/api/integrations/accurate/sync/netPreview`, { method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId: f.v.booking.id }) });
   try {

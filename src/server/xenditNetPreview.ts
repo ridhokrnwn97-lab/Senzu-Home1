@@ -1,4 +1,4 @@
-import { isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic, observeXenditState, matchesXenditPaymentProduct, ACCURATE_NET_PREVIEW_ERRORS, xenditMinorUnits,
+import { isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic, isXenditSuccessfulIncomingPayment, observeXenditState, matchesXenditPaymentProduct, ACCURATE_NET_PREVIEW_ERRORS, xenditMinorUnits,
   type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
 
 const fail = (status: number, code: string) => Object.assign(new Error(ACCURATE_NET_PREVIEW_ERRORS[code]), { status, code });
@@ -39,7 +39,7 @@ export async function readXenditNetPreview(expected: Expected, deps: Dependencie
   if (!matchesXenditPaymentProduct(expected.paymentId, t.product_id)) throw fail(409, 'XENDIT_PRODUCT_MISMATCH');
   if (t.amount !== expected.amount) throw fail(409, 'XENDIT_AMOUNT_MISMATCH');
   if (t.currency !== 'IDR' || t.net_amount_currency !== 'IDR') throw fail(409, 'XENDIT_CURRENCY_UNVERIFIED');
-  if (t.type !== 'PAYMENT' || t.status !== 'SUCCESS' || t.cashflow !== 'MONEY_IN') {
+  if (!isXenditSuccessfulIncomingPayment(t.type, t.status, t.cashflow)) {
     const diagnostic = { mode: 'xendit_state_diagnostic_v1', environment: 'live', readOnly: true, verified: false,
       bookingCode: expected.bookingCode, checkedAt: new Date(deps.clock()).toISOString(), checks: {
         type: observeXenditState('type', t.type), status: observeXenditState('status', t.status), cashflow: observeXenditState('cashflow', t.cashflow),
