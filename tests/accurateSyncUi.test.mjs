@@ -24,6 +24,10 @@ const netFixture = { success: true, mode: 'xendit_net_preview_v1', environment: 
   grossAmount: 160000, xenditFee: 9000, valueAddedTax: 990, xenditWithholdingTax: 0, thirdPartyWithholdingTax: 0, netAmount: 150010,
   feeStatus: 'COMPLETED', settlementStatus: 'SETTLED', transactionUpdatedAt: '2026-10-22T05:42:43Z', checkedAt: '2026-10-22T09:00:00Z',
   processingFeeIncluded: false, bankPayoutVerified: false };
+const stateDiagnosticFixture = { success: true, mode: 'xendit_state_diagnostic_v1', environment: 'live', readOnly: true, verified: false,
+  bookingCode: 'SH-261022-FIX01', checkedAt: '2026-10-22T09:00:00Z', checks: {
+    type: { kind: 'known', value: 'PAYMENT' }, status: { kind: 'known', value: 'SUCCESS' }, cashflow: { kind: 'missing', value: null },
+  } };
 before(async () => {
   temp = await fs.mkdtemp(path.join(os.tmpdir(), 'senzu-accurate-sync-ui-'));
   const mocks = {
@@ -204,6 +208,44 @@ test('late net results after account switch or logout are discarded and reads ar
       assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
       assert.ok(f.state.calls.filter(c => c.action === 'netPreview').length <= 1); assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false);
       assert.deepEqual(await f.page.evaluate(() => window.__events), []); assert.deepEqual(f.errors, []);
+    } finally { release?.(); await f.context.close(); }
+  }
+});
+test('an unverified state diagnostic replaces old net values, compares all three fields, and preserves the active accounting status without Meta events', async () => {
+  const f = await fixture(); try {
+    await ready(f.page); Object.assign(f.state.status, { enabled: true, activatedAt: '2026-10-22T05:21:20Z', taxPolicy: 'no_extra_tax' });
+    await f.page.getByRole('button', { name: 'Muat Ulang Status Pencatatan' }).click(); await f.page.getByText('Aktif', { exact: true }).waitFor();
+    await netPreview(f.page); await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).waitFor();
+    f.state.net = structuredClone(stateDiagnosticFixture); await f.page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).click();
+    const result = f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }); await result.waitFor();
+    const text = await result.innerText(); for (const value of [/type/, /PAYMENT/, /status/, /SUCCESS/, /cashflow/, /Tidak disediakan/, /MONEY_IN/, /Neto belum terverifikasi/]) assert.match(text, value);
+    assert.equal(await result.getByRole('row').count(), 4); assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+    assert.equal(text.includes('150.010'), false); assert.equal(await f.page.getByText('Aktif', { exact: true }).count(), 1);
+    assert.equal(await f.page.getByRole('heading', { name: 'Aktivasi pencatatan booking baru' }).count(), 0);
+    assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
+    await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX02'); assert.equal(await result.count(), 0);
+  } finally { await f.context.close(); }
+});
+test('forged diagnostic values, identifiers, verification or financial fields cannot be rendered', async () => {
+  for (const change of [v => v.verified = true, v => v.readOnly = false, v => v.bookingCode = 'SH-261022-OTHER',
+    v => v.checks.status.value = 'private_fixture_secret', v => v.checks.cashflow.kind = 'known', v => v.netAmount = 150010,
+    v => v.checks.cashflow = { kind: 'known', value: 'MONEY_IN' }]) {
+    const f = await fixture(); try {
+      await ready(f.page); f.state.net = structuredClone(stateDiagnosticFixture); change(f.state.net); await netPreview(f.page);
+      await f.page.getByRole('alert').waitFor(); assert.equal(await f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }).count(), 0);
+      assert.equal((await f.page.locator('body').innerText()).includes('private_fixture_secret'), false);
+      assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+    } finally { await f.context.close(); }
+  }
+});
+test('late diagnostics cannot survive account switch or logout', async () => {
+  for (const nextUser of ['manager2', null]) {
+    const f = await fixture(); let release; try {
+      await ready(f.page); f.state.net = structuredClone(stateDiagnosticFixture); f.state.delay = new Promise(r => release = r);
+      await netPreview(f.page); await f.page.getByText('Memeriksa data…', { exact: true }).waitFor();
+      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); if (nextUser) await ready(f.page);
+      assert.equal(await f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }).count(), 0);
+      assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), ''); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
     } finally { release?.(); await f.context.close(); }
   }
 });

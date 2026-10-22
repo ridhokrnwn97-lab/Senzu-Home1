@@ -1,5 +1,5 @@
-import { isAccurateXenditNetPreview, matchesXenditPaymentProduct, ACCURATE_NET_PREVIEW_ERRORS, xenditMinorUnits,
-  type AccurateXenditNetPreview } from '../lib/accurateSyncContracts.ts';
+import { isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic, observeXenditState, matchesXenditPaymentProduct, ACCURATE_NET_PREVIEW_ERRORS, xenditMinorUnits,
+  type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
 
 const fail = (status: number, code: string) => Object.assign(new Error(ACCURATE_NET_PREVIEW_ERRORS[code]), { status, code });
 type Expected = { bookingCode: string; referenceId: string; paymentId: string; amount: number };
@@ -7,7 +7,7 @@ type Dependencies = { env: NodeJS.ProcessEnv; fetch?: typeof fetch; clock: () =>
 
 // This module has exactly one outbound operation: GET /transactions on the
 // fixed Xendit origin. It cannot refresh a payment, post fees or withdraw funds.
-export async function readXenditNetPreview(expected: Expected, deps: Dependencies): Promise<AccurateXenditNetPreview> {
+export async function readXenditNetPreview(expected: Expected, deps: Dependencies): Promise<AccurateXenditNetResult> {
   const key = deps.env.XENDIT_LIVE_SECRET_KEY, businessId = deps.env.XENDIT_LIVE_BUSINESS_ID;
   if (!/^xnd_production_[A-Za-z0-9_-]+$/.test(key || '') || !/^[A-Za-z0-9_-]{8,128}$/.test(businessId || '')) {
     throw fail(503, 'XENDIT_NET_NOT_CONFIGURED');
@@ -39,7 +39,14 @@ export async function readXenditNetPreview(expected: Expected, deps: Dependencie
   if (!matchesXenditPaymentProduct(expected.paymentId, t.product_id)) throw fail(409, 'XENDIT_PRODUCT_MISMATCH');
   if (t.amount !== expected.amount) throw fail(409, 'XENDIT_AMOUNT_MISMATCH');
   if (t.currency !== 'IDR' || t.net_amount_currency !== 'IDR') throw fail(409, 'XENDIT_CURRENCY_UNVERIFIED');
-  if (t.type !== 'PAYMENT' || t.status !== 'SUCCESS' || t.cashflow !== 'MONEY_IN') throw fail(409, 'XENDIT_STATE_UNVERIFIED');
+  if (t.type !== 'PAYMENT' || t.status !== 'SUCCESS' || t.cashflow !== 'MONEY_IN') {
+    const diagnostic = { mode: 'xendit_state_diagnostic_v1', environment: 'live', readOnly: true, verified: false,
+      bookingCode: expected.bookingCode, checkedAt: new Date(deps.clock()).toISOString(), checks: {
+        type: observeXenditState('type', t.type), status: observeXenditState('status', t.status), cashflow: observeXenditState('cashflow', t.cashflow),
+      } };
+    if (!isAccurateXenditStateDiagnostic(diagnostic)) throw fail(409, 'XENDIT_STATE_UNVERIFIED');
+    return diagnostic;
+  }
   if (!t.fee || t.fee.status !== 'COMPLETED') throw fail(409, 'XENDIT_FEES_PENDING');
   if (t.settlement_status !== 'SETTLED') throw fail(409, 'XENDIT_SETTLEMENT_PENDING');
   for (const [field, code] of [['xendit_fee', 'XENDIT_FEE_AMOUNT_UNVERIFIED'], ['value_added_tax', 'XENDIT_FEE_VAT_UNVERIFIED'],

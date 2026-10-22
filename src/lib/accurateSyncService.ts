@@ -1,6 +1,6 @@
 import { auth } from './firebase';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview,
-  type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview } from './accurateSyncContracts';
+import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
+  type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetResult } from './accurateSyncContracts';
 
 async function request(action: string, body: Record<string, unknown>, signal?: AbortSignal) {
   const user = auth.currentUser;
@@ -43,8 +43,8 @@ export async function accurateSyncPreview(bookingId: string, signal?: AbortSigna
   }
   return v;
 }
-export async function accurateXenditNetPreview(bookingId: string, signal?: AbortSignal): Promise<AccurateXenditNetPreview> {
+export async function accurateXenditNetPreview(bookingId: string, signal?: AbortSignal): Promise<AccurateXenditNetResult> {
   const v = await request('netPreview', { bookingId }, signal);
-  if (!isAccurateXenditNetPreview(v) || bookingId !== `bk_${v.bookingCode}`) throw new Error('Respons pratinjau neto Xendit tidak valid.');
+  if (!(isAccurateXenditNetPreview(v) || isAccurateXenditStateDiagnostic(v)) || bookingId !== `bk_${v.bookingCode}`) throw new Error('Respons pratinjau neto Xendit tidak valid.');
   return v;
 }
