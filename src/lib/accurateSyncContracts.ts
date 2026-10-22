@@ -1,16 +1,19 @@
 export const ACCURATE_SYNC_DATABASE_ID = 2974047;
+export const ACCURATE_FEE_ACK = 'NEW_LIVE_XENDIT_FEES_AS_EXPENSE_INCLUDING_VAT';
 export const ACCURATE_SYNC_ACK = 'NEW_LIVE_XENDIT_PAYMENTS_ONLY';
-export type AccurateSyncJobState = 'queued' | 'processing' | 'waiting_service' | 'retry' | 'review' | 'complete';
+export type AccurateSyncJobState = 'queued' | 'processing' | 'waiting_service' | 'waiting_fee' | 'retry' | 'review' | 'complete';
 export type AccurateSyncJobView = {
   id: string; bookingCode: string; amount: number; state: AccurateSyncJobState;
   createdAt: string; updatedAt: string; note: string;
   downPaymentNumber: string | null; receiptNumber: string | null; invoiceNumber: string | null;
   confirmed: Array<'down_payment' | 'receipt' | 'invoice'>;
+  feeNumber?: string; feeState?: 'excluded' | 'pending' | 'confirmed' | 'zero'; feeAmount?: number | null;
 };
 export type AccurateSyncStatus = {
   mode: 'posting_v1'; databaseId: number; writesConfigured: boolean; schedulerConfigured: boolean;
   enabled: boolean; activatedAt: string | null; taxPolicy: 'no_extra_tax' | null;
   jobs: AccurateSyncJobView[];
+  feesEnabled?: boolean; feesActivatedAt?: string | null; feePolicy?: 'expense_including_vat' | null;
 };
 export type AccurateSyncPreview = {
   bookingCode: string; amount: number; historical: boolean; eligible: boolean;
@@ -130,6 +133,7 @@ export function isAccurateXenditNetPreview(value: unknown): value is AccurateXen
 export const ACCURATE_SYNC_NOTES: Record<string, string> = {
   queued: 'Menunggu pencatatan uang muka.', processing: 'Sedang diproses.',
   waiting_service: 'Uang muka dan penerimaan tercatat. Menunggu treatment selesai.',
+  waiting_fee: 'Dokumen bruto diproses. Menunggu biaya final Xendit atau pengiriman jurnal biaya.',
   retry: 'Belum berhasil menghubungi Accurate. Akan diperiksa kembali.',
   review: 'Perlu pemeriksaan Manager. Tidak mengirim ulang pembuatan dokumen yang belum pasti.',
   complete: 'Uang muka, penerimaan, dan faktur layanan sudah diverifikasi.',
