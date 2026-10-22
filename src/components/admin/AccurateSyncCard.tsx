@@ -8,19 +8,20 @@ import { accurateSyncAction, accurateSyncPreview, accurateXenditNetPreview } fro
 
 const money = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 const feeMoney = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n);
-const stateLabel = { queued: 'Menunggu', processing: 'Diproses', waiting_service: 'Menunggu treatment', retry: 'Akan diperiksa ulang', review: 'Perlu pemeriksaan', complete: 'Selesai' };
+const stateLabel = { queued: 'Menunggu', processing: 'Diproses', waiting_service: 'Menunggu treatment', waiting_fee: 'Menunggu jurnal biaya', retry: 'Akan diperiksa ulang', review: 'Perlu pemeriksaan', complete: 'Selesai' };
 export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   const allowed = ['manager', 'admin'].includes(currentUser.role);
   const [status, setStatus] = useState<AccurateSyncStatus | null>(null), [preview, setPreview] = useState<AccurateSyncPreview | null>(null);
   const [netPreview, setNetPreview] = useState<AccurateXenditNetPreview | null>(null);
   const [stateDiagnostic, setStateDiagnostic] = useState<AccurateXenditStateDiagnostic | null>(null);
   const [booking, setBooking] = useState(''), [ack, setAck] = useState(false), [tax, setTax] = useState(false);
+  const [feeAck, setFeeAck] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const generation = useRef(0), flight = useRef(false), controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const off = onAuthStateChanged(auth, user => {
       const version = ++generation.current; controller.current?.abort(); controller.current = null;
-      flight.current = false; setBusy(false); setStatus(null); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setBooking(''); setAck(false); setTax(false); setError('');
+      flight.current = false; setBusy(false); setStatus(null); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setBooking(''); setAck(false); setTax(false); setFeeAck(false); setError('');
       if (!user || !allowed) return;
       const c = new AbortController(); controller.current = c; flight.current = true; setBusy(true);
       accurateSyncAction('status', undefined, c.signal).then(v => { if (generation.current === version) setStatus(v); })
@@ -31,29 +32,29 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   }, [currentUser.uid, currentUser.role, allowed]);
   if (!allowed) return null;
   const normalized = booking.trim().startsWith('SH-') ? `bk_${booking.trim()}` : booking.trim();
-  const act = async (action: 'status' | 'preview' | 'netPreview' | 'activate' | 'pause' | 'run' | 'retry') => {
+  const act = async (action: 'status' | 'preview' | 'netPreview' | 'activate' | 'activateFees' | 'pauseFees' | 'pause' | 'run' | 'retry') => {
     if (flight.current) return;
     const version = generation.current, c = new AbortController(); controller.current = c;
     flight.current = true; setBusy(true); setError('');
     if (action === 'status') setStatus(null);
     try {
       if (action === 'netPreview') {
-        setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false);
+        setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false); setFeeAck(false);
         const v = await accurateXenditNetPreview(normalized, c.signal);
         if (generation.current === version) { if (v.mode === 'xendit_state_diagnostic_v1') setStateDiagnostic(v); else setNetPreview(v); }
       } else if (action === 'preview') {
-        setPreview(null); setAck(false); setTax(false);
+        setPreview(null); setAck(false); setTax(false); setFeeAck(false);
         const v = await accurateSyncPreview(normalized, c.signal); if (generation.current === version) setPreview(v);
       } else {
         const v = await accurateSyncAction(action, action === 'retry' ? normalized : undefined, c.signal);
-        if (generation.current === version) { setStatus(v); if (action === 'activate') { setAck(false); setTax(false); } }
+        if (generation.current === version) { setStatus(v); if (action === 'activate' || action === 'activateFees') { setAck(false); setTax(false); setFeeAck(false); } }
       }
     } catch (e: any) {
       if (generation.current === version) {
         // A known Xendit read failure does not invalidate the already loaded
         // accounting status. Auth/account changes still clear state separately.
         if (action !== 'netPreview' || !Object.values(ACCURATE_NET_PREVIEW_ERRORS).includes(e?.message)) setStatus(null);
-        setAck(false); setTax(false);
+        setAck(false); setTax(false); setFeeAck(false);
         setError(e?.name === 'AbortError' || e?.name === 'TimeoutError' ? 'Permintaan belum selesai. Muat ulang status sebelum mencoba kembali.' : e.message);
       }
     } finally { if (generation.current === version) { flight.current = false; setBusy(false); } }
@@ -62,7 +63,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   return <section aria-label="Accurate Online — Pencatatan Transaksi" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
     <h3 className="text-lg font-bold text-[#082A4F]">Accurate Online — Pencatatan Transaksi</h3>
     <p className="text-sm text-slate-600">Pembayaran Xendit Live masuk ke Uang Muka Penjualan dan Saldo Xendit. Saat treatment selesai, uang muka dipakai melunasi faktur layanan.</p>
-    <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Aktivasi membuat dokumen akuntansi pada PT KSBONE UNTUK KITA, database 2974047. Booking lama, pembayaran manual, dan simulasi Test tidak dimasukkan otomatis. Biaya Xendit, pencairan bank, pembatalan, dan refund memerlukan pemeriksaan terpisah.</p>
+    <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Aktivasi membuat dokumen akuntansi pada PT KSBONE UNTUK KITA, database 2974047. Booking lama, pembayaran manual, dan simulasi Test tidak dimasukkan otomatis. Biaya transaksi Xendit dapat diaktifkan terpisah sebagai beban termasuk PPN. Processing fee harian, pencairan bank, pembatalan, dan refund tetap diperiksa terpisah.</p>
     {status && <div className="space-y-1 text-sm text-slate-700">
       <p>Pengiriman: <strong>{status.enabled && status.writesConfigured ? 'Aktif' : status.activatedAt ? 'Dijeda' : 'Belum aktif'}</strong>.</p>
       <p>{status.writesConfigured ? 'Konfigurasi server mengizinkan pengiriman setelah aktivasi Manager.' : 'Pengiriman dari server belum diizinkan.'}</p>
@@ -77,7 +78,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
     <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
       <h4 className="font-semibold">Pratinjau booking dan periksa pemetaan</h4>
       <p>Pratinjau hanya membaca data. Gunakan kode booking yang sudah dibayar melalui Xendit Live untuk memeriksa akun, layanan, dan rincian nominal.</p>
-      <label className="block">Kode atau ID booking<input aria-label="Booking untuk pratinjau Accurate" value={booking} disabled={busy} onChange={e => { setBooking(e.target.value); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false); setError(''); }} placeholder="SH-261022-NUOUN atau bk_SH-…" className="mt-1 block min-h-[44px] w-full rounded-lg border p-2" /></label>
+      <label className="block">Kode atau ID booking<input aria-label="Booking untuk pratinjau Accurate" value={booking} disabled={busy} onChange={e => { setBooking(e.target.value); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false); setFeeAck(false); setError(''); }} placeholder="SH-261022-NUOUN atau bk_SH-…" className="mt-1 block min-h-[44px] w-full rounded-lg border p-2" /></label>
       <div className="flex flex-wrap gap-3">
         <button type="button" className={button} disabled={busy || !normalized} onClick={() => act('preview')}>Pratinjau Tanpa Mencatat</button>
         <button type="button" className={button} disabled={busy || !normalized} onClick={() => act('netPreview')}>Pratinjau Biaya &amp; Neto Xendit</button>
@@ -113,7 +114,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
         <p>Biaya final dan settlement pembayaran terverifikasi di Xendit. Diperiksa {new Date(netPreview.checkedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB.</p>
         <p>Processing fee harian dan PPN-nya belum termasuk. Potongan tersebut perlu dicocokkan terpisah dengan laporan Xendit, tanpa dibagi otomatis ke booking.</p>
         <p><strong>Ini belum membuktikan dana masuk rekening bank.</strong> Cocokkan laporan pencairan Xendit dengan mutasi rekening.</p>
-        <p>Pratinjau hanya membaca Xendit. Tidak mencatat biaya ke Accurate atau mengubah pembayaran. Perlakuan pajak biaya menunggu pemeriksaan Finance.</p>
+        <p>Pratinjau hanya membaca Xendit. Tidak mencatat biaya ke Accurate atau mengubah pembayaran. Pencatatan otomatis biaya mengikuti pengaturan Finance di bawah.</p>
         <details><summary className="cursor-pointer">Referensi pemeriksaan</summary><div className="mt-2 space-y-1 break-all text-xs">
           <p>Referensi: {netPreview.referenceId}</p><p>Payment: {netPreview.paymentId}</p><p>Transaksi: {netPreview.transactionId}</p>
           <p>Pembaruan data Xendit: {new Date(netPreview.transactionUpdatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB.</p>
@@ -127,6 +128,18 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
       <button type="button" className="min-h-[44px] rounded-lg bg-[#082A4F] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !status?.writesConfigured || !preview?.itemCode || !ack || !tax} onClick={() => act('activate')}>{status?.activatedAt ? 'Lanjutkan Pengiriman Accurate' : 'Aktifkan Pencatatan Booking Baru'}</button>
       <p>Jeda menghentikan pengiriman berikutnya. Dokumen yang sudah terkirim tetap tersimpan di Accurate.</p>
     </div>}
+    {status && <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
+      <h4 className="font-semibold">Jurnal biaya Xendit otomatis</h4>
+      <p>Debit Beban Administrasi Xendit (600031), kredit Saldo Xendit (110103), sebesar biaya transaksi + PPN biaya yang sudah final dari Xendit. PPN biaya dibebankan sebagai biaya sesuai keputusan Finance.</p>
+      <p>Status: <strong>{status.feesEnabled ? 'Aktif' : status.feesActivatedAt ? 'Dijeda' : 'Belum aktif'}</strong>.</p>
+      {status.feesActivatedAt && <p>Berlaku untuk booking dan sesi pembayaran yang dibuat setelah {new Date(status.feesActivatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB. Jeda menyimpan antrean baru tanpa mengirim jurnal biaya.</p>}
+      <p>Booking sebelum aktivasi biaya, termasuk jurnal manual yang sudah dicatat, tidak diproses ulang. Tidak mencatat processing fee harian, PPN Masukan, atau transfer bank.</p>
+      {!status.feesEnabled && <>
+        <label className="flex gap-2"><input type="checkbox" aria-label="Konfirmasi Finance biaya Xendit termasuk PPN" disabled={busy} checked={feeAck} onChange={e => setFeeAck(e.target.checked)} />Finance menyetujui biaya transaksi dan PPN biaya dicatat sebagai beban. Saya memahami aktivasi akan membuat jurnal untuk pembayaran baru.</label>
+        <button type="button" className={button} disabled={busy || !feeAck || !status.enabled || !status.writesConfigured} onClick={() => act('activateFees')}>{status.feesActivatedAt ? 'Lanjutkan Jurnal Biaya Xendit' : 'Aktifkan Jurnal Biaya Xendit'}</button>
+      </>}
+      {status.feesEnabled && <button type="button" className={button} disabled={busy} onClick={() => act('pauseFees')}>Jeda Jurnal Biaya Xendit</button>}
+    </div>}
     {busy && <p role="status" className="text-sm text-slate-600">Memeriksa data…</p>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {status && <div className="overflow-x-auto"><table className="w-full text-left text-xs"><caption className="mb-2 text-left font-semibold">20 catatan antrean terbaru</caption>
@@ -134,6 +147,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
       <tbody>{status.jobs.map(j => <tr key={j.id} className="border-b align-top"><td className="whitespace-nowrap p-2">{j.bookingCode}</td><td className="whitespace-nowrap p-2">{money(j.amount)}</td><td className="min-w-[200px] p-2"><strong>{stateLabel[j.state]}</strong><p>{j.note}</p></td><td className="space-y-1 p-2">
         <p>Uang muka: {j.downPaymentNumber} ({j.confirmed.includes('down_payment') ? 'terverifikasi' : 'belum terverifikasi'})</p>
         <p>Penerimaan: {j.receiptNumber} ({j.confirmed.includes('receipt') ? 'terverifikasi' : 'belum terverifikasi'})</p>
+        <p>Biaya Xendit: {j.feeState === 'excluded' || !j.feeState ? 'di luar cakupan aktivasi biaya' : `${j.feeNumber} (${j.feeState === 'confirmed' ? 'terverifikasi' : j.feeState === 'zero' ? 'biaya nol; tanpa jurnal' : 'menunggu verifikasi'})`}{j.feeAmount != null && ` · ${feeMoney(j.feeAmount)}`}</p>
         <p>Faktur: {j.invoiceNumber} ({j.confirmed.includes('invoice') ? 'terverifikasi' : 'belum terverifikasi'})</p>
       </td></tr>)}</tbody>
     </table>{status.jobs.length === 0 && <p className="mt-3 text-sm text-slate-600">Belum ada booking dalam antrean pencatatan.</p>}</div>}
