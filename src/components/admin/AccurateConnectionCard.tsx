@@ -45,7 +45,7 @@ export function AccurateConnectionCard({ currentUser }: { currentUser: StaffUser
   return <section aria-label="Accurate Online — Koneksi" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
     <h3 className="text-lg font-bold text-[#082A4F]">Accurate Online — Koneksi</h3>
     <p className="text-sm text-slate-600">Periksa koneksi ke PT KSBONE UNTUK KITA serta akun dan layanan Senzu Home.</p>
-    <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><strong>Sinkronisasi transaksi belum aktif.</strong> Pemeriksaan ini membaca data; tidak membuat faktur, penerimaan penjualan, atau jurnal.</p>
+    <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><strong>Panel ini hanya memeriksa koneksi.</strong> Pemeriksaan ini membaca data; tidak membuat faktur, penerimaan penjualan, atau jurnal. Status pengiriman ada pada panel Pencatatan Transaksi.</p>
     {configuration && <div className="space-y-1 text-sm text-slate-700">
       <p>API Token: {configuration.apiTokenPresent ? 'tersedia' : 'belum tersedia atau format tidak valid'}.</p>
       <p>Signature Secret: {configuration.signatureSecretPresent ? 'tersedia' : 'belum tersedia atau format tidak valid'}.</p>

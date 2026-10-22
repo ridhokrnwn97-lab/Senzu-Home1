@@ -2,6 +2,7 @@ import { registerPaymentAcceptance, assertPaymentLink, assertManualPayment } fro
 import { registerXenditSandbox } from './src/server/xenditSandbox.ts';
 import { registerXenditLive } from './src/server/xenditLive.ts';
 import { registerAccurateConnection } from './src/server/accurateConnection.ts';
+import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
@@ -1723,6 +1724,36 @@ async function startServer() {
   // Loyalty point earning + account provisioning run server-side; Firestore rules keep client writes staff-only.
   const loyaltyAccounts = registerLoyaltyAccounts(app, adminDb, token => adminAuth!.verifyIdToken(token));
 
+  const accurateSync = registerAccurateSync(app, {
+    db: adminDb,
+    verify: token => {
+      if (!adminAuth) throw Object.assign(new Error('Auth unavailable'), { code: 'auth/internal-error' });
+      return adminAuth.verifyIdToken(token);
+    },
+    authorizeManager: async (transaction, uid) => {
+      const [roleSnap, canonical, legacy, direct] = await Promise.all([
+        transaction.get(adminDb.collection('staff_roles').doc(uid)),
+        transaction.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').doc(uid)),
+      ]);
+      const matches = new Map<string, any>();
+      for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+      const role = roleSnap.data() || {};
+      for (const linked of [role.staffId, role.staffUserId]) {
+        if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !matches.has(linked)) {
+          const snap = await transaction.get(adminDb.collection('staff_users').doc(linked));
+          if (snap.exists) matches.set(snap.id, snap);
+        }
+      }
+      const result = validateStage7dActiveManagerIdentity(uid, roleSnap.exists, role, matches);
+      if (!result.ok) throw Object.assign(new Error(result.message || 'Akses Manager/Admin diperlukan.'), {
+        status: result.status || 403, code: result.code || 'MANAGER_ROLE_REQUIRED',
+      });
+      return result;
+    },
+  });
+
   const liveXendit = registerXenditLive(app, {
     db: adminDb,
     verify: token => {
@@ -1751,7 +1782,8 @@ async function startServer() {
       });
       return result;
     },
-    onPaid: bookingId => loyaltyAccounts.creditBookingLoyalty(bookingId),
+    stagePaid: (transaction, value) => accurateSync.stagePaid(transaction, value),
+    onPaid: bookingId => { accurateSync.wake(); return loyaltyAccounts.creditBookingLoyalty(bookingId); },
   });
 
   // Connection-only Accurate checks use the existing active Staff Master identity policy.
