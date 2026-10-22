@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
+import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
   type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetResult } from './accurateSyncContracts';
 
 async function request(action: string, body: Record<string, unknown>, signal?: AbortSignal) {
@@ -17,17 +17,24 @@ async function request(action: string, body: Record<string, unknown>, signal?: A
     'Permintaan Accurate belum berhasil.' + (typeof value?.code === 'string' && /^[A-Z_]{1,60}$/.test(value.code) ? ` Kode: ${value.code}.` : ' Coba muat ulang.'));
   return value;
 }
-export async function accurateSyncAction(action: 'status' | 'activate' | 'pause' | 'run' | 'retry', bookingId?: string, signal?: AbortSignal): Promise<AccurateSyncStatus> {
-  const body = action === 'activate' ? { acknowledgement: ACCURATE_SYNC_ACK, taxPolicy: 'no_extra_tax' } : action === 'retry' ? { bookingId } : {};
+export async function accurateSyncAction(action: 'status' | 'activate' | 'activateFees' | 'pauseFees' | 'pause' | 'run' | 'retry', bookingId?: string, signal?: AbortSignal): Promise<AccurateSyncStatus> {
+  const body = action === 'activateFees' ? { acknowledgement: ACCURATE_FEE_ACK, feePolicy: 'expense_including_vat' } : action === 'activate' ? { acknowledgement: ACCURATE_SYNC_ACK, taxPolicy: 'no_extra_tax' } : action === 'retry' ? { bookingId } : {};
   const v = await request(action, body, signal);
   if (v.mode !== 'posting_v1' || v.databaseId !== ACCURATE_SYNC_DATABASE_ID ||
       ['writesConfigured', 'schedulerConfigured', 'enabled'].some(k => typeof v[k] !== 'boolean') ||
       !(v.activatedAt === null || typeof v.activatedAt === 'string' && Number.isFinite(Date.parse(v.activatedAt))) ||
+      !(v.feesEnabled === undefined || typeof v.feesEnabled === 'boolean') ||
+      !(v.feesActivatedAt === undefined || v.feesActivatedAt === null || typeof v.feesActivatedAt === 'string' && Number.isFinite(Date.parse(v.feesActivatedAt))) ||
+      ![undefined, null, 'expense_including_vat'].includes(v.feePolicy) ||
+      (v.feesEnabled === true && (!v.feesActivatedAt || v.feePolicy !== 'expense_including_vat')) ||
       ![null, 'no_extra_tax'].includes(v.taxPolicy) || !Array.isArray(v.jobs) || v.jobs.length > 20 ||
       v.jobs.some((j: any) => !/^[a-f0-9]{64}$/.test(j?.id || '') || typeof j.bookingCode !== 'string' || !/^SH-\d{6}-[A-Z0-9]{5,20}$/.test(j.bookingCode) ||
-        !Number.isSafeInteger(j.amount) || j.amount < 10000 || j.amount > 10000000 || !['queued', 'processing', 'waiting_service', 'retry', 'review', 'complete'].includes(j.state) ||
+        !Number.isSafeInteger(j.amount) || j.amount < 10000 || j.amount > 10000000 || !['queued', 'processing', 'waiting_service', 'waiting_fee', 'retry', 'review', 'complete'].includes(j.state) ||
         typeof j.note !== 'string' || !Number.isFinite(Date.parse(j.createdAt)) || !Number.isFinite(Date.parse(j.updatedAt)) ||
         j.downPaymentNumber !== `SHDP-${j.id.slice(0, 24)}` || j.receiptNumber !== `SHRC-${j.id.slice(0, 24)}` || j.invoiceNumber !== `SHIV-${j.id.slice(0, 24)}` ||
+        (j.feeNumber !== undefined && j.feeNumber !== `SHXF-${j.id.slice(0, 24)}`) ||
+        ![undefined, 'excluded', 'pending', 'confirmed', 'zero'].includes(j.feeState) ||
+        !(j.feeAmount === undefined || j.feeAmount === null || typeof j.feeAmount === 'number' && Number.isFinite(j.feeAmount) && j.feeAmount >= 0 && j.feeAmount <= 10000000) ||
         !Array.isArray(j.confirmed) || j.confirmed.some((k: any) => !['down_payment', 'receipt', 'invoice'].includes(k)))) {
     throw new Error('Respons status pencatatan Accurate tidak valid.');
   }

@@ -1,8 +1,9 @@
 import type { Express, Request } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
+import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, isAccurateXenditNetPreview, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
   type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
+import { FEE_POLICY, feeNumber, feePlan, matchesFeeJournal } from './accurateFeePosting.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
 import { readXenditNetPreview } from './xenditNetPreview.ts';
 import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
@@ -24,6 +25,9 @@ const providerDate = (value: unknown) => typeof value === 'string' ? /^\d{2}\/\d
 const numbers = (id: string) => ({ downPaymentNumber: `SHDP-${id.slice(0, 24)}`, receiptNumber: `SHRC-${id.slice(0, 24)}`, invoiceNumber: `SHIV-${id.slice(0, 24)}` });
 const MESSAGES: Record<string, string> = {
   ...ACCURATE_NET_PREVIEW_ERRORS,
+  FEE_APPROVAL_REQUIRED: 'Konfirmasi Finance bahwa biaya dan PPN biaya dibebankan sebagai biaya diperlukan.',
+  FEE_POSTING_PAUSED: 'Pengiriman jurnal biaya dijeda. Antrean biaya tetap disimpan.',
+  FEE_EVIDENCE_CHANGED: 'Rincian biaya Xendit berubah. Finance perlu memeriksa jurnal sebelum melanjutkan.',
   AUTH_REQUIRED: 'Silakan masuk sebagai Manager atau Admin.', AUTH_INVALID: 'Sesi login tidak valid.',
   AUTH_UNAVAILABLE: 'Verifikasi login belum tersedia.', MANAGER_ROLE_REQUIRED: 'Akses Manager atau Admin aktif diperlukan.',
   INVALID_SYNC_REQUEST: 'Permintaan pencatatan Accurate tidak valid.', DATABASE_UNAVAILABLE: 'Database belum tersedia.',
@@ -57,6 +61,9 @@ function control(value: any) {
   if (!value) return null;
   if (value.schemaVersion !== 1 || value.databaseId !== TARGET || value.taxPolicy !== 'no_extra_tax' ||
       typeof value.enabled !== 'boolean' || !Number.isFinite(stampTime(value.activatedAt))) throw syncFailure('SYNC_CONTROL_INVALID', true);
+  if (value.feesActivatedAt !== undefined && (typeof value.feesEnabled !== 'boolean' || value.feePolicy !== FEE_POLICY ||
+      !Number.isFinite(stampTime(value.feesActivatedAt)) || stampTime(value.feesActivatedAt) < stampTime(value.activatedAt))) throw syncFailure('SYNC_CONTROL_INVALID', true);
+  if (value.feesActivatedAt === undefined && (value.feesEnabled !== undefined || value.feePolicy !== undefined)) throw syncFailure('SYNC_CONTROL_INVALID', true);
   return value;
 }
 function terms(booking: any, payment: any) {
@@ -145,7 +152,9 @@ export function createAccurateSync(deps: Dependencies) {
       paymentId: v.payment.id, referenceId: v.intent.referenceId, quoteHash: v.intent.quoteHash,
       ownerHash: hash([TARGET, v.booking.customerAuthUid]), amount: v.payment.amount,
       state: issue ? 'review' : 'queued', issue, commercial, createdAt: now(), updatedAt: now(),
-      wakeAt: issue ? PARKED : clock(), documents: {}, attempts: 0 });
+      wakeAt: issue ? PARKED : clock(), documents: {}, attempts: 0,
+      ...(c.feesActivatedAt && v.bookingCreatedAt > stampTime(c.feesActivatedAt) && stampTime(v.intent.createdAt) > stampTime(c.feesActivatedAt)
+        ? { feePolicy: FEE_POLICY, feesActivatedAt: c.feesActivatedAt } : {}) });
   }
   async function source(t: Transaction, bookingId: string): Promise<AccuratePaidEvent> {
     const bs = await t.get(db!.collection('bookings').doc(bookingId)), b = bs.data();
@@ -159,12 +168,15 @@ export function createAccurateSync(deps: Dependencies) {
   const jobView = (id: string, job: any): AccurateSyncJobView => ({ id, bookingCode: job.bookingCode, amount: job.amount,
     state: job.state, createdAt: job.createdAt, updatedAt: job.updatedAt,
     note: MESSAGES[job.issue] || ACCURATE_SYNC_NOTES[job.state] || ACCURATE_SYNC_NOTES.review,
-    ...numbers(id), confirmed: (['down_payment', 'receipt', 'invoice'] as const).filter(kind => Boolean(job.documents?.[kind]?.id)) });
+    ...numbers(id), feeNumber: feeNumber(id), feeState: job.feePolicy !== FEE_POLICY ? 'excluded' :
+      job.documents?.fee?.id ? 'confirmed' : job.feeZero === true ? 'zero' : 'pending', feeAmount: job.feeEvidence?.amount ?? null,
+    confirmed: (['down_payment', 'receipt', 'invoice'] as const).filter(kind => Boolean(job.documents?.[kind]?.id)) });
   async function statusValue(uid: string): Promise<AccurateSyncStatus> {
     const [cs, latest] = await Promise.all([ref().get(), db!.collection(JOBS).orderBy('createdAt', 'desc').limit(20).get()]);
     const c = control(cs.data());
     await db!.runTransaction(t => deps.authorizeManager(t, uid));
     return { mode: 'posting_v1', databaseId: TARGET, writesConfigured: configured(), schedulerConfigured: schedulerConfigured(),
+      feesEnabled: c?.feesEnabled === true, feesActivatedAt: c?.feesActivatedAt || null, feePolicy: c?.feePolicy || null,
       enabled: c?.enabled === true, activatedAt: c?.activatedAt || null, taxPolicy: c?.taxPolicy || null,
       jobs: latest.docs.map(d => jobView(d.id, d.data())) };
   }
@@ -217,6 +229,28 @@ export function createAccurateSync(deps: Dependencies) {
         activatedAt: c?.activatedAt || now(), updatedAt: now(), updatedBy: uid }, { merge: true });
     });
     wake(); return statusValue(uid);
+  }
+  async function activateFees(req: Request) {
+    const uid = await actor(req, ['acknowledgement', 'feePolicy']); rate(`activateFees:${uid}`, 2);
+    if (req.body.acknowledgement !== ACCURATE_FEE_ACK || req.body.feePolicy !== FEE_POLICY) throw fail(400, 'FEE_APPROVAL_REQUIRED');
+    if (!configured()) throw fail(503, 'SYNC_NOT_CONFIGURED');
+    const api = await provider.connect(clock() + 45000); await api.masters();
+    // Read permission is checked without creating a journal or expanding access.
+    await api.lookup('fee', 'SHXF-PERMISSION-CHECK');
+    await db!.runTransaction(async t => {
+      await deps.authorizeManager(t, uid); const c = control((await t.get(ref())).data());
+      if (!c?.enabled) throw fail(409, 'SYNC_PAUSED');
+      t.update(ref(), { feesEnabled: true, feePolicy: FEE_POLICY, feesActivatedAt: c.feesActivatedAt || now(), updatedAt: now(), updatedBy: uid });
+    });
+    wake(); return statusValue(uid);
+  }
+  async function pauseFees(req: Request) {
+    const uid = await actor(req, []);
+    await db!.runTransaction(async t => {
+      await deps.authorizeManager(t, uid); const c = control((await t.get(ref())).data());
+      if (c?.feesActivatedAt) t.update(ref(), { feesEnabled: false, updatedAt: now(), updatedBy: uid });
+    });
+    return statusValue(uid);
   }
   async function pause(req: Request) {
     const uid = await actor(req, []);
@@ -284,7 +318,7 @@ export function createAccurateSync(deps: Dependencies) {
       }
       const v = await fresh(), commercial = core(v), docs = numbers(a.id);
       const api = await provider.connect(deadline); await api.masters(commercial.itemCode!);
-      async function ensure(kind: AccurateDocumentKind, number: string, payload: Record<string, any>, validate: (d: any) => boolean) {
+      async function ensure(kind: AccurateDocumentKind, number: string, payload: Record<string, any>, validate: (d: any) => boolean, guard?: () => Promise<void>) {
         const operationId = hash([TARGET, kind, number]), opRef = db!.collection(OPS).doc(operationId);
         const fingerprint = hash(kind === 'customer' ? { ...payload, name: null, transDate: null } : payload);
         const op = await db!.runTransaction(async t => { await leased(t, a.token); return (await t.get(opRef)).data(); });
@@ -294,9 +328,10 @@ export function createAccurateSync(deps: Dependencies) {
           // Once a create may have been sent, absence is NOT permission to retry.
           if (op) throw syncFailure('ACCURATE_DOCUMENT_UNCERTAIN', true);
           if (deadline - clock() < 12000) throw syncFailure('ACCURATE_RETRY');
-          await fresh();
+          await fresh(); if (guard) await guard();
           await db!.runTransaction(async t => {
-            await leased(t, a.token); const current = await t.get(opRef);
+            const c = await leased(t, a.token); const current = await t.get(opRef);
+            if (kind === 'fee' && !c.feesEnabled) throw syncFailure('FEE_POSTING_PAUSED');
             if (current.exists) throw syncFailure('ACCURATE_DOCUMENT_UNCERTAIN', true);
             t.create(opRef, { schemaVersion: 1, databaseId: TARGET, kind, number, fingerprint, state: 'sending',
               bookingId: kind === 'customer' ? null : a.job.bookingId, createdAt: now(), updatedAt: now() });
@@ -310,6 +345,7 @@ export function createAccurateSync(deps: Dependencies) {
           document = await api.lookup(kind, number);
           if (!document) throw syncFailure('ACCURATE_DOCUMENT_UNCERTAIN', true);
         }
+        if (guard) await guard();
         if (!positiveId(document.id) || !validate(document)) throw syncFailure('ACCURATE_DOCUMENT_MISMATCH', true);
         await db!.runTransaction(async t => {
           await leased(t, a.token); const current = await t.get(opRef);
@@ -352,27 +388,74 @@ export function createAccurateSync(deps: Dependencies) {
         currency(d) && customerMatches(d) && d.description === description('RC') && providerDate(d.transDate) === paidDate && Array.isArray(d.detailInvoice) &&
         d.detailInvoice.length === 1 && invoiceNumber(d.detailInvoice[0]) === docs.downPaymentNumber && d.detailInvoice[0].paymentAmount === a.job.amount);
       const latest = await fresh();
-      if (String(latest.booking.status).toLowerCase() !== 'completed') {
-        await finish(a, 'waiting_service', ''); return { processed: 1 };
+      const serviceCompleted = String(latest.booking.status).toLowerCase() === 'completed';
+      if (serviceCompleted) {
+        const completedAt = latest.booking.completedAt;
+        if (!Number.isFinite(stampTime(completedAt)) || stampTime(completedAt) < stampTime(v.payment.paidAt) || stampTime(completedAt) > clock() + 60000) throw syncFailure('SYNC_SOURCE_CHANGED', true);
+        const item = { itemNo: commercial.itemCode, quantity: 1, itemUnitName: 'Paket', unitPrice: commercial.servicePrice,
+          useTax1: false, useTax2: false, useTax3: false };
+        const expenses = commercial.visitFee ? [{ accountNo: '400005', expenseAmount: commercial.visitFee, expenseName: 'Biaya kunjungan Senzu Home' }] : [];
+        await ensure('invoice', docs.invoiceNumber, { customerNo, number: docs.invoiceNumber, transDate: wibDate(completedAt),
+          currencyCode: 'IDR', invoiceDp: false, taxable: false, inclusiveTax: false, cashDiscount: commercial.discount,
+          description: description('IV'), detailItem: [item], detailExpense: expenses,
+          detailDownPayment: [{ invoiceNumber: docs.downPaymentNumber, paymentAmount: a.job.amount }] },
+        d => d.number === docs.invoiceNumber && d.invoiceDp === false && d.totalAmount === a.job.amount && currency(d) && customerMatches(d) &&
+          d.description === description('IV') && providerDate(d.transDate) === wibDate(completedAt) && d.taxable === false && (d.cashDiscount || 0) === commercial.discount &&
+          Array.isArray(d.detailItem) && d.detailItem.length === 1 && (d.detailItem[0].item?.no || d.detailItem[0].itemNo) === commercial.itemCode &&
+          d.detailItem[0].quantity === 1 && d.detailItem[0].unitPrice === commercial.servicePrice &&
+          Array.isArray(d.detailExpense) && d.detailExpense.length === expenses.length && (!expenses.length ||
+            (d.detailExpense[0].account?.no || d.detailExpense[0].accountNo) === '400005' && d.detailExpense[0].expenseAmount === commercial.visitFee) &&
+          Array.isArray(d.detailDownPayment) && d.detailDownPayment.length === 1 && invoiceNumber(d.detailDownPayment[0]) === docs.downPaymentNumber &&
+          d.detailDownPayment[0].paymentAmount === a.job.amount && (d.primeOwing === undefined || d.primeOwing === 0));
       }
-      const completedAt = latest.booking.completedAt;
-      if (!Number.isFinite(stampTime(completedAt)) || stampTime(completedAt) < stampTime(v.payment.paidAt) || stampTime(completedAt) > clock() + 60000) throw syncFailure('SYNC_SOURCE_CHANGED', true);
-      const item = { itemNo: commercial.itemCode, quantity: 1, itemUnitName: 'Paket', unitPrice: commercial.servicePrice,
-        useTax1: false, useTax2: false, useTax3: false };
-      const expenses = commercial.visitFee ? [{ accountNo: '400005', expenseAmount: commercial.visitFee, expenseName: 'Biaya kunjungan Senzu Home' }] : [];
-      await ensure('invoice', docs.invoiceNumber, { customerNo, number: docs.invoiceNumber, transDate: wibDate(completedAt),
-        currencyCode: 'IDR', invoiceDp: false, taxable: false, inclusiveTax: false, cashDiscount: commercial.discount,
-        description: description('IV'), detailItem: [item], detailExpense: expenses,
-        detailDownPayment: [{ invoiceNumber: docs.downPaymentNumber, paymentAmount: a.job.amount }] },
-      d => d.number === docs.invoiceNumber && d.invoiceDp === false && d.totalAmount === a.job.amount && currency(d) && customerMatches(d) &&
-        d.description === description('IV') && providerDate(d.transDate) === wibDate(completedAt) && d.taxable === false && (d.cashDiscount || 0) === commercial.discount &&
-        Array.isArray(d.detailItem) && d.detailItem.length === 1 && (d.detailItem[0].item?.no || d.detailItem[0].itemNo) === commercial.itemCode &&
-        d.detailItem[0].quantity === 1 && d.detailItem[0].unitPrice === commercial.servicePrice &&
-        Array.isArray(d.detailExpense) && d.detailExpense.length === expenses.length && (!expenses.length ||
-          (d.detailExpense[0].account?.no || d.detailExpense[0].accountNo) === '400005' && d.detailExpense[0].expenseAmount === commercial.visitFee) &&
-        Array.isArray(d.detailDownPayment) && d.detailDownPayment.length === 1 && invoiceNumber(d.detailDownPayment[0]) === docs.downPaymentNumber &&
-        d.detailDownPayment[0].paymentAmount === a.job.amount && (d.primeOwing === undefined || d.primeOwing === 0));
-      await finish(a, 'complete', ''); return { processed: 1 };
+      let feePending = false, feeIssue = '';
+      if (a.job.feePolicy !== undefined && a.job.feePolicy !== FEE_POLICY) throw syncFailure('SYNC_CONTROL_INVALID', true);
+      if (a.job.feePolicy === FEE_POLICY) {
+        const c = await db!.runTransaction(t => leased(t, a.token));
+        if (a.job.feesActivatedAt !== c.feesActivatedAt || v.bookingCreatedAt <= stampTime(c.feesActivatedAt) ||
+            stampTime(v.intent.createdAt) <= stampTime(c.feesActivatedAt)) throw syncFailure('SYNC_CONTROL_INVALID', true);
+        if (!c.feesEnabled) { feePending = !a.job.documents?.fee?.id && a.job.feeZero !== true; feeIssue = feePending ? 'FEE_POSTING_PAUSED' : ''; }
+        else {
+          // Account checks and gross receipt validation have already succeeded.
+          // Re-read the provider's final fee; never estimate tariffs or daily fees.
+          let net;
+          try { net = await readXenditNetPreview({ bookingCode: v.booking.bookingCode, referenceId: v.intent.referenceId,
+            paymentId: v.intent.paymentId, amount: v.payment.amount }, { env, fetch: deps.fetch, clock }); }
+          catch (e: any) {
+            if (['XENDIT_TRANSACTION_UNAVAILABLE', 'XENDIT_TRANSACTION_NOT_FOUND', 'XENDIT_FEES_PENDING', 'XENDIT_SETTLEMENT_PENDING'].includes(e?.code)) {
+              feePending = true; feeIssue = e.code;
+            } else throw syncFailure(MESSAGES[e?.code] ? e.code : 'XENDIT_TRANSACTION_UNVERIFIED', true);
+          }
+          if (net) {
+            if (!isAccurateXenditNetPreview(net)) throw syncFailure('XENDIT_STATE_UNVERIFIED', true);
+            const plan = feePlan(a.id, net, paidDate), evidenceHash = hash(plan.payload);
+            const feeSource = (x: AccuratePaidEvent) => hash([x.booking.id, x.payment.paidAt, x.intent.referenceId,
+              x.intent.paymentId, x.intent.sessionId, x.intent.quoteHash, x.payment.amount]);
+            const guard = async () => {
+              const current = await fresh();
+              if (feeSource(current) !== feeSource(v)) throw syncFailure('SYNC_SOURCE_CHANGED', true);
+              await db!.runTransaction(async t => { const c = await leased(t, a.token);
+                if (!c.feesEnabled) throw syncFailure('FEE_POSTING_PAUSED'); });
+            };
+            await guard();
+            await db!.runTransaction(async t => {
+              await leased(t, a.token); const snap = await t.get(a.ref), prior = snap.data()?.feeEvidence;
+              if (prior && prior.fingerprint !== evidenceHash) throw syncFailure('FEE_EVIDENCE_CHANGED', true);
+              t.update(a.ref, { feeEvidence: { fingerprint: evidenceHash, transactionId: net.transactionId,
+                xenditFee: net.xenditFee, vat: net.valueAddedTax, amount: plan.amount, netAmount: net.netAmount, checkedAt: net.checkedAt }, updatedAt: now() });
+            });
+            if (plan.amount > 0) await ensure('fee', feeNumber(a.id), plan.payload, d => matchesFeeJournal(d, plan.payload), guard);
+            else {
+              // A zero-fee journal is invalid. Still reject a conflicting document.
+              if (await api.lookup('fee', feeNumber(a.id))) throw syncFailure('ACCURATE_DOCUMENT_COLLISION', true);
+              await guard();
+              await db!.runTransaction(async t => { await leased(t, a.token); t.update(a.ref, { feeZero: true, updatedAt: now() }); });
+            }
+          }
+        }
+      }
+      await finish(a, serviceCompleted ? feePending ? 'waiting_fee' : 'complete' : 'waiting_service', feeIssue);
+      return { processed: 1 };
     } catch (e: any) {
       if (!active) throw syncFailure(MESSAGES[e?.code] ? e.code : 'ACCURATE_RETRY', Boolean(e?.review));
       if (active) await finish(active, e?.review ? 'review' : 'retry', MESSAGES[e?.code] ? e.code : 'ACCURATE_RETRY').catch(() => {});
@@ -403,12 +486,12 @@ export function createAccurateSync(deps: Dependencies) {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length) throw fail(400, 'INVALID_SYNC_REQUEST');
     return runOnce();
   }
-  return { stagePaid, status, preview, netPreview, activate, pause, retry, run, runOnce, scheduled, wake };
+  return { stagePaid, status, preview, netPreview, activate, activateFees, pauseFees, pause, retry, run, runOnce, scheduled, wake };
 }
 
 export function registerAccurateSync(app: Express, deps: Dependencies) {
   const service = createAccurateSync(deps);
-  for (const action of ['status', 'preview', 'netPreview', 'activate', 'pause', 'retry', 'run', 'scheduled'] as const) {
+  for (const action of ['status', 'preview', 'netPreview', 'activate', 'activateFees', 'pauseFees', 'pause', 'retry', 'run', 'scheduled'] as const) {
     app.post(`/api/integrations/accurate/sync/${action}`, async (req, res) => {
       res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
       try { res.json({ success: true, ...await service[action](req) }); }

@@ -9,9 +9,10 @@ import express from 'express';
 import { createAccurateSync, registerAccurateSync } from '../src/server/accurateSync.ts';
 import { createAccurateSyncProvider } from '../src/server/accurateSyncProvider.ts';
 import { createXenditLive } from '../src/server/xenditLive.ts';
+import { feePlan, matchesFeeJournal } from '../src/server/accurateFeePosting.ts';
 import { liveQuoteSeal } from '../src/server/xenditLiveQuote.ts';
 import { ACCURATE_MASTERS, ACCURATE_APP_KEY, ACCURATE_APP_NAME, ACCURATE_COMPANY } from '../src/lib/accurateContracts.ts';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, isAccurateXenditStateDiagnostic } from '../src/lib/accurateSyncContracts.ts';
+import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, isAccurateXenditStateDiagnostic } from '../src/lib/accurateSyncContracts.ts';
 const h = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const sourceText = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('server.ts', sourceText, ts.ScriptTarget.Latest, true);
@@ -110,7 +111,7 @@ function fixture() {
     }
     if (action === 'detail.do') return Response.json({ s: true, d: [...remote.values()].find(v => v._type === type && v.id === Number(url.searchParams.get('id'))) });
     assert.equal(init.method, 'POST'); assert.equal(payload.id, undefined, 'never update existing provider records');
-    const kind = type === 'customer' ? 'customer' : type === 'sales-receipt' ? 'receipt' : action === 'create-down-payment.do' ? 'down_payment' : 'invoice';
+    const kind = type === 'journal-voucher' ? 'fee' : type === 'customer' ? 'customer' : type === 'sales-receipt' ? 'receipt' : action === 'create-down-payment.do' ? 'down_payment' : 'invoice';
     if (absentKind === kind) throw new Error(`fixture unavailable ${token} ${secret}`);
     const id = remote.size + 100, common = { id, _type: type, currency: { code: 'IDR' }, ...payload };
     let d;
@@ -120,6 +121,7 @@ function fixture() {
     }
     else if (kind === 'down_payment') d = { ...common, invoiceDp: true, totalAmount: payload.dpAmount, taxable: payload.isTaxable, customer: { customerNo: payload.customerNo } };
     else if (kind === 'receipt') d = { ...common, bank: { no: payload.bankNo }, customer: { customerNo: payload.customerNo }, detailInvoice: payload.detailInvoice.map(x => ({ invoice: { number: x.invoiceNo }, paymentAmount: x.paymentAmount })) };
+    else if (kind === 'fee') d = { ...common, detailJournalVoucher: payload.detailJournalVoucher.map(r => ({ ...r, account: { no: r.accountNo, currency: { code: 'IDR' } } })) };
     else d = { ...common, customer: { customerNo: payload.customerNo }, totalAmount: payload.detailItem.reduce((s, v) => s + v.unitPrice * v.quantity, 0) + payload.detailExpense.reduce((s, v) => s + v.expenseAmount, 0) - payload.cashDiscount, primeOwing: 0 };
     if (kind !== 'customer') delete d.customerNo;
     assert.equal(remote.has(`${type}/${payload.customerNo && kind === 'customer' ? payload.customerNo : payload.number}`), false, 'no duplicate POST');
@@ -767,4 +769,156 @@ test('diagnostic HTTP success means only a completed read, with verified false a
     assert.equal(value.success, true); assert.equal(value.verified, false); assert.equal(isAccurateXenditStateDiagnostic(value), true);
     assert.equal(JSON.stringify(value).includes(f.row.status), false); assert.equal(Object.hasOwn(value, 'netAmount'), false); assert.deepEqual(f.db.writes, []);
   } finally { service.stop(); await new Promise(r => server.close(r)); }
+});
+
+// Fee posting integration fixtures: no actual provider credentials or POSTs.
+function feeFixture({ activate = true, completed = true } = {}) {
+  const f = netFixture(); f.activateControl();
+  const c = f.db.data.get('accurate_sync_private/control');
+  if (activate) Object.assign(c, { feesEnabled: true, feePolicy: 'expense_including_vat', feesActivatedAt: new Date(f.clock() - 1000).toISOString() });
+  const paymentId = 'py-' + f.row.product_id;
+  f.v.payment.providerTransactionId = paymentId; f.v.intent.paymentId = paymentId;
+  if (completed) {
+    f.v.booking.status = 'Completed'; f.v.booking.completedAt = new Date(f.clock()).toISOString();
+    Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`), { status: 'Completed', completedAt: f.v.booking.completedAt });
+  }
+  const service = createAccurateSync({ ...f.deps, fetch: (url, init) => new URL(url).hostname === 'api.xendit.co' ? f.netDeps.fetch(url, init) : f.deps.fetch(url, init) });
+  return { ...f, service, c, stage: () => f.db.runTransaction(t => service.stagePaid(t, f.v)),
+    retryFee: async () => { f.advance(600000); return service.retry(req({ bookingId: f.v.booking.id })); },
+    feePosts: () => f.posts('journal-voucher') };
+}
+test('fee activation requires explicit Finance policy; no journal is created; cutoff survives pause/resume', async () => {
+  const f = feeFixture({ activate: false });
+  await rejects(f.service.activateFees(req({ acknowledgement: ACCURATE_FEE_ACK, feePolicy: 'input_vat' })), 'FEE_APPROVAL_REQUIRED');
+  const s = await f.service.activateFees(req({ acknowledgement: ACCURATE_FEE_ACK, feePolicy: 'expense_including_vat' }));
+  assert.equal(s.feesEnabled, true); const cutoff = s.feesActivatedAt;
+  assert.equal(f.feePosts().length, 0);
+  await f.service.pauseFees(req()); f.advance(60001);
+  const s2 = await f.service.activateFees(req({ acknowledgement: ACCURATE_FEE_ACK, feePolicy: 'expense_including_vat' }));
+  assert.equal(s2.feesActivatedAt, cutoff); assert.equal(s2.feesEnabled, true);
+});
+test('all pre-activation jobs, including the manually recorded booking, stay excluded even on retry', async () => {
+  const f = feeFixture({ activate: false }); await f.stage(); await f.service.runOnce();
+  assert.equal(f.job(f.v).state, 'complete'); assert.equal(f.feePosts().length, 0);
+  Object.assign(f.db.data.get('accurate_sync_private/control'), { feesEnabled: true, feePolicy: 'expense_including_vat', feesActivatedAt: new Date(f.clock()).toISOString() });
+  await f.retryFee(); await f.service.runOnce();
+  assert.equal(f.feePosts().length, 0); assert.equal(f.netCalls.length, 0);
+  const s = await f.service.status(req()); assert.equal(s.jobs[0].feeState, 'excluded');
+});
+test('both booking creation and session creation must be strictly after the fee cutoff', async () => {
+  for (const source of ['booking', 'session']) {
+    const f = feeFixture(); const cutoff = Date.parse(f.c.feesActivatedAt);
+    if (source === 'booking') f.v.bookingCreatedAt = cutoff;
+    else { f.v.intent.createdAt = new Date(cutoff).toISOString(); f.db.data.get(`xendit_live_sessions/${f.v.intent.referenceId}`).createdAt = f.v.intent.createdAt; }
+    await f.stage(); await f.service.runOnce(); assert.equal(f.feePosts().length, 0); assert.equal(f.netCalls.length, 0);
+  }
+});
+test('settled fee + VAT posts exactly one two-line expense journal; gross receipt/invoice remain 160000', async () => {
+  const f = feeFixture(); f.row.status = 'SUCCESSFUL'; await f.stage(); await f.service.runOnce();
+  const j = f.job(f.v); assert.equal(j.state, 'complete'); assert.ok(j.documents.fee?.id); assert.equal(j.feeEvidence.amount, 9990);
+  assert.equal(f.feePosts().length, 1); const p = f.feePosts()[0].payload;
+  assert.equal(p.number, `SHXF-${h([TARGET, f.v.booking.id]).slice(0,24)}`); assert.equal(p.transDate, '22/10/2026');
+  assert.deepEqual(p.detailJournalVoucher, [{ accountNo:'600031', amount:9990, amountType:'DEBIT' }, { accountNo:'110103', amount:9990, amountType:'CREDIT' }]);
+  assert.ok(p.description.includes(f.row.id)); assert.equal(p.id, undefined);
+  assert.equal(f.posts('sales-receipt')[0].payload.chequeAmount, 160000);
+  assert.equal([...f.remote.values()].find(d => d.invoiceDp === false).totalAmount, 160000);
+  f.advance(600000); await f.service.retry(req({ bookingId:f.v.booking.id })); await f.service.runOnce(); assert.equal(f.feePosts().length,1);
+  assert.equal((await f.service.status(req())).jobs[0].feeState,'confirmed');
+  assert.ok(f.db.writes.every(w => ['accurate_sync_jobs','accurate_sync_operations','accurate_sync_private'].includes(w.ref.name)));
+});
+test('actual channel tariffs including two-decimal fees are used; no daily processing fee is allocated', async () => {
+  const f = feeFixture(); f.row.channel_category = 'QR_CODE'; f.row.channel_code = 'QRIS';
+  Object.assign(f.row.fee,{ xendit_fee:111.11, value_added_tax:12.22 }); f.row.net_amount=159876.67;
+  await f.stage(); await f.service.runOnce(); assert.equal(f.feePosts()[0].payload.detailJournalVoucher[0].amount,123.33);
+});
+test('pending fees/settlement retry without delaying completed-service invoice or sending a guessed journal', async () => {
+  for (const change of [f=>f.row.fee.status='PENDING', f=>f.row.settlement_status='PENDING',f=>f.state.value.data=[]]) {
+    const f = feeFixture(); change(f); await f.stage(); await f.service.runOnce();
+    assert.equal(f.job(f.v).state,'waiting_fee'); assert.ok(f.job(f.v).documents.invoice?.id); assert.equal(f.feePosts().length,0);
+    f.row.fee.status='COMPLETED'; f.row.settlement_status='SETTLED'; f.state.value.data=[f.row]; await f.retryFee();
+    assert.equal(f.feePosts().length,1); assert.equal(f.posts('sales-receipt').length,1); assert.equal(f.posts('sales-invoice').length,2);
+  }
+});
+test('fees can post before treatment finishes; completing treatment never posts the fee twice', async () => {
+  const f = feeFixture({ completed:false }); await f.stage(); await f.service.runOnce();
+  assert.equal(f.job(f.v).state,'waiting_service'); assert.equal(f.feePosts().length,1);
+  Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`),{status:'Completed',completedAt:new Date(f.clock()).toISOString()});
+  await f.retryFee(); assert.equal(f.job(f.v).state,'complete'); assert.equal(f.feePosts().length,1);
+});
+test('pausing fee posting preserves the invoice and fee queue; resume retains the same activation boundary', async () => {
+  const f = feeFixture(); f.c.feesEnabled=false; await f.stage(); await f.service.runOnce();
+  assert.equal(f.job(f.v).state,'waiting_fee'); assert.equal(f.job(f.v).issue,'FEE_POSTING_PAUSED'); assert.ok(f.job(f.v).documents.invoice?.id);
+  assert.equal(f.netCalls.length,0); f.db.data.get('accurate_sync_private/control').feesEnabled=true; await f.retryFee(); assert.equal(f.feePosts().length,1);
+});
+test('mismatched provider data, state, withholding, totals and missing fees park for review without posting', async () => {
+  for (const change of [f=>f.row.product_id='wrong',f=>f.row.amount=1,f=>f.row.business_id='foreign',f=>f.row.status='FAILED',
+    f=>f.row.fee.xendit_withholding_tax=1,f=>delete f.row.fee.value_added_tax,f=>f.row.net_amount=145570]) {
+    const f=feeFixture(); change(f); await f.stage(); await f.service.runOnce(); assert.equal(f.job(f.v).state,'review'); assert.equal(f.feePosts().length,0);
+    assert.ok(f.job(f.v).documents.invoice?.id);
+  }
+});
+test('source changes during the Xendit read cannot create a fee journal', async () => {
+  for (const change of [f=>f.db.data.get(`bookings/${f.v.booking.id}`).status='Cancelled',
+    f=>f.db.data.get(`payments/${f.v.payment.id}`).providerTransactionId='py-foreign'.padEnd(30,'0'),
+    f=>f.db.data.get('accurate_sync_private/control').feesEnabled=false]) {
+    const f=feeFixture(); f.state.onRead=()=>change(f); await f.stage(); await f.service.runOnce(); assert.equal(f.feePosts().length,0);
+  }
+});
+test('lost fee POST response is reconciled by number, never sent twice', async () => {
+  const f=feeFixture(); f.lose('fee'); await f.stage(); await f.service.runOnce();
+  assert.equal(f.job(f.v).issue,'ACCURATE_DOCUMENT_UNCERTAIN'); assert.equal(f.feePosts().length,1);
+  await f.retryFee(); assert.equal(f.job(f.v).state,'complete'); assert.equal(f.feePosts().length,1);
+});
+test('missing fee document after ambiguous POST never authorizes a second POST, including across workers', async () => {
+  const f=feeFixture(); f.absent('fee'); await f.stage(); await f.service.runOnce();
+  assert.equal(f.job(f.v).issue,'ACCURATE_DOCUMENT_UNCERTAIN'); assert.equal(f.feePosts().length,1);
+  await f.retryFee(); assert.equal(f.feePosts().length,1); assert.equal(f.job(f.v).state,'review');
+});
+test('exact existing journal is adopted; manual or conflicting same-number documents are not edited or duplicated', async () => {
+  for (const mismatch of [false,true]) {
+    const f=feeFixture(); await f.stage(); f.lose('fee'); await f.service.runOnce();
+    const d=[...f.remote.values()].find(d=>d._type==='journal-voucher'); if(mismatch)d.description='Manual journal requiring Finance review';
+    await f.retryFee(); assert.equal(f.feePosts().length,1); assert.equal(f.job(f.v).state,mismatch?'review':'complete');
+  }
+});
+test('a fee adjustment after an already posted journal requires review rather than changing or creating another journal', async () => {
+  const f=feeFixture({completed:false}); await f.stage(); await f.service.runOnce();
+  f.row.fee.xendit_fee=8000; f.row.net_amount=151010; await f.retryFee();
+  assert.equal(f.job(f.v).issue,'FEE_EVIDENCE_CHANGED'); assert.equal(f.feePosts().length,1);
+});
+test('explicit zero fees are recorded as zero evidence without an invalid zero-amount journal', async () => {
+  const f=feeFixture(); f.row.fee.xendit_fee=0; f.row.fee.value_added_tax=0; f.row.net_amount=160000;
+  await f.stage(); await f.service.runOnce(); assert.equal(f.job(f.v).state,'complete'); assert.equal(f.feePosts().length,0);
+  assert.equal((await f.service.status(req())).jobs[0].feeState,'zero');
+});
+test('journal detail validation rejects altered accounts, extra lines, reversed amounts and foreign currencies', async () => {
+  const f=feeFixture(); await f.stage(); await f.service.runOnce();
+  const d=[...f.remote.values()].find(d=>d._type==='journal-voucher'), p=f.feePosts()[0].payload;
+  assert.equal(matchesFeeJournal(d,p),true);
+  for(const mutate of [d=>d.detailJournalVoucher.push(d.detailJournalVoucher[0]),d=>d.detailJournalVoucher[0].accountNo='110504',
+    d=>d.detailJournalVoucher[0].amountType='CREDIT',d=>d.detailJournalVoucher[1].amount=9991,
+    d=>d.detailJournalVoucher[1].account.currency.code='USD',d=>d.description='other',d=>d.transDate='21/10/2026']) {
+    const copy=structuredClone(d);mutate(copy);assert.equal(matchesFeeJournal(copy,p),false);
+  }
+  const api=await createAccurateSyncProvider(f.deps).connect(f.clock()+45000);
+  for(const payload of [{...p,id:123},{...p,detailJournalVoucher:[{...p.detailJournalVoucher[0],accountNo:'110504'},p.detailJournalVoucher[1]]}]) await rejects(api.save('fee',payload),'ACCURATE_OPERATION_INVALID');
+});
+test('two workers share the lease and send one fee journal under concurrent retries', async()=>{
+  const f=feeFixture();await f.stage();
+  const other=createAccurateSync({...f.deps,fetch:(url,init)=>new URL(url).hostname==='api.xendit.co'?f.netDeps.fetch(url,init):f.deps.fetch(url,init)});
+  await Promise.all([f.service.runOnce(),other.runOnce(),f.service.runOnce()]);
+  assert.equal(f.feePosts().length,1);assert.equal(f.job(f.v).state,'complete');
+});
+test('global pause, source cancellation and Manager revocation during activation cannot authorize fee writes',async()=>{
+  const f=feeFixture({activate:false});
+  f.respond(c=>{if(c.url.pathname.includes('/journal-voucher/list.do'))f.db.data.get('staff_roles/manager').isActive=false;});
+  await assert.rejects(f.service.activateFees(req({acknowledgement:ACCURATE_FEE_ACK,feePolicy:'expense_including_vat'})));
+  assert.equal(f.db.data.get('accurate_sync_private/control').feesEnabled,undefined);assert.equal(f.feePosts().length,0);
+  const g=feeFixture();g.state.onRead=()=>g.db.data.get('accurate_sync_private/control').enabled=false;
+  await g.stage();await g.service.runOnce();assert.equal(g.feePosts().length,0);
+});
+test('pausing fees after a verified journal does not block subsequent completion of the service invoice',async()=>{
+  const f=feeFixture({completed:false});await f.stage();await f.service.runOnce();
+  await f.service.pauseFees(req());Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`),{status:'Completed',completedAt:new Date(f.clock()).toISOString()});
+  await f.retryFee();assert.equal(f.job(f.v).state,'complete');assert.equal(f.feePosts().length,1);assert.ok(f.job(f.v).documents.invoice.id);
 });

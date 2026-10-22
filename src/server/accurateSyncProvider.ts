@@ -11,8 +11,8 @@ export function matchesAccurateCustomerNo(expected: string, ...aliases: unknown[
   // Never prefer one alias when another supplied value contradicts it.
   return supplied.length > 0 && supplied.every(v => typeof v === 'string' && v === expected);
 }
-export type AccurateDocumentKind = 'customer' | 'down_payment' | 'receipt' | 'invoice';
-const resource = (kind: AccurateDocumentKind) => kind === 'customer' ? 'customer' : kind === 'receipt' ? 'sales-receipt' : 'sales-invoice';
+export type AccurateDocumentKind = 'customer' | 'down_payment' | 'receipt' | 'invoice' | 'fee';
+const resource = (kind: AccurateDocumentKind) => kind === 'fee' ? 'journal-voucher' : kind === 'customer' ? 'customer' : kind === 'receipt' ? 'sales-receipt' : 'sales-invoice';
 export function syncCredentialsConfigured(env: NodeJS.ProcessEnv) {
   return /^aat\.[A-Za-z0-9+/=._-]{32,16380}$/.test(env.ACCURATE_API_TOKEN || '') &&
     /^[!-~]{16,512}$/.test(env.ACCURATE_SIGNATURE_SECRET || '') &&
@@ -50,9 +50,9 @@ export function createAccurateSyncProvider(deps: Dependencies) {
     if (!syncCredentialsConfigured(env)) throw syncFailure('ACCURATE_SYNC_SECRETS_INVALID', true);
     async function request(target: string, method: 'GET' | 'POST', payload?: Record<string, any>, metadata = false): Promise<any> {
       const original = new URL(target);
-      const read = /^\/accurate\/api\/(customer|sales-invoice|sales-receipt)\/(list|detail)\.do$/.test(original.pathname) ||
+      const read = /^\/accurate\/api\/(customer|sales-invoice|sales-receipt|journal-voucher)\/(list|detail)\.do$/.test(original.pathname) ||
         /^\/accurate\/api\/(glaccount|item)\/detail\.do$/.test(original.pathname);
-      const write = /^\/accurate\/api\/(customer|sales-invoice|sales-receipt)\/save\.do$/.test(original.pathname) ||
+      const write = /^\/accurate\/api\/(customer|sales-invoice|sales-receipt|journal-voucher)\/save\.do$/.test(original.pathname) ||
         original.pathname === '/accurate/api/sales-invoice/create-down-payment.do';
       if (metadata ? target !== 'https://account.accurate.id/api/api-token.do' || method !== 'POST' || payload !== undefined :
           !(method === 'GET' && read && !payload || method === 'POST' && write && payload)) throw syncFailure('ACCURATE_OPERATION_INVALID', true);
@@ -131,6 +131,15 @@ export function createAccurateSyncProvider(deps: Dependencies) {
       }
     }
     async function save(kind: AccurateDocumentKind, payload: Record<string, any>) {
+      if (kind === 'fee' && (Object.keys(payload).sort().join(',') !== 'description,detailJournalVoucher,number,transDate' ||
+          !/^SHXF-[a-f0-9]{24}$/.test(payload.number || '') || typeof payload.description !== 'string' ||
+          !/^SENZU_HOME_FEE_V1:[a-f0-9]{64} \| /.test(payload.description) ||
+          !Array.isArray(payload.detailJournalVoucher) || payload.detailJournalVoucher.length !== 2 ||
+          payload.detailJournalVoucher.some((r: any, i: number) => Object.keys(r).sort().join(',') !== 'accountNo,amount,amountType' ||
+            r.accountNo !== (i === 0 ? '600031' : '110103') || r.amountType !== (i === 0 ? 'DEBIT' : 'CREDIT') ||
+            typeof r.amount !== 'number' || !Number.isFinite(r.amount) || r.amount <= 0 || r.amount > 10000000 ||
+            !/^\d+(?:\.\d{1,2})?$/.test(String(r.amount))) ||
+          payload.detailJournalVoucher[0].amount !== payload.detailJournalVoucher[1].amount)) throw syncFailure('ACCURATE_OPERATION_INVALID', true);
       const path = kind === 'down_payment' ? 'sales-invoice/create-down-payment.do' : `${resource(kind)}/save.do`;
       return request(`${origin}/accurate/api/${path}`, 'POST', payload);
     }
