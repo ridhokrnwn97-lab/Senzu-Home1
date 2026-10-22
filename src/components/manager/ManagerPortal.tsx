@@ -52,6 +52,7 @@ import { BusinessSettingsCard } from '../admin/BusinessSettingsCard';
 import { MetaAdsSettingsCard } from '../admin/MetaAdsSettingsCard';
 import { XenditSandboxCard } from '../admin/XenditSandboxCard';
 import { XenditLiveCard } from '../admin/XenditLiveCard';
+import { AccurateConnectionCard } from '../admin/AccurateConnectionCard';
 import { AreaMasterCard } from './AreaMasterCard';
 import { PaymentMasterCard } from './PaymentMasterCard';
 import { StaffMasterCard } from './StaffMasterCard';
@@ -594,6 +595,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
               <MetaAdsSettingsCard currentUser={currentUser} />
               <XenditSandboxCard currentUser={currentUser} />
               <XenditLiveCard currentUser={currentUser} />
+              <AccurateConnectionCard currentUser={currentUser} />
             </div>
           )}
 
