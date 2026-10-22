@@ -73,7 +73,7 @@ test('Manager mount reads configuration only; explicit check shows eight masters
     assert.deepEqual(state.calls.map(c => c.action), ['configuration']); assert.equal(await page.locator('input,textarea').count(), 0);
     await check.click(); await page.getByText('Koneksi berhasil. Seluruh master yang diperiksa cocok.', { exact: true }).waitFor();
     assert.equal(await page.locator('tbody tr').count(), 8); assert.equal(state.calls.filter(c => c.action === 'check').length, 1);
-    await page.getByText('Sinkronisasi transaksi belum aktif.', { exact: true }).waitFor();
+    await page.getByText('Panel ini hanya memeriksa koneksi.', { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__events), []); assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });

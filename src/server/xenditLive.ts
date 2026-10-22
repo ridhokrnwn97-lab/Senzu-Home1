@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { safeLiveCheckoutUrl } from '../lib/xenditLiveContracts.ts';
 import { assertPaymentLink, bookingDeadline } from './paymentAcceptance.ts';
 import { liveError as fail, liveQuoteSeal, quoteLiveDrivingDistance } from './xenditLiveQuote.ts';
+import type { AccuratePaidEvent } from './accurateSync.ts';
 
 const SESSIONS = 'xendit_live_sessions', EVENTS = 'xendit_live_webhook_events';
 const WEBHOOK = '/api/integrations/xendit/live/webhook';
@@ -20,6 +21,7 @@ type Dependencies = {
   fetch?: typeof fetch;
   clock?: () => number;
   onPaid?: (bookingId: string) => Promise<unknown>;
+  stagePaid?: (transaction: Transaction, value: AccuratePaidEvent) => Promise<void>;
 };
 
 export function createXenditLive(deps: Dependencies) {
@@ -172,6 +174,13 @@ export function createXenditLive(deps: Dependencies) {
         ...(source === 'webhook' ? { gatewayLastWebhookAt: stamp } : {}),
         ...(paymentStatus === 'paid' ? { paidAt: v.payment.paidAt || stamp, verifiedAt: v.payment.verifiedAt || stamp,
           verifiedBy: 'xendit', verifiedByName: 'Xendit', providerTransactionId: s.paymentId || v.payment.providerTransactionId } : {}) };
+      // Persist accounting intent atomically with the first verified Live paid
+      // transition. The hook completes all reads before any payment writes.
+      if (paymentStatus === 'paid' && !alreadyPaid && !needsReview && deps.stagePaid) {
+        await deps.stagePaid(t, { booking: { ...v.booking, paymentStatus: 'PAID', gatewayReviewRequired: false, activePaymentId: v.paymentRef.id },
+          payment: { ...v.payment, ...update }, intent: newIntent, receipt: v.receipt,
+          bookingCreatedAt: v.bookingSnap.createTime?.toMillis() || NaN });
+      }
       t.set(v.intentRef, newIntent);
       t.update(v.paymentRef, update);
       if (paymentStatus !== v.payment.status) {
