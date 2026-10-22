@@ -1,5 +1,46 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
+## Pratinjau biaya dan neto Xendit — 22 Oktober 2026
+
+Paket **SenzuHome-Xendit-Neto-Preview.zip** berisi **8 file**. Basis source terbaru: main commit `c95d84972cd109e3c7460be31db0e88d583bd6d3`, setelah Customer Fix digabung. Ini menambah pemeriksaan baca saja pada panel pencatatan yang sudah ada; bukan aktivasi pencatatan biaya/pajak/pencairan.
+
+1. src/server/xenditNetPreview.ts — pembaca Transaction API Xendit.
+2. src/server/accurateSync.ts — endpoint Manager, validasi sumber dan pemeriksaan ulang akses/sumber setelah pembacaan.
+3. src/lib/accurateSyncContracts.ts — kontrak hasil, uang IDR, identitas dan pesan aman.
+4. src/lib/accurateSyncService.ts — pemanggil dan pemeriksa respons panel.
+5. src/components/admin/AccurateSyncCard.tsx — tombol dan rincian biaya/neto.
+6. tests/accurateSync.test.mjs — fixture backend dan regresi pencatatan sebelumnya.
+7. tests/accurateSyncUi.test.mjs — fixture panel, akun berubah dan tidak ada event Meta.
+8. docs/ACCURATE-SYNC.md — petunjuk ini.
+
+### Pemasangan dan pemakaian
+
+1. Unggah **8 file** sesuai struktur folder ke GitHub, merge, **Pull Changes**, kemudian **Publish/Republish**. Tunggu selesai. Bila main sudah berubah dari basis di atas, tinjau konflik/diff sebelum mengganti file. Tidak ada dependency atau Secret baru.
+2. Buka `https://senzuhome.com/`, lalu **Manager → Master Data → Operational Settings → Accurate Online — Pencatatan Transaksi**. Masukkan kode booking yang sudah dibayar melalui Xendit Live, misalnya **SH-261022-NUOUN**.
+3. Klik **Pratinjau Biaya & Neto Xendit**. Tombol ini hanya membaca transaksi. Tombol **Periksa Ulang Booking dalam Antrean** dan **Proses Antrean Sekarang** menjalankan pencatatan yang sudah ada; keduanya tidak diperlukan untuk pratinjau neto.
+4. Cocokkan bruto, biaya transaksi, PPN biaya dan neto dengan transaksi yang sama pada dashboard Xendit. Panel menunjukkan waktu pemeriksaan dan referensi transaksi. Untuk contoh bruto Rp160.000, fee Rp9.000 dan PPN fee Rp990, hasil perhitungan adalah Rp150.010. Nilai berasal dari API, bukan tarif Mandiri yang ditanam dalam kode.
+5. Jika Xendit menolak akses, periksa **Transaction Read** pada key Live yang sudah digunakan server dan akun bisnisnya. Penolakan izin ditampilkan tersendiri; paket tidak menambah izin atau mengganti key. Jangan kirim Secret ke chat. Biaya belum final, settlement belum selesai, data hilang atau tidak cocok menahan hasil neto; data kosong tidak dianggap biaya nol.
+
+### Arti hasil dan batas pencatatan
+
+Neto ini adalah **neto satu pembayaran di Xendit**, belum bukti dana diterima rekening bank dan belum rekonsiliasi seluruh saldo akun 110103. Processing fee Xendit dipotong sebagai akumulasi harian, termasuk percobaan pembayaran yang relevan menurut kebijakan Xendit. Potongan processing dan PPN-nya harus dicocokkan terpisah dengan ledger/laporan Billing; paket ini tidak membagi satu potongan harian ke booking tertentu. Pencairan ke bank perlu dicocokkan dengan laporan withdrawal dan mutasi bank asli.
+
+Status PKP PT KSBONE belum dipastikan. Pratinjau menampilkan PPN atas biaya sebagaimana dilaporkan Xendit tanpa menentukan apakah dicatat sebagai Pajak Masukan atau beban. Pajak dipotong/withholding yang bukan nol ditahan untuk pemeriksaan Finance. **Belum ada POST biaya, pajak, jurnal atau transfer bank ke Accurate**, dan tidak ada penarikan dana dari Xendit. Uang muka serta penerimaan bruto yang sudah tercatat tetap mengikuti integrasi sebelumnya.
+
+Endpoint `POST /api/integrations/accurate/sync/netPreview` menerima hanya `bookingId` dengan Firebase ID token Manager/Admin aktif. Permintaan keluar hanya **GET `https://api.xendit.co/transactions`**, difilter referensi booking yang tersimpan, PAYMENT, IDR, limit 2. Key Test ditolak. Key Live dan business ID dibaca hanya dari konfigurasi server. Penghentian checkout baru tidak melarang pemeriksaan transaksi lama.
+
+Respons harus tepat satu transaksi, tanpa halaman berikutnya, dengan business ID, reference ID, payment/product ID, nominal, mata uang, arus masuk, status SUCCESS, biaya COMPLETED dan settlement SETTLED yang cocok. Product ID boleh sama dengan payment ID lengkap, atau UUID tanpa awalan `py-` hanya untuk pasangan UUID yang sama. Prefiks lain atau ketidakcocokan ditolak. Empat komponen fee wajib berupa angka lengkap; versi ini memverifikasi neto ketika kedua withholding nol dan bruto dikurangi fee serta PPN tepat sama dengan neto. Perhitungan IDR mendukung dua angka desimal dengan pembandingan integer minor units.
+
+Panel tidak membaca Xendit saat baru dibuka; pembacaan dilakukan ketika tombol diklik, maksimal tiga kali per menit per Manager per instance. Akses Manager dan seluruh sumber booking/pembayaran/sesi/quote diperiksa lagi setelah GET sebelum hasil dikembalikan. Hasil terlambat setelah pergantian akun/logout dibuang. Error mentah, kredensial dan data pelanggan dari provider tidak ditampilkan atau disimpan.
+
+Jalur baru tidak menulis Firestore, membuat/menghapus antrean atau bukti operasi, menggeser cutoff, menghubungi Accurate, memeriksa ulang status pembayaran melalui Payment Session API, mengubah sumber webhook/status, atau memicu Meta. Booking historis boleh dibaca tanpa dimasukkan ke antrean. Checkout pelanggan, pembayaran manual dan Meta Pixel tidak diubah.
+
+**Batas bukti:** pengujian paket ini menggunakan fixture lokal, bukan key produksi. Pembacaan Transaction API dari aplikasi publik masih perlu dibuktikan setelah Republish; tampilan dashboard Xendit sebelumnya tidak menggantikan pemeriksaan API tersebut. Keberhasilan uang muka/penerimaan versi Customer Fix yang sudah diperiksa secara native di Accurate adalah bukti terpisah, bukan bukti pencatatan fee/neto/pencairan otomatis.
+
+Validasi lokal paket ini pada Node.js 22.23.4: **156/156 grup pengujian lulus**, termasuk backend Accurate, panel, koneksi Accurate dan regresi Xendit Test/Live. Pemeriksaan TypeScript, build dan impor native backend juga lulus. Regresi baru mencakup biaya pecahan IDR/biaya nol eksplisit, field fee hilang, status pending, withholding, respons ganda/paginasi, identitas berbeda, izin API, pembatalan/pergantian akun, sumber berubah saat membaca, dan tidak adanya POST keuangan atau event Meta pada jalur pratinjau.
+
+Rujukan primer: [List Transactions](https://docs.xendit.co/apidocs/list-transactions), [Transaction fees](https://docs.xendit.co/v1/docs/transaction-fees), [Balance report](https://docs.xendit.co/docs/balance-report), [Reports overview](https://docs.xendit.co/docs/reports-overview). Bagian-bagian versi sebelumnya di bawah adalah catatan historis.
+
 ## Perbaikan pembaca nomor pelanggan — 22 Oktober 2026
 
 Patch **SenzuHome-Accurate-Customer-Fix.zip** berisi **4 file**:

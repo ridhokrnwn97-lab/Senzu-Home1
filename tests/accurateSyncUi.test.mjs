@@ -18,6 +18,12 @@ const initial = { success: true, mode: 'posting_v1', databaseId: TARGET, writesC
 const previewFixture = { success: true, bookingCode: 'SH-261022-FIX01', amount: 160000, servicePrice: 160000, visitFee: 0, discount: 0,
   historical: true, eligible: false, itemCode: 'SH-SIG-030', note: 'Booking dibuat sebelum aktivasi. Tidak dimasukkan otomatis.',
   downPaymentNumber: `SHDP-${id.slice(0, 24)}`, receiptNumber: `SHRC-${id.slice(0, 24)}`, invoiceNumber: `SHIV-${id.slice(0, 24)}` };
+const netFixture = { success: true, mode: 'xendit_net_preview_v1', environment: 'live', readOnly: true, bookingCode: 'SH-261022-FIX01',
+  referenceId: 'shl_' + 'b'.repeat(48), paymentId: 'py-123e4567-e89b-12d3-a456-426614174000', productId: '123e4567-e89b-12d3-a456-426614174000',
+  transactionId: '123e4567-e89b-12d3-a456-426614174111', channelCategory: 'VIRTUAL_ACCOUNT', channelCode: 'MANDIRI', currency: 'IDR',
+  grossAmount: 160000, xenditFee: 9000, valueAddedTax: 990, xenditWithholdingTax: 0, thirdPartyWithholdingTax: 0, netAmount: 150010,
+  feeStatus: 'COMPLETED', settlementStatus: 'SETTLED', transactionUpdatedAt: '2026-10-22T05:42:43Z', checkedAt: '2026-10-22T09:00:00Z',
+  processingFeeIncluded: false, bankPayoutVerified: false };
 before(async () => {
   temp = await fs.mkdtemp(path.join(os.tmpdir(), 'senzu-accurate-sync-ui-'));
   const mocks = {
@@ -45,15 +51,16 @@ before(async () => {
 after(async () => { await browser?.close(); if (server) await new Promise(r => server.close(r)); if (temp) await fs.rm(temp, { recursive: true, force: true }); });
 async function fixture(query = '') {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const state = { calls: [], status: structuredClone(initial), preview: structuredClone(previewFixture), delay: null, html: false };
+  const state = { calls: [], status: structuredClone(initial), preview: structuredClone(previewFixture), net: structuredClone(netFixture), netError: null, delay: null, html: false };
   await context.route('**/api/integrations/accurate/sync/*', async route => {
     const action = new URL(route.request().url()).pathname.split('/').at(-1), payload = route.request().postDataJSON();
     state.calls.push({ action, payload, authorization: route.request().headers().authorization });
-    const result = structuredClone(action === 'preview' ? state.preview : state.status);
+    const result = structuredClone(action === 'preview' ? state.preview : action === 'netPreview' ? state.net : state.status);
     if (action === 'activate') { result.enabled = true; result.activatedAt = '2026-10-22T04:00:00Z'; result.taxPolicy = 'no_extra_tax'; state.status = structuredClone(result); }
     if (action === 'pause') { result.enabled = false; state.status = structuredClone(result); }
-    if (state.delay && action === 'preview') await state.delay;
+    if (state.delay && ['preview', 'netPreview'].includes(action)) await state.delay;
     if (state.html) await route.fulfill({ status: 502, contentType: 'text/html', body: '<html>private provider error</html>' }).catch(() => {});
+    else if (action === 'netPreview' && state.netError) await route.fulfill({ status: 502, json: { success: false, code: state.netError, error: 'untrusted private provider text' } }).catch(() => {});
     else await route.fulfill({ json: result }).catch(() => {});
   });
   const page = await context.newPage(); page.setDefaultTimeout(7000); const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -124,4 +131,61 @@ test('wrong database and raw HTML errors cannot show a usable queue or leak deta
     f.state.html = true; await f.page.getByRole('button', { name: 'Muat Ulang Status Pencatatan' }).click(); await f.page.getByRole('alert').waitFor();
     assert.equal((await f.page.locator('body').innerText()).includes('private provider error'), false);
   } finally { await f.context.close(); }
+});
+async function netPreview(page) {
+  await page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX01');
+  await page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).click();
+}
+test('net preview displays gross, actual fees and net with separate processing and bank evidence boundaries, without posting or Meta events', async () => {
+  const f = await fixture(); try {
+    await ready(f.page); await netPreview(f.page);
+    const result = f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }); await result.waitFor();
+    const text = await result.innerText();
+    for (const expected of [/160\.000/, /9\.000/, /990/, /150\.010/, /Processing fee harian dan PPN-nya belum termasuk/,
+      /belum membuktikan dana masuk rekening bank/, /Tidak mencatat biaya ke Accurate/, /Finance/]) assert.match(text, expected);
+    assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'netPreview']); assert.deepEqual(f.state.calls.at(-1).payload, { bookingId: 'bk_SH-261022-FIX01' });
+    assert.equal(f.state.calls.at(-1).authorization, 'Bearer fixture_manager1');
+    assert.equal(await f.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' }).isDisabled(), true);
+    assert.deepEqual(await f.page.evaluate(() => window.__events), []); assert.deepEqual(f.errors, []);
+    await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX02'); assert.equal(await result.count(), 0);
+  } finally { await f.context.close(); }
+});
+test('net preview refuses malformed, wrong booking, nonfinal, miscalculated or posting-capable responses', async () => {
+  for (const change of [v => v.netAmount = 145570, v => v.bookingCode = 'SH-261022-OTHER', v => v.readOnly = false,
+    v => v.feeStatus = 'PENDING', v => delete v.valueAddedTax, v => v.bankPayoutVerified = true,
+    v => v.processingFeeIncluded = true, v => v.grossAmount = '160000', v => v.productId = 'foreign', v => v.currency = 'USD',
+    v => v.referenceId = [v.referenceId], v => v.xenditWithholdingTax = 100]) {
+    const f = await fixture(); try {
+      await ready(f.page); change(f.state.net); await netPreview(f.page); await f.page.getByRole('alert').waitFor();
+      assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+      assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'netPreview']); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
+    } finally { await f.context.close(); }
+  }
+});
+test('a failed net reread clears prior values and explains permission or pending fees without raw provider details', async () => {
+  for (const [code, pattern] of [['XENDIT_TRANSACTION_PERMISSION_REQUIRED', /Transaction Read/], ['XENDIT_FEES_PENDING', /belum berstatus COMPLETED/]]) {
+    const f = await fixture(); try {
+      await ready(f.page); await netPreview(f.page); await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).waitFor();
+      f.state.netError = code; await f.page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).click();
+      const alert = f.page.getByRole('alert'); await alert.waitFor(); assert.match(await alert.innerText(), pattern);
+      assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+      assert.equal((await f.page.locator('body').innerText()).includes('untrusted private provider text'), false);
+      assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false);
+    } finally { await f.context.close(); }
+  }
+});
+test('late net results after account switch or logout are discarded and reads are guarded against duplicate clicks', async () => {
+  for (const nextUser of ['manager2', null]) {
+    const f = await fixture(); let release; try {
+      await ready(f.page); f.state.delay = new Promise(r => release = r);
+      await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX01');
+      await f.page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).evaluate(button => { button.click(); button.click(); });
+      await f.page.getByText('Memeriksa data…', { exact: true }).waitFor();
+      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); if (nextUser) await ready(f.page);
+      assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), '');
+      assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+      assert.ok(f.state.calls.filter(c => c.action === 'netPreview').length <= 1); assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false);
+      assert.deepEqual(await f.page.evaluate(() => window.__events), []); assert.deepEqual(f.errors, []);
+    } finally { release?.(); await f.context.close(); }
+  }
 });

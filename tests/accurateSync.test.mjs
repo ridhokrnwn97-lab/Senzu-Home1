@@ -508,3 +508,134 @@ test('Express routes expose safe results, preserve no-store and never emit raw u
     assert.equal(text.includes(token), false); assert.equal(text.includes(secret), false); assert.equal(text.includes('stack'), false);
   } finally { service.stop(); await new Promise(r => server.close(r)); }
 });
+
+// Transaction API fixtures are offline. The amounts model the observed Mandiri
+// payment; the API envelope/field names follow Xendit's List Transactions docs.
+function netFixture() {
+  const f = fixture(), v = f.booking();
+  f.env.XENDIT_LIVE_SECRET_KEY = 'xnd_production_offline_fixture_key';
+  f.env.XENDIT_LIVE_BUSINESS_ID = 'business_offline_fixture';
+  f.env.XENDIT_LIVE_ENABLED = 'false'; // Historical reads remain possible while new checkout is disabled.
+  const paymentId = 'py-123e4567-e89b-12d3-a456-426614174000';
+  f.db.data.get(`payments/${v.payment.id}`).providerTransactionId = paymentId;
+  f.db.data.get(`xendit_live_sessions/${v.intent.referenceId}`).paymentId = paymentId;
+  const row = { id: '123e4567-e89b-12d3-a456-426614174111', product_id: paymentId.slice(3),
+    business_id: f.env.XENDIT_LIVE_BUSINESS_ID, reference_id: v.intent.referenceId, type: 'PAYMENT', status: 'SUCCESS',
+    cashflow: 'MONEY_IN', channel_category: 'VIRTUAL_ACCOUNT', channel_code: 'MANDIRI', currency: 'IDR', amount: 160000,
+    net_amount: 150010, net_amount_currency: 'IDR', settlement_status: 'SETTLED', created: new Date(f.clock()).toISOString(), updated: new Date(f.clock()).toISOString(),
+    fee: { xendit_fee: 9000, value_added_tax: 990, xendit_withholding_tax: 0, third_party_withholding_tax: 0, status: 'COMPLETED' } };
+  const state = { value: { has_more: false, data: [row], links: [] }, response: null, error: null, onRead: null }, calls = [];
+  const deps = { ...f.deps, fetch: async (input, init) => {
+    const url = new URL(input); calls.push({ url, init });
+    assert.equal(url.origin, 'https://api.xendit.co'); assert.equal(url.pathname, '/transactions');
+    assert.equal(init.method, 'GET'); assert.equal(init.body, undefined); assert.equal(init.redirect, 'error'); assert.equal(init.cache, 'no-store'); assert.ok(init.signal);
+    assert.equal(init.headers.Authorization, `Basic ${Buffer.from(`${f.env.XENDIT_LIVE_SECRET_KEY}:`).toString('base64')}`);
+    assert.equal(init.headers['for-user-id'], undefined);
+    assert.deepEqual(Object.fromEntries(url.searchParams), { reference_id: v.intent.referenceId, types: 'PAYMENT', currency: 'IDR', limit: '2' });
+    await state.onRead?.(); if (state.error) throw state.error;
+    return state.response || Response.json(state.value);
+  } };
+  const service = createAccurateSync(deps);
+  return { ...f, v, row, state, netCalls: calls, netDeps: deps, net: () => service.netPreview(req({ bookingId: v.booking.id })), netService: service };
+}
+test('settled Mandiri net preview reads one exact Live transaction without accounting credentials, writes, queueing or payment refresh', async () => {
+  const f = netFixture(); delete f.env.ACCURATE_API_TOKEN; delete f.env.ACCURATE_SIGNATURE_SECRET; delete f.env.ACCURATE_SYNC_WRITES_ENABLED;
+  const before = structuredClone([...f.db.data]), result = await f.net();
+  assert.equal(result.grossAmount, 160000); assert.equal(result.xenditFee, 9000); assert.equal(result.valueAddedTax, 990); assert.equal(result.netAmount, 150010);
+  assert.equal(result.productId, f.row.product_id); assert.equal(result.readOnly, true); assert.equal(result.processingFeeIncluded, false); assert.equal(result.bankPayoutVerified, false);
+  assert.equal(result.checkedAt, new Date(f.clock()).toISOString()); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
+  assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []); assert.equal(f.job(f.v), undefined);
+  for (const field of ['business_id', 'account_identifier', 'customer', 'key', 'Authorization', 'fee']) assert.equal(Object.hasOwn(result, field), false);
+});
+test('net preview supports canonical payment products, other channel fees and exact fractional IDR amounts without guessing zero', async () => {
+  for (const free of [false, true]) {
+    const f = netFixture(); f.row.product_id = `py-${f.row.product_id}`; f.row.channel_category = 'QR_CODE'; f.row.channel_code = 'QRIS';
+    Object.assign(f.row.fee, { xendit_fee: free ? 0 : 1120, value_added_tax: free ? 0 : 123.2 });
+    f.row.net_amount = free ? 160000 : 158756.8;
+    const result = await f.net(); assert.equal(result.netAmount, f.row.net_amount); assert.equal(result.valueAddedTax, free ? 0 : 123.2); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('net preview rejects Test/manual/unpaid/review/canceled sources and inactive or non-Manager staff before any provider request', async () => {
+  for (const change of [f => f.db.data.get(`bookings/${f.v.booking.id}`).paymentMethod = 'Manual',
+    f => f.db.data.get(`payments/${f.v.payment.id}`).gatewayEnvironment = 'test',
+    f => f.db.data.get(`payments/${f.v.payment.id}`).status = 'pending',
+    f => f.db.data.get(`payments/${f.v.payment.id}`).reconciliationRequired = true,
+    f => f.db.data.get(`bookings/${f.v.booking.id}`).status = 'Cancelled',
+    f => f.db.data.get(`bookings/${f.v.booking.id}`).totalAmount++,
+    f => f.db.data.get('staff_roles/manager').isActive = false,
+    f => staff(f.db, 'manager', 'therapist')]) {
+    const f = netFixture(); change(f); const before = structuredClone([...f.db.data]);
+    await assert.rejects(f.net()); assert.equal(f.netCalls.length, 0); assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('net preview rejects body overrides and invalid Live configuration without reading secrets from the client', async () => {
+  for (const body of [{ bookingId: 'bk_SH-261022-FIX01', amount: 1 }, { bookingId: 'bk_SH-261022-FIX01', url: 'https://evil.invalid' },
+    { bookingId: 'bk_SH-261022-FIX01', businessId: 'other' }, { bookingId: '../private' }]) {
+    const f = netFixture(); await rejects(f.netService.netPreview(req(body)), 'INVALID_SYNC_REQUEST'); assert.equal(f.netCalls.length, 0);
+  }
+  for (const change of [f => f.env.XENDIT_LIVE_SECRET_KEY = 'xnd_development_fixture', f => delete f.env.XENDIT_LIVE_SECRET_KEY,
+    f => f.env.XENDIT_LIVE_BUSINESS_ID = '', f => f.env.XENDIT_LIVE_SECRET_KEY += '\n']) {
+    const f = netFixture(); change(f); await rejects(f.net(), 'XENDIT_NET_NOT_CONFIGURED'); assert.equal(f.netCalls.length, 0); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('net preview rejects mismatched identity, amount, currency, cashflow and unsuccessful or non-payment transactions', async () => {
+  for (const [key, value] of [['business_id', 'foreign_business'], ['reference_id', 'foreign_ref'], ['product_id', 'foreign_product'],
+    ['product_id', 'va_payment_123e4567-e89b-12d3-a456-426614174000'], ['product_id', null], ['amount', 160001], ['amount', '160000'],
+    ['currency', 'USD'], ['net_amount_currency', 'USD'], ['cashflow', 'MONEY_OUT'], ['status', 'REVERSED'], ['status', 'PENDING'],
+    ['type', 'WITHDRAWAL'], ['id', 'https://evil.invalid'], ['updated', null], ['channel_code', '<script>']]) {
+    const f = netFixture(); f.row[key] = value; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('net preview refuses ambiguous or paginated results and never follows navigation URLs', async () => {
+  for (const change of [f => f.state.value.has_more = true, f => delete f.state.value.has_more,
+    f => f.state.value.data.push(structuredClone(f.row)), f => f.state.value.data = null,
+    f => f.state.value.links.push({ rel: 'next', href: 'https://evil.invalid/private', method: 'GET' }), f => delete f.state.value.links]) {
+    const f = netFixture(); change(f); await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  }
+  const f = netFixture(); f.state.value.data = []; await rejects(f.net(), 'XENDIT_TRANSACTION_NOT_FOUND'); assert.equal(f.netCalls.length, 1);
+});
+test('missing, pending or nonfinal fees and settlement never display a verified net; nonzero withholding waits Finance', async () => {
+  for (const status of ['PENDING', 'NOT_APPLICABLE', 'CANCELED', 'REVERSED', null, undefined]) {
+    const f = netFixture(); f.row.fee.status = status; await rejects(f.net(), 'XENDIT_FEES_PENDING'); assert.deepEqual(f.db.writes, []);
+  }
+  for (const field of ['xendit_fee', 'value_added_tax', 'xendit_withholding_tax', 'third_party_withholding_tax']) {
+    for (const value of [undefined, null, '0', -1, 1.001]) {
+      const f = netFixture(); f.row.fee[field] = value; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.deepEqual(f.db.writes, []);
+    }
+  }
+  for (const status of ['PENDING', 'EARLY_SETTLED', null, undefined]) { const f = netFixture(); f.row.settlement_status = status; await rejects(f.net(), 'XENDIT_SETTLEMENT_PENDING'); }
+  for (const field of ['xendit_withholding_tax', 'third_party_withholding_tax']) { const f = netFixture(); f.row.fee[field] = 100; await rejects(f.net(), 'XENDIT_WITHHOLDING_REVIEW'); }
+  for (const amount of [145570, 150010.001, '150010', null, -1]) { const f = netFixture(); f.row.net_amount = amount; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); }
+});
+test('a Manager revoked or source changed during the Xendit read cannot receive the preview', async () => {
+  for (const change of [f => f.db.data.get('staff_roles/manager').isActive = false,
+    f => f.db.data.get(`bookings/${f.v.booking.id}`).status = 'Completed',
+    f => f.db.data.get(`payments/${f.v.payment.id}`).amount++,
+    f => f.db.data.get(`xendit_live_sessions/${f.v.intent.referenceId}`).paymentId = 'py-foreign0000000000000000',
+    f => f.db.data.get(`voucher_checkout_receipts/${f.v.booking.gatewayReceiptId}`).totalAmount++]) {
+    const f = netFixture(); f.state.onRead = () => change(f); await assert.rejects(f.net()); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('net API read failures are safe and retrying a preview only performs another GET', async () => {
+  for (const [status, code] of [[401, 'XENDIT_TRANSACTION_AUTH_INVALID'], [403, 'XENDIT_TRANSACTION_PERMISSION_REQUIRED'],
+    [429, 'XENDIT_TRANSACTION_UNAVAILABLE'], [503, 'XENDIT_TRANSACTION_UNAVAILABLE'], [302, 'XENDIT_TRANSACTION_UNAVAILABLE']]) {
+    const f = netFixture(); f.state.response = new Response(`${f.env.XENDIT_LIVE_SECRET_KEY} private body`, { status, headers: { Location: 'https://evil.invalid' } });
+    await rejects(f.net(), code); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  }
+  const f = netFixture(); f.state.error = new Error(`${f.env.XENDIT_LIVE_SECRET_KEY} private body`);
+  await rejects(f.net(), 'XENDIT_TRANSACTION_UNAVAILABLE'); f.state.error = null; const result = await f.net();
+  assert.equal(result.netAmount, 150010); assert.equal(f.netCalls.length, 2); assert.deepEqual(f.db.writes, []);
+});
+test('net preview route requires Manager auth, has no-store, throttles reads and emits no raw upstream errors', async () => {
+  const f = netFixture(), app = express(); app.use(express.json()); const service = registerAccurateSync(app, f.netDeps);
+  const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r)); const origin = `http://127.0.0.1:${server.address().port}`;
+  const call = (bearer = 'manager') => fetch(`${origin}/api/integrations/accurate/sync/netPreview`, { method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId: f.v.booking.id }) });
+  try {
+    const invalid = await call('invalid'); assert.equal(invalid.status, 401); assert.equal(f.netCalls.length, 0);
+    const good = await call(); assert.equal(good.status, 200); assert.match(good.headers.get('cache-control'), /no-store/); assert.equal((await good.json()).netAmount, 150010);
+    f.state.response = new Response(`${f.env.XENDIT_LIVE_SECRET_KEY} private body`, { status: 403 });
+    const bad = await call(); assert.equal(bad.status, 502); const text = await bad.text(); assert.match(text, /XENDIT_TRANSACTION_PERMISSION_REQUIRED/);
+    assert.equal(text.includes(f.env.XENDIT_LIVE_SECRET_KEY), false); assert.equal(text.includes('private body'), false); assert.equal(text.includes('stack'), false);
+    f.state.response = null; assert.equal((await call()).status, 200); assert.equal((await call()).status, 429); assert.equal(f.netCalls.length, 3); assert.deepEqual(f.db.writes, []);
+  } finally { service.stop(); await new Promise(r => server.close(r)); }
+});

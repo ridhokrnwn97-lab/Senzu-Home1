@@ -1,5 +1,6 @@
 import { auth } from './firebase';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID, type AccurateSyncStatus, type AccurateSyncPreview } from './accurateSyncContracts';
+import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview,
+  type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview } from './accurateSyncContracts';
 
 async function request(action: string, body: Record<string, unknown>, signal?: AbortSignal) {
   const user = auth.currentUser;
@@ -11,8 +12,9 @@ async function request(action: string, body: Record<string, unknown>, signal?: A
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const value = await response.json().catch(() => null);
   if (auth.currentUser?.uid !== user.uid) throw new Error('Sesi pengguna telah berubah.');
-  if (!response.ok || value?.success !== true) throw new Error('Permintaan Accurate belum berhasil.' +
-    (typeof value?.code === 'string' && /^[A-Z_]{1,60}$/.test(value.code) ? ` Kode: ${value.code}.` : ' Coba muat ulang.'));
+  if (!response.ok || value?.success !== true) throw new Error(
+    typeof value?.code === 'string' && Object.hasOwn(ACCURATE_NET_PREVIEW_ERRORS, value.code) ? ACCURATE_NET_PREVIEW_ERRORS[value.code] :
+    'Permintaan Accurate belum berhasil.' + (typeof value?.code === 'string' && /^[A-Z_]{1,60}$/.test(value.code) ? ` Kode: ${value.code}.` : ' Coba muat ulang.'));
   return value;
 }
 export async function accurateSyncAction(action: 'status' | 'activate' | 'pause' | 'run' | 'retry', bookingId?: string, signal?: AbortSignal): Promise<AccurateSyncStatus> {
@@ -39,5 +41,10 @@ export async function accurateSyncPreview(bookingId: string, signal?: AbortSigna
       !/^SHDP-[a-f0-9]{24}$/.test(v.downPaymentNumber || '') || !/^SHRC-[a-f0-9]{24}$/.test(v.receiptNumber || '') || !/^SHIV-[a-f0-9]{24}$/.test(v.invoiceNumber || '')) {
     throw new Error('Respons pratinjau Accurate tidak valid.');
   }
+  return v;
+}
+export async function accurateXenditNetPreview(bookingId: string, signal?: AbortSignal): Promise<AccurateXenditNetPreview> {
+  const v = await request('netPreview', { bookingId }, signal);
+  if (!isAccurateXenditNetPreview(v) || bookingId !== `bk_${v.bookingCode}`) throw new Error('Respons pratinjau neto Xendit tidak valid.');
   return v;
 }
