@@ -1,9 +1,10 @@
 import type { Express, Request } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES,
-  type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus } from '../lib/accurateSyncContracts.ts';
+import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
+  type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetPreview } from '../lib/accurateSyncContracts.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
+import { readXenditNetPreview } from './xenditNetPreview.ts';
 import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
   type AccurateDocumentKind } from './accurateSyncProvider.ts';
 
@@ -22,6 +23,7 @@ const providerDate = (value: unknown) => typeof value === 'string' ? /^\d{2}\/\d
   /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value) ? `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}` : null : null;
 const numbers = (id: string) => ({ downPaymentNumber: `SHDP-${id.slice(0, 24)}`, receiptNumber: `SHRC-${id.slice(0, 24)}`, invoiceNumber: `SHIV-${id.slice(0, 24)}` });
 const MESSAGES: Record<string, string> = {
+  ...ACCURATE_NET_PREVIEW_ERRORS,
   AUTH_REQUIRED: 'Silakan masuk sebagai Manager atau Admin.', AUTH_INVALID: 'Sesi login tidak valid.',
   AUTH_UNAVAILABLE: 'Verifikasi login belum tersedia.', MANAGER_ROLE_REQUIRED: 'Akses Manager atau Admin aktif diperlukan.',
   INVALID_SYNC_REQUEST: 'Permintaan pencatatan Accurate tidak valid.', DATABASE_UNAVAILABLE: 'Database belum tersedia.',
@@ -182,6 +184,27 @@ export function createAccurateSync(deps: Dependencies) {
       eligible: !historical && !blocked && Boolean(commercial.itemCode),
       note: historical ? MESSAGES.SYNC_HISTORICAL : blocked ? MESSAGES.SYNC_SOURCE_CHANGED : !commercial.itemCode ? MESSAGES.SYNC_SERVICE_UNMAPPED : 'Data siap untuk pencatatan setelah aktivasi.',
       ...numbers(jobId(v.booking.id)) };
+  }
+  async function netPreview(req: Request): Promise<AccurateXenditNetPreview> {
+    const uid = await actor(req, ['bookingId']), bookingId = req.body.bookingId;
+    if (!safeId(bookingId)) throw fail(400, 'INVALID_SYNC_REQUEST');
+    rate(`netPreview:${uid}`, 3);
+    const readSource = async (t: Transaction) => {
+      await deps.authorizeManager(t, uid);
+      const v = await source(t, bookingId); core(v);
+      if (['cancelled', 'canceled', 'refunded', 'expired', 'rescheduled', 'rejected'].includes(String(v.booking.status).toLowerCase())) {
+        throw fail(409, 'SYNC_SOURCE_CHANGED');
+      }
+      return v;
+    };
+    const v = await db!.runTransaction(readSource), fingerprint = hash(v);
+    const result = await readXenditNetPreview({ bookingCode: v.booking.bookingCode, referenceId: v.intent.referenceId,
+      paymentId: v.intent.paymentId, amount: v.payment.amount }, { env, fetch: deps.fetch, clock });
+    // Read-only historical inspection is allowed. No queue/control/operation
+    // writes, Accurate requests or payment status refreshes occur on this path.
+    const latest = await db!.runTransaction(readSource);
+    if (hash(latest) !== fingerprint) throw fail(409, 'SYNC_SOURCE_CHANGED');
+    return result;
   }
   async function activate(req: Request) {
     const uid = await actor(req, ['acknowledgement', 'taxPolicy']); rate(`activate:${uid}`, 2);
@@ -380,12 +403,12 @@ export function createAccurateSync(deps: Dependencies) {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length) throw fail(400, 'INVALID_SYNC_REQUEST');
     return runOnce();
   }
-  return { stagePaid, status, preview, activate, pause, retry, run, runOnce, scheduled, wake };
+  return { stagePaid, status, preview, netPreview, activate, pause, retry, run, runOnce, scheduled, wake };
 }
 
 export function registerAccurateSync(app: Express, deps: Dependencies) {
   const service = createAccurateSync(deps);
-  for (const action of ['status', 'preview', 'activate', 'pause', 'retry', 'run', 'scheduled'] as const) {
+  for (const action of ['status', 'preview', 'netPreview', 'activate', 'pause', 'retry', 'run', 'scheduled'] as const) {
     app.post(`/api/integrations/accurate/sync/${action}`, async (req, res) => {
       res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
       try { res.json({ success: true, ...await service[action](req) }); }
