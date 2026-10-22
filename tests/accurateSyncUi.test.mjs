@@ -163,7 +163,9 @@ test('net preview refuses malformed, wrong booking, nonfinal, miscalculated or p
   }
 });
 test('a failed net reread clears prior values and explains permission or pending fees without raw provider details', async () => {
-  for (const [code, pattern] of [['XENDIT_TRANSACTION_PERMISSION_REQUIRED', /Transaction Read/], ['XENDIT_FEES_PENDING', /belum berstatus COMPLETED/]]) {
+  for (const [code, pattern] of [['XENDIT_TRANSACTION_PERMISSION_REQUIRED', /Transaction Read/], ['XENDIT_FEES_PENDING', /belum berstatus COMPLETED/],
+    ['XENDIT_PRODUCT_MISMATCH', /Product ID/], ['XENDIT_LIST_MULTIPLE_RESULTS', /lebih dari satu hasil/],
+    ['XENDIT_FEE_WITHHOLDING_UNVERIFIED', /withholding.*tidak lengkap/], ['XENDIT_NET_AMOUNT_UNVERIFIED', /Nominal neto/]]) {
     const f = await fixture(); try {
       await ready(f.page); await netPreview(f.page); await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).waitFor();
       f.state.netError = code; await f.page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).click();
@@ -173,6 +175,22 @@ test('a failed net reread clears prior values and explains permission or pending
       assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false);
     } finally { await f.context.close(); }
   }
+});
+test('a known Xendit read error preserves the loaded active accounting queue without showing an activation form', async () => {
+  const f = await fixture(); try {
+    await ready(f.page); Object.assign(f.state.status, { enabled: true, activatedAt: '2026-10-22T05:21:20Z', taxPolicy: 'no_extra_tax',
+      jobs: [{ id, bookingCode: 'SH-261022-FIX01', amount: 160000, state: 'waiting_service', createdAt: '2026-10-22T05:42:43Z', updatedAt: '2026-10-22T05:42:43Z',
+        note: 'Uang muka dan penerimaan tercatat. Menunggu treatment selesai.', downPaymentNumber: `SHDP-${id.slice(0,24)}`,
+        receiptNumber: `SHRC-${id.slice(0,24)}`, invoiceNumber: `SHIV-${id.slice(0,24)}`, confirmed: ['down_payment','receipt'] }] });
+    await f.page.getByRole('button', { name: 'Muat Ulang Status Pencatatan' }).click(); await f.page.getByText('Aktif', { exact: true }).waitFor();
+    f.state.netError = 'XENDIT_PRODUCT_MISMATCH'; await netPreview(f.page); await f.page.getByRole('alert').waitFor();
+    assert.equal(await f.page.getByText('Aktif', { exact: true }).count(), 1); assert.equal(await f.page.locator('tbody tr').count(), 1);
+    assert.equal(await f.page.getByRole('heading', { name: 'Aktivasi pencatatan booking baru' }).count(), 0);
+    assert.equal(await f.page.getByRole('button', { name: 'Proses Antrean Sekarang' }).isEnabled(), true);
+    assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'status', 'netPreview']); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
+    await f.page.evaluate(() => window.__setAuth(null)); assert.equal(await f.page.locator('tbody tr').count(), 0);
+    assert.equal(await f.page.getByText('Aktif', { exact: true }).count(), 0); assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), '');
+  } finally { await f.context.close(); }
 });
 test('late net results after account switch or logout are discarded and reads are guarded against duplicate clicks', async () => {
   for (const nextUser of ['manager2', null]) {

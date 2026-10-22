@@ -1,5 +1,41 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
+## Perbaikan validasi dan pesan pratinjau neto — 22 Oktober 2026
+
+Paket **SenzuHome-Xendit-Neto-Validation.zip** berisi **6 file**. Basis source terbaru main commit `33fa1a1313125d9140a3ab1d46606bdb0eecad6a`, setelah paket 8 file pratinjau neto digabung.
+
+1. src/server/xenditNetPreview.ts
+2. src/lib/accurateSyncContracts.ts
+3. src/components/admin/AccurateSyncCard.tsx
+4. tests/accurateSync.test.mjs
+5. tests/accurateSyncUi.test.mjs
+6. docs/ACCURATE-SYNC.md
+
+### Temuan pada aplikasi publik
+
+Versi pratinjau sudah terlihat pada `https://senzuhome.com/`. Pembacaan pertama melaporkan akses Transaction Read ditolak. Penambahan **Transaction → Read** pada key **SenzuHomeLive** disetujui pengguna dan diselesaikan dengan verifikasi authenticator. Dashboard Xendit kemudian menampilkan **Read only: Transaction**. Tidak dibuat key pengganti dan tidak dibaca nilai Secret.
+
+Pembacaan ulang untuk **SH-261022-NUOUN** tidak lagi menampilkan penolakan izin, tetapi menghasilkan pesan umum **Identitas, nominal, atau rincian transaksi Xendit belum cocok**. Raw respons API tidak diambil. Karena versi sebelumnya menyatukan beberapa pemeriksaan ke pesan tersebut, field penyebab kasus publik **belum diketahui** dan pembacaan neto belum dinyatakan berhasil.
+
+### Perubahan
+
+Pembaca lama mewajibkan `links` kosong. Versi ini menggunakan penanda eksplisit `has_more === false` dan tepat satu hasil sebagai pemeriksaan akhir daftar. Array navigasi boleh berisi tautan; isinya tidak dipakai, tidak dikembalikan ke browser dan tidak diikuti. `has_more` hilang/salah tipe/true, format daftar salah dan lebih dari satu hasil tetap ditolak. Ini membenahi pembatasan navigasi pada kode; **belum membuktikan navigasi merupakan penyebab penolakan kasus publik**.
+
+Pesan pemeriksaan kini membedakan format daftar, paginasi, hasil ganda, Business ID, reference ID, product/payment ID, bruto, mata uang, status/arah dana, biaya transaksi, PPN biaya, withholding, perhitungan neto, serta metadata transaksi. Pesan berasal dari daftar tetap pada kode. Nilai yang bertentangan, payload mentah, nomor rekening, data pelanggan, URL navigasi dan kredensial tidak ditampilkan/disimpan. Field biaya yang kosong tetap tidak dianggap nol. Withholding bukan nol tetap memerlukan Finance.
+
+Kegagalan baca Xendit yang sudah dikenali sekarang mempertahankan tampilan status Accurate yang sebelumnya sudah dimuat. Ia tidak menampilkan formulir aktivasi seolah-olah pengiriman Accurate kehilangan aktivasi. Logout, pergantian akun, kegagalan autentikasi atau respons status yang tidak valid tetap mengosongkan data terkait. Tidak ada perubahan pengaturan aktivasi, cutoff, antrean, bukti operasi atau dokumen Accurate di server.
+
+### Pemasangan dan pemeriksaan berikutnya
+
+1. Ekstrak dan unggah **6 file** sesuai foldernya ke GitHub, merge, **Pull Changes**, lalu **Republish**. Tinjau diff bila main sudah berubah. Tidak perlu Secret baru, mengulang aktivasi atau membuat pembayaran baru.
+2. Buka **Manager → Master Data → Operational Settings → Accurate Online — Pencatatan Transaksi**. Masukkan **SH-261022-NUOUN**, klik **Pratinjau Biaya & Neto Xendit** sekali, dan periksa hasilnya.
+3. Jika hasil belum cocok, pesan spesifik menunjukkan bagian yang ditahan. Pemeriksaan lanjutan harus berdasarkan pesan dan data yang benar, tanpa mengubah nominal/identitas agar lolos dan tanpa menganggap data kosong nol. Tidak perlu mengeklik Proses Antrean atau Periksa Ulang Booking untuk membaca neto.
+4. Hasil sukses tetap hanya membuktikan neto satu pembayaran Xendit. Processing fee harian, perlakuan pajak, pencairan aktual dan mutasi bank memerlukan rekonsiliasi terpisah. Tidak ada pencatatan biaya/pajak/pencairan otomatis pada paket ini.
+
+Paket hanya mengubah pembaca pratinjau, pesan, tampilan kegagalan dan pengujiannya. Checkout pelanggan, verifikasi Payment Session/webhook, pembayaran manual, Meta Pixel dan worker Accurate tidak diubah. Semua tes menggunakan fixture lokal; paket ini belum diterbitkan ketika disiapkan. Keberhasilan pembacaan API publik tetap perlu diverifikasi setelah Republish.
+
+Validasi lokal pada Node.js **22.23.4**: **160/160 grup pengujian lulus**, pemeriksaan TypeScript, build dan impor native backend lulus. Regresi tambahan memeriksa tautan navigasi yang tidak diikuti dengan satu hasil final, penolakan hasil ganda/penanda halaman hilang, respons JSON salah, alasan pemeriksaan spesifik tanpa nilai mentah, serta status antrean aktif yang tetap terlihat setelah kegagalan baca Xendit. Pemeriksaan akses dan pencocokan finansial sebelumnya tetap dijalankan.
+
 ## Pratinjau biaya dan neto Xendit — 22 Oktober 2026
 
 Paket **SenzuHome-Xendit-Neto-Preview.zip** berisi **8 file**. Basis source terbaru: main commit `c95d84972cd109e3c7460be31db0e88d583bd6d3`, setelah Customer Fix digabung. Ini menambah pemeriksaan baca saja pada panel pencatatan yang sudah ada; bukan aktivasi pencatatan biaya/pajak/pencairan.

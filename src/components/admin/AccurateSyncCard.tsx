@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import type { StaffUser } from '../../types';
-import type { AccurateSyncStatus, AccurateSyncPreview, AccurateXenditNetPreview } from '../../lib/accurateSyncContracts';
+import { ACCURATE_NET_PREVIEW_ERRORS, type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview } from '../../lib/accurateSyncContracts';
 import { accurateSyncAction, accurateSyncPreview, accurateXenditNetPreview } from '../../lib/accurateSyncService';
 
 const money = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
@@ -47,7 +47,10 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
       }
     } catch (e: any) {
       if (generation.current === version) {
-        setStatus(null); setAck(false); setTax(false);
+        // A known Xendit read failure does not invalidate the already loaded
+        // accounting status. Auth/account changes still clear state separately.
+        if (action !== 'netPreview' || !Object.values(ACCURATE_NET_PREVIEW_ERRORS).includes(e?.message)) setStatus(null);
+        setAck(false); setTax(false);
         setError(e?.name === 'AbortError' || e?.name === 'TimeoutError' ? 'Permintaan belum selesai. Muat ulang status sebelum mencoba kembali.' : e.message);
       }
     } finally { if (generation.current === version) { flight.current = false; setBusy(false); } }
