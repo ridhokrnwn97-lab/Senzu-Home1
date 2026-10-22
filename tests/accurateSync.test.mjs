@@ -579,33 +579,56 @@ test('net preview rejects body overrides and invalid Live configuration without 
   }
 });
 test('net preview rejects mismatched identity, amount, currency, cashflow and unsuccessful or non-payment transactions', async () => {
+  const issues = { business_id: 'XENDIT_BUSINESS_MISMATCH', reference_id: 'XENDIT_REFERENCE_MISMATCH', product_id: 'XENDIT_PRODUCT_MISMATCH',
+    amount: 'XENDIT_AMOUNT_MISMATCH', currency: 'XENDIT_CURRENCY_UNVERIFIED', net_amount_currency: 'XENDIT_CURRENCY_UNVERIFIED',
+    cashflow: 'XENDIT_STATE_UNVERIFIED', status: 'XENDIT_STATE_UNVERIFIED', type: 'XENDIT_STATE_UNVERIFIED',
+    id: 'XENDIT_TRANSACTION_META_UNVERIFIED', updated: 'XENDIT_TRANSACTION_META_UNVERIFIED', channel_code: 'XENDIT_TRANSACTION_META_UNVERIFIED' };
   for (const [key, value] of [['business_id', 'foreign_business'], ['reference_id', 'foreign_ref'], ['product_id', 'foreign_product'],
     ['product_id', 'va_payment_123e4567-e89b-12d3-a456-426614174000'], ['product_id', null], ['amount', 160001], ['amount', '160000'],
     ['currency', 'USD'], ['net_amount_currency', 'USD'], ['cashflow', 'MONEY_OUT'], ['status', 'REVERSED'], ['status', 'PENDING'],
     ['type', 'WITHDRAWAL'], ['id', 'https://evil.invalid'], ['updated', null], ['channel_code', '<script>']]) {
-    const f = netFixture(); f.row[key] = value; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.deepEqual(f.db.writes, []);
+    const f = netFixture(); f.row[key] = value; await rejects(f.net(), issues[key]); assert.deepEqual(f.db.writes, []);
   }
 });
 test('net preview refuses ambiguous or paginated results and never follows navigation URLs', async () => {
-  for (const change of [f => f.state.value.has_more = true, f => delete f.state.value.has_more,
-    f => f.state.value.data.push(structuredClone(f.row)), f => f.state.value.data = null,
-    f => f.state.value.links.push({ rel: 'next', href: 'https://evil.invalid/private', method: 'GET' }), f => delete f.state.value.links]) {
-    const f = netFixture(); change(f); await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  for (const [change, code] of [[f => f.state.value.has_more = true, 'XENDIT_LIST_MULTIPLE_RESULTS'],
+    [f => delete f.state.value.has_more, 'XENDIT_LIST_PAGINATION_UNVERIFIED'],
+    [f => f.state.value.has_more = 'false', 'XENDIT_LIST_PAGINATION_UNVERIFIED'],
+    [f => f.state.value.data.push(structuredClone(f.row)), 'XENDIT_LIST_MULTIPLE_RESULTS'],
+    [f => f.state.value.data = null, 'XENDIT_LIST_FORMAT_UNVERIFIED'], [f => delete f.state.value.links, 'XENDIT_LIST_FORMAT_UNVERIFIED']]) {
+    const f = netFixture(); change(f); await rejects(f.net(), code); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
   }
   const f = netFixture(); f.state.value.data = []; await rejects(f.net(), 'XENDIT_TRANSACTION_NOT_FOUND'); assert.equal(f.netCalls.length, 1);
+});
+test('one verified payment with has_more false can include navigation links without following or exposing them', async () => {
+  for (const href of ['/transactions?after_id=fixture', 'https://api.xendit.co/transactions?after_id=fixture', 'https://evil.invalid/private']) {
+    const f = netFixture(); f.state.value.links = [{ rel: 'next', href, method: 'GET' }, { rel: 'previous', href: '/transactions?before_id=fixture', method: 'GET' }];
+    const before = structuredClone([...f.db.data]), result = await f.net();
+    assert.equal(result.netAmount, 150010); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
+    assert.equal(JSON.stringify(result).includes(href), false); assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []);
+    f.state.value.has_more = true; await rejects(f.net(), 'XENDIT_LIST_MULTIPLE_RESULTS'); assert.equal(f.netCalls.length, 2);
+  }
+});
+test('malformed JSON or list rows have a specific safe format error instead of a guessed payment', async () => {
+  for (const body of ['<html>private response</html>', 'null', '{"data":[],"has_more":false}', '{"data":[null],"has_more":false,"links":[]}',
+    '{"data":[[]],"has_more":false,"links":[]}']) {
+    const f = netFixture(); f.state.response = new Response(body, { status: 200 });
+    await rejects(f.net(), 'XENDIT_LIST_FORMAT_UNVERIFIED'); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  }
 });
 test('missing, pending or nonfinal fees and settlement never display a verified net; nonzero withholding waits Finance', async () => {
   for (const status of ['PENDING', 'NOT_APPLICABLE', 'CANCELED', 'REVERSED', null, undefined]) {
     const f = netFixture(); f.row.fee.status = status; await rejects(f.net(), 'XENDIT_FEES_PENDING'); assert.deepEqual(f.db.writes, []);
   }
   for (const field of ['xendit_fee', 'value_added_tax', 'xendit_withholding_tax', 'third_party_withholding_tax']) {
+    const issue = field === 'xendit_fee' ? 'XENDIT_FEE_AMOUNT_UNVERIFIED' : field === 'value_added_tax' ? 'XENDIT_FEE_VAT_UNVERIFIED' : 'XENDIT_FEE_WITHHOLDING_UNVERIFIED';
     for (const value of [undefined, null, '0', -1, 1.001]) {
-      const f = netFixture(); f.row.fee[field] = value; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); assert.deepEqual(f.db.writes, []);
+      const f = netFixture(); f.row.fee[field] = value; await rejects(f.net(), issue); assert.deepEqual(f.db.writes, []);
     }
   }
   for (const status of ['PENDING', 'EARLY_SETTLED', null, undefined]) { const f = netFixture(); f.row.settlement_status = status; await rejects(f.net(), 'XENDIT_SETTLEMENT_PENDING'); }
   for (const field of ['xendit_withholding_tax', 'third_party_withholding_tax']) { const f = netFixture(); f.row.fee[field] = 100; await rejects(f.net(), 'XENDIT_WITHHOLDING_REVIEW'); }
-  for (const amount of [145570, 150010.001, '150010', null, -1]) { const f = netFixture(); f.row.net_amount = amount; await rejects(f.net(), 'XENDIT_TRANSACTION_UNVERIFIED'); }
+  for (const amount of [145570, 150010.001, '150010', null, -1]) { const f = netFixture(); f.row.net_amount = amount; await rejects(f.net(), 'XENDIT_NET_AMOUNT_UNVERIFIED'); }
 });
 test('a Manager revoked or source changed during the Xendit read cannot receive the preview', async () => {
   for (const change of [f => f.db.data.get('staff_roles/manager').isActive = false,
@@ -637,5 +660,22 @@ test('net preview route requires Manager auth, has no-store, throttles reads and
     const bad = await call(); assert.equal(bad.status, 502); const text = await bad.text(); assert.match(text, /XENDIT_TRANSACTION_PERMISSION_REQUIRED/);
     assert.equal(text.includes(f.env.XENDIT_LIVE_SECRET_KEY), false); assert.equal(text.includes('private body'), false); assert.equal(text.includes('stack'), false);
     f.state.response = null; assert.equal((await call()).status, 200); assert.equal((await call()).status, 429); assert.equal(f.netCalls.length, 3); assert.deepEqual(f.db.writes, []);
+  } finally { service.stop(); await new Promise(r => server.close(r)); }
+});
+test('specific validation reasons expose neither actual mismatched values nor provider bodies', async () => {
+  const f = netFixture(), app = express(); app.use(express.json()); const service = registerAccurateSync(app, f.netDeps);
+  const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
+  const url = `http://127.0.0.1:${server.address().port}/api/integrations/accurate/sync/netPreview`;
+  const sensitiveFixture = `${f.env.XENDIT_LIVE_SECRET_KEY} private mismatched customer or business`;
+  try {
+    for (const [field, code] of [['business_id', 'XENDIT_BUSINESS_MISMATCH'], ['reference_id', 'XENDIT_REFERENCE_MISMATCH']]) {
+      const prior = f.row[field]; f.row[field] = sensitiveFixture;
+      const response = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer manager', 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId: f.v.booking.id }) });
+      assert.equal(response.status, 409); assert.match(response.headers.get('cache-control'), /no-store/);
+      const result = await response.json(); assert.equal(result.code, code); assert.deepEqual(Object.keys(result).sort(), ['code', 'error', 'success']);
+      assert.equal(JSON.stringify(result).includes(sensitiveFixture), false); assert.equal(JSON.stringify(result).includes(f.env.XENDIT_LIVE_SECRET_KEY), false);
+      f.row[field] = prior;
+    }
+    assert.deepEqual(f.db.writes, []);
   } finally { service.stop(); await new Promise(r => server.close(r)); }
 });
