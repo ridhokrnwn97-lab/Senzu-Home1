@@ -1,5 +1,31 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
+## Perbaikan pembaca nomor pelanggan — 22 Oktober 2026
+
+Patch **SenzuHome-Accurate-Customer-Fix.zip** berisi **4 file**:
+
+1. src/server/accurateSyncProvider.ts
+2. src/server/accurateSync.ts
+3. tests/accurateSync.test.mjs
+4. docs/ACCURATE-SYNC.md
+
+Basis source terbaru: main commit `d8e270c7fd35717a33045b6b8b1909b6489b6471`, sesudah paket Mapping Fix digabung. Pada pemeriksaan publik, pembayaran booking baru sudah terverifikasi melalui webhook Xendit, tetapi antrean Accurate tertahan dengan ACCURATE_DOCUMENT_COLLISION. Pelanggan berkode SHC- sudah ditemukan di Accurate dengan penanda kepemilikan dan akun yang sesuai. Pencarian nomor uang muka dan penerimaan milik antrean tersebut belum menemukan dokumen. Temuan ini menunjukkan proses belum dapat dianggap berhasil mencatat pembayaran di Accurate.
+
+Pembaca lama menyamakan nama filter pelanggan dengan nama kolom respons: `no`. Patch memisahkan filter `filter.no` dari proyeksi respons `customerNo`. Identitas pada daftar dan detail harus tetap cocok dengan nomor yang dicari dan ID hasil daftar. Bentuk lama `no` tetap dapat dibaca; jika respons menyediakan keduanya, semua nilai harus sama. Nilai kosong, null, salah tipe, berbeda, hasil ganda, atau ID detail berbeda tetap ditolak. Referensi pelanggan pada uang muka, penerimaan, dan faktur juga membaca `customer.customerNo`, dengan pemeriksaan seluruh alias yang disediakan.
+
+Payload pembuatan, nomor pelanggan/dokumen, fingerprint, penanda kepemilikan, akun, cutoff aktivasi, dan bukti operasi lama dipertahankan. Bukti `sending` tidak dihapus atau direset. Pelanggan yang sudah tersimpan harus ditemukan dan diverifikasi; bila tidak ditemukan setelah percobaan terdahulu, POST tidak diulang. Pemeriksaan penanda kepemilikan dan akun piutang/uang muka tetap berlaku.
+
+Pemasangan dan pemulihan:
+
+1. Unggah **keempat file** sesuai foldernya ke GitHub, merge, **Pull Changes**, lalu **Republish**. Tunggu publikasi selesai. Tidak diperlukan Secret baru atau aktivasi ulang.
+2. Muat ulang panel **Accurate Online — Pencatatan Transaksi** dan periksa booking yang tertahan beserta nomor dokumennya. Periksa kembali dokumen di Accurate sebelum memilih pemulihan, terutama jika ada pencatatan manual selama penanganan.
+3. Setelah versi baru terpasang dan transaksi cocok, gunakan **Periksa Ulang Booking dalam Antrean** satu kali untuk booking tersebut. Tombol ini dapat membuat uang muka dan penerimaan yang belum pernah dicoba, sehingga merupakan tindakan pencatatan. Ia tidak mengulang POST yang mempunyai bukti percobaan lama. Jangan menghapus catatan antrean/operasi atau membuat pembayaran pengganti.
+4. Cocokkan hasil nyata di Accurate: pelanggan yang sama, satu uang muka, satu penerimaan ke akun 110103, jumlah dan tanggal yang benar. Faktur baru dibuat setelah treatment benar-benar selesai; status booking tidak diubah untuk pengujian.
+
+Validasi patch: **142/142 grup pengujian lokal lulus**, TypeScript, build, dan impor backend native pada **Node.js 22.23.4** lulus. Fixture utama memakai respons pelanggan `customerNo` dan referensi dokumen `customer.customerNo`, tanpa mengandalkan pantulan payload POST sebagai bukti identitas. Regresi mencakup pemulihan setelah restart dengan bukti sending lama, respons pelanggan hilang, pelanggan tidak ditemukan tanpa POST ulang, alias bertentangan, penanda/akun salah, serta pembuatan dokumen paling banyak sekali. Suite juga memeriksa regresi Xendit Test/Live dan UI.
+
+**Batas bukti:** tes menggunakan fixture lokal. Raw respons API pelanggan dari aplikasi publik belum diambil; inspeksi Accurate dilakukan melalui antarmuka pengguna. Keberhasilan pemulihan dan dokumen keuangan setelah patch tetap harus diverifikasi sesudah publikasi. Hasil paket sebelumnya di bawah adalah catatan historis, bukan pengganti pemeriksaan tersebut.
+
 ## Perbaikan pembaca akun — 22 Oktober 2026
 
 Patch **SenzuHome-Accurate-Mapping-Fix.zip** berisi **3 file**: src/server/accurateSyncProvider.ts, tests/accurateSync.test.mjs, dan docs/ACCURATE-SYNC.md. Source terbaru dibaca dari main commit 447d5e3 sebelum patch dibuat.

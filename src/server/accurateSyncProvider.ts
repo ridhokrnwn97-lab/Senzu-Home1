@@ -5,6 +5,12 @@ import { ACCURATE_SYNC_DATABASE_ID } from '../lib/accurateSyncContracts.ts';
 export const syncFailure = (code: string, review = false) => Object.assign(new Error(code), { code, review });
 export const normalizeAccurate = (v: unknown) => typeof v === 'string' ? v.normalize('NFKC').toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
 export const positiveId = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
+export function matchesAccurateCustomerNo(expected: string, ...aliases: unknown[]) {
+  const supplied = aliases.filter(v => v !== undefined);
+  // Customer responses use customerNo; older projections may expose no.
+  // Never prefer one alias when another supplied value contradicts it.
+  return supplied.length > 0 && supplied.every(v => typeof v === 'string' && v === expected);
+}
 export type AccurateDocumentKind = 'customer' | 'down_payment' | 'receipt' | 'invoice';
 const resource = (kind: AccurateDocumentKind) => kind === 'customer' ? 'customer' : kind === 'receipt' ? 'sales-receipt' : 'sales-invoice';
 export function syncCredentialsConfigured(env: NodeJS.ProcessEnv) {
@@ -92,13 +98,17 @@ export function createAccurateSyncProvider(deps: Dependencies) {
     const origin = cloud(db.host);
     const get = (path: string, query: Record<string, string>) => request(`${origin}/accurate/api/${path}?${new URLSearchParams(query)}`, 'GET');
     async function lookup(kind: AccurateDocumentKind, number: string) {
-      const type = resource(kind), field = kind === 'customer' ? 'no' : 'number';
-      const rows = await get(`${type}/list.do`, { fields: `id,${field}`, [`filter.${field}.op`]: 'EQUAL',
-        [`filter.${field}.val`]: number, 'sp.page': '1', 'sp.pageSize': '2' });
-      if (!Array.isArray(rows) || rows.length > 1 || rows.some(row => !positiveId(row?.id) || row[field] !== number)) throw syncFailure('ACCURATE_DOCUMENT_COLLISION', true);
+      const type = resource(kind), filterField = kind === 'customer' ? 'no' : 'number';
+      const responseField = kind === 'customer' ? 'customerNo' : 'number';
+      const matchesNumber = (row: any) => kind === 'customer' ? matchesAccurateCustomerNo(number, row?.customerNo, row?.no) : row?.number === number;
+      // Accurate's customer filter is filter.no, but its response field is
+      // customerNo. Keep the filter and projection distinct.
+      const rows = await get(`${type}/list.do`, { fields: `id,${responseField}`, [`filter.${filterField}.op`]: 'EQUAL',
+        [`filter.${filterField}.val`]: number, 'sp.page': '1', 'sp.pageSize': '2' });
+      if (!Array.isArray(rows) || rows.length > 1 || rows.some(row => !positiveId(row?.id) || !matchesNumber(row))) throw syncFailure('ACCURATE_DOCUMENT_COLLISION', true);
       if (!rows.length) return null;
       const detail = await get(`${type}/detail.do`, { id: String(rows[0].id) });
-      if (!detail || detail.id !== rows[0].id || detail[field] !== number) throw syncFailure('ACCURATE_DOCUMENT_COLLISION', true);
+      if (!detail || detail.id !== rows[0].id || !matchesNumber(detail)) throw syncFailure('ACCURATE_DOCUMENT_COLLISION', true);
       return detail;
     }
     async function masters(itemCode?: string) {

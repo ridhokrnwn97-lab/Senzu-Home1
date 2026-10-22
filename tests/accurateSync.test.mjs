@@ -7,6 +7,7 @@ import { transformSync } from 'esbuild';
 import { createHash, createHmac } from 'node:crypto';
 import express from 'express';
 import { createAccurateSync, registerAccurateSync } from '../src/server/accurateSync.ts';
+import { createAccurateSyncProvider } from '../src/server/accurateSyncProvider.ts';
 import { createXenditLive } from '../src/server/xenditLive.ts';
 import { liveQuoteSeal } from '../src/server/xenditLiveQuote.ts';
 import { ACCURATE_MASTERS, ACCURATE_APP_KEY, ACCURATE_APP_NAME, ACCURATE_COMPANY } from '../src/lib/accurateContracts.ts';
@@ -104,7 +105,8 @@ function fixture() {
     if (action === 'list.do') {
       assert.equal(init.method, 'GET'); const number = url.searchParams.get(`filter.${type === 'customer' ? 'no' : 'number'}.val`);
       assert.equal(url.searchParams.get(`filter.${type === 'customer' ? 'no' : 'number'}.op`), 'EQUAL');
-      return Response.json({ s: true, d: [...remote.values()].filter(v => v._type === type && (v.no || v.number) === number).map(v => ({ id: v.id, [type === 'customer' ? 'no' : 'number']: number })) });
+      assert.equal(url.searchParams.get('fields'), type === 'customer' ? 'id,customerNo' : 'id,number');
+      return Response.json({ s: true, d: [...remote.values()].filter(v => v._type === type && (type === 'customer' ? v.customerNo : v.number) === number).map(v => ({ id: v.id, [type === 'customer' ? 'customerNo' : 'number']: number })) });
     }
     if (action === 'detail.do') return Response.json({ s: true, d: [...remote.values()].find(v => v._type === type && v.id === Number(url.searchParams.get('id'))) });
     assert.equal(init.method, 'POST'); assert.equal(payload.id, undefined, 'never update existing provider records');
@@ -112,10 +114,14 @@ function fixture() {
     if (absentKind === kind) throw new Error(`fixture unavailable ${token} ${secret}`);
     const id = remote.size + 100, common = { id, _type: type, currency: { code: 'IDR' }, ...payload };
     let d;
-    if (kind === 'customer') d = { ...common, no: payload.customerNo };
-    else if (kind === 'down_payment') d = { ...common, invoiceDp: true, totalAmount: payload.dpAmount, taxable: payload.isTaxable, customer: { no: payload.customerNo } };
-    else if (kind === 'receipt') d = { ...common, bank: { no: payload.bankNo }, customer: { no: payload.customerNo }, detailInvoice: payload.detailInvoice.map(x => ({ invoice: { number: x.invoiceNo }, paymentAmount: x.paymentAmount })) };
-    else d = { ...common, customer: { no: payload.customerNo }, totalAmount: payload.detailItem.reduce((s, v) => s + v.unitPrice * v.quantity, 0) + payload.detailExpense.reduce((s, v) => s + v.expenseAmount, 0) - payload.cashDiscount, primeOwing: 0 };
+    if (kind === 'customer') {
+      d = { ...common, customerReceivableAccountList: [{ no: '110301' }], customerDownPaymentAccountList: [{ no: '210102' }] };
+      delete d.number; delete d.customerReceivableAccountListNo; delete d.customerDownPaymentAccountListNo;
+    }
+    else if (kind === 'down_payment') d = { ...common, invoiceDp: true, totalAmount: payload.dpAmount, taxable: payload.isTaxable, customer: { customerNo: payload.customerNo } };
+    else if (kind === 'receipt') d = { ...common, bank: { no: payload.bankNo }, customer: { customerNo: payload.customerNo }, detailInvoice: payload.detailInvoice.map(x => ({ invoice: { number: x.invoiceNo }, paymentAmount: x.paymentAmount })) };
+    else d = { ...common, customer: { customerNo: payload.customerNo }, totalAmount: payload.detailItem.reduce((s, v) => s + v.unitPrice * v.quantity, 0) + payload.detailExpense.reduce((s, v) => s + v.expenseAmount, 0) - payload.cashDiscount, primeOwing: 0 };
+    if (kind !== 'customer') delete d.customerNo;
     assert.equal(remote.has(`${type}/${payload.customerNo && kind === 'customer' ? payload.customerNo : payload.number}`), false, 'no duplicate POST');
     remote.set(`${type}/${kind === 'customer' ? payload.customerNo : payload.number}`, d);
     if (lostKind === kind) { lostKind = null; throw new Error(`fixture lost ${secret}`); }
@@ -301,6 +307,122 @@ test('lost DP response is reconciled on retry without a second POST', async () =
   const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v); f.lose('down_payment'); await f.service.runOnce();
   assert.equal(f.job(v).state, 'review'); assert.equal(f.posts('create-down-payment.do').length, 1);
   await f.service.retry(req({ bookingId: v.booking.id })); assert.equal(f.job(v).state, 'waiting_service'); assert.equal(f.posts('create-down-payment.do').length, 1);
+});
+test('customer lookup reads customerNo, keeps filter.no and verifies every supplied identity alias', async () => {
+  const number = 'SHC-offline_customer';
+  for (const shape of [{ customerNo: number }, { no: number }, { customerNo: number, no: number }]) {
+    const f = fixture();
+    f.respond(({ url }) => {
+      if (url.pathname.endsWith('customer/list.do')) {
+        assert.equal(url.searchParams.get('fields'), 'id,customerNo');
+        assert.equal(url.searchParams.get('filter.no.op'), 'EQUAL');
+        assert.equal(url.searchParams.get('filter.no.val'), number);
+        assert.equal(url.searchParams.has('filter.customerNo.val'), false);
+        return Response.json({ s: true, d: [{ id: 123, ...shape }] });
+      }
+      if (url.pathname.endsWith('customer/detail.do')) return Response.json({ s: true, d: { id: 123, ...shape, notes: 'fixture' } });
+    });
+    const api = await createAccurateSyncProvider(f.deps).connect(f.clock() + 60000);
+    assert.deepEqual(await api.lookup('customer', number), { id: 123, ...shape, notes: 'fixture' });
+    assert.equal(f.posts().length, 0);
+  }
+});
+test('missing, malformed, conflicting, duplicate or changed customer identities block lookup without POST', async () => {
+  const number = 'SHC-offline_customer';
+  const bad = [{}, { number }, { customerNo: 'foreign' }, { customerNo: '' }, { customerNo: null },
+    { customerNo: 123 }, { customerNo: number, no: 'foreign' }, { customerNo: number, no: null }];
+  for (const stage of ['list', 'detail']) for (const shape of bad) {
+    const f = fixture();
+    f.respond(({ url }) => {
+      if (url.pathname.endsWith('customer/list.do')) return Response.json({ s: true, d: [{ id: 123, ...(stage === 'list' ? shape : { customerNo: number }) }] });
+      if (url.pathname.endsWith('customer/detail.do')) return Response.json({ s: true, d: { id: 123, ...(stage === 'detail' ? shape : { customerNo: number }) } });
+    });
+    const api = await createAccurateSyncProvider(f.deps).connect(f.clock() + 60000);
+    await rejects(api.lookup('customer', number), 'ACCURATE_DOCUMENT_COLLISION'); assert.equal(f.posts().length, 0);
+  }
+  for (const mismatch of ['duplicate', 'id']) {
+    const f = fixture();
+    f.respond(({ url }) => {
+      if (url.pathname.endsWith('customer/list.do')) return Response.json({ s: true, d: mismatch === 'duplicate' ?
+        [{ id: 123, customerNo: number }, { id: 124, customerNo: number }] : [{ id: 123, customerNo: number }] });
+      if (url.pathname.endsWith('customer/detail.do')) return Response.json({ s: true, d: { id: 124, customerNo: number } });
+    });
+    const api = await createAccurateSyncProvider(f.deps).connect(f.clock() + 60000);
+    await rejects(api.lookup('customer', number), 'ACCURATE_DOCUMENT_COLLISION'); assert.equal(f.posts().length, 0);
+  }
+});
+test('saved customer from a parked collision recovers after restart with the original sending receipt and no second customer POST', async () => {
+  const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v);
+  const beforeBooking = structuredClone(f.db.data.get(`bookings/${v.booking.id}`));
+  const beforePayment = structuredClone(f.db.data.get(`payments/${v.payment.id}`));
+  // Emulate the old field selection: the customer is saved but its number is
+  // absent from the requested projection. The durable sending receipt survives.
+  f.respond(({ url }) => url.pathname.endsWith('customer/list.do') && f.remote.size ?
+    Response.json({ s: true, d: [{ id: [...f.remote.values()][0].id }] }) : null);
+  await f.service.runOnce(); assert.equal(f.job(v).issue, 'ACCURATE_DOCUMENT_COLLISION');
+  assert.equal(f.posts().length, 1); assert.equal(f.posts('customer/save.do').length, 1);
+  const [opPath, op] = [...f.db.data].find(([path]) => path.startsWith('accurate_sync_operations/'));
+  const original = structuredClone(op); assert.equal(original.state, 'sending');
+  assert.equal(original.fingerprint, h({ ...f.posts('customer/save.do')[0].payload, name: null, transDate: null }));
+  f.respond(null); const restarted = createAccurateSync(f.deps);
+  await restarted.retry(req({ bookingId: v.booking.id }));
+  assert.equal(f.job(v).state, 'waiting_service'); assert.equal(f.posts('customer/save.do').length, 1);
+  assert.equal(f.posts('create-down-payment.do').length, 1); assert.equal(f.posts('sales-receipt/save.do').length, 1);
+  assert.equal(f.db.data.get(opPath).state, 'confirmed'); assert.equal(f.db.data.get(opPath).fingerprint, original.fingerprint);
+  assert.equal(f.db.data.get(opPath).createdAt, original.createdAt);
+  assert.deepEqual(f.db.data.get(`bookings/${v.booking.id}`), beforeBooking);
+  assert.deepEqual(f.db.data.get(`payments/${v.payment.id}`), beforePayment);
+  await restarted.retry(req({ bookingId: v.booking.id })); assert.equal(f.posts().length, 3);
+});
+test('lost customer response recovers by canonical number and missing customer is never recreated', async () => {
+  for (const saved of [true, false]) {
+    const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v);
+    if (saved) f.lose('customer'); else f.absent('customer');
+    await f.service.runOnce(); assert.equal(f.job(v).issue, 'ACCURATE_DOCUMENT_UNCERTAIN');
+    assert.equal(f.posts('customer/save.do').length, 1); f.absent(null);
+    const restarted = createAccurateSync(f.deps); await restarted.retry(req({ bookingId: v.booking.id }));
+    assert.equal(f.posts('customer/save.do').length, 1);
+    assert.equal(f.job(v).state, saved ? 'waiting_service' : 'review');
+    assert.equal(f.posts().length, saved ? 3 : 1);
+  }
+});
+test('customer recovery retains ownership and account validation, including legacy detail responses', async () => {
+  for (const shape of ['legacy', 'marker', 'receivable', 'down_payment']) {
+    const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v); f.lose('customer');
+    await f.service.runOnce(); const customer = [...f.remote.values()][0];
+    if (shape === 'legacy') f.respond(({ url }) => {
+      if (!url.pathname.endsWith('customer/detail.do')) return null;
+      const d = { ...customer, no: customer.customerNo }; delete d.customerNo;
+      return Response.json({ s: true, d });
+    });
+    if (shape === 'marker') customer.notes = 'foreign customer';
+    if (shape === 'receivable') customer.customerReceivableAccountList = [{ no: 'foreign' }];
+    if (shape === 'down_payment') customer.customerDownPaymentAccountList = [{ no: 'foreign' }];
+    await f.service.retry(req({ bookingId: v.booking.id }));
+    assert.equal(f.posts('customer/save.do').length, 1);
+    assert.equal(f.job(v).state, shape === 'legacy' ? 'waiting_service' : 'review');
+    if (shape !== 'legacy') { assert.equal(f.job(v).issue, 'ACCURATE_DOCUMENT_MISMATCH'); assert.equal(f.posts().length, 1); }
+  }
+});
+test('financial customer references accept canonical and legacy aliases only when all supplied values agree', async () => {
+  for (const stage of ['down_payment', 'receipt', 'invoice']) for (const shape of ['canonical', 'legacy', 'root', 'agree', 'conflict', 'null', 'missing']) {
+    const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v);
+    f.advance(10000); Object.assign(f.db.data.get(`bookings/${v.booking.id}`), { status: 'Completed', completedAt: new Date(f.clock()).toISOString() });
+    await f.service.runOnce(); assert.equal(f.job(v).state, 'complete');
+    const doc = [...f.remote.values()].find(d => stage === 'receipt' ? d._type === 'sales-receipt' : d._type === 'sales-invoice' && d.invoiceDp === (stage === 'down_payment'));
+    const number = doc.customer.customerNo; delete doc.customerNo;
+    if (shape === 'legacy') doc.customer = { no: number };
+    if (shape === 'root') { delete doc.customer; doc.customerNo = number; }
+    if (shape === 'agree') { doc.customer = { customerNo: number, no: number }; doc.customerNo = number; }
+    if (shape === 'conflict') { doc.customer.no = number; doc.customerNo = 'foreign'; }
+    if (shape === 'null') doc.customer.no = null;
+    if (shape === 'missing') doc.customer = {};
+    // Revisit an existing job without resetting any operation receipts.
+    Object.assign(f.job(v), { state: 'review', issue: 'ACCURATE_DOCUMENT_MISMATCH' });
+    await f.service.retry(req({ bookingId: v.booking.id }));
+    assert.equal(f.job(v).state, ['conflict', 'null', 'missing'].includes(shape) ? 'review' : 'complete');
+    assert.equal(f.posts().length, 4, 'rechecking existing documents never sends another financial POST');
+  }
 });
 test('uncertain create with no provider record is never resent, including explicit retry', async () => {
   const f = fixture(); f.activateControl(); const v = f.booking(); await f.queue(v); f.absent('down_payment'); await f.service.runOnce();
