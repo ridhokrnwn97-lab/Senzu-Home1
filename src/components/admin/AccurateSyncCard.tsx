@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import type { StaffUser } from '../../types';
-import { ACCURATE_NET_PREVIEW_ERRORS, type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview } from '../../lib/accurateSyncContracts';
+import { ACCURATE_NET_PREVIEW_ERRORS, XENDIT_STATE_EXPECTED, xenditObservedStateLabel,
+  type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview, type AccurateXenditStateDiagnostic } from '../../lib/accurateSyncContracts';
 import { accurateSyncAction, accurateSyncPreview, accurateXenditNetPreview } from '../../lib/accurateSyncService';
 
 const money = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
@@ -12,13 +13,14 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   const allowed = ['manager', 'admin'].includes(currentUser.role);
   const [status, setStatus] = useState<AccurateSyncStatus | null>(null), [preview, setPreview] = useState<AccurateSyncPreview | null>(null);
   const [netPreview, setNetPreview] = useState<AccurateXenditNetPreview | null>(null);
+  const [stateDiagnostic, setStateDiagnostic] = useState<AccurateXenditStateDiagnostic | null>(null);
   const [booking, setBooking] = useState(''), [ack, setAck] = useState(false), [tax, setTax] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const generation = useRef(0), flight = useRef(false), controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const off = onAuthStateChanged(auth, user => {
       const version = ++generation.current; controller.current?.abort(); controller.current = null;
-      flight.current = false; setBusy(false); setStatus(null); setPreview(null); setNetPreview(null); setBooking(''); setAck(false); setTax(false); setError('');
+      flight.current = false; setBusy(false); setStatus(null); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setBooking(''); setAck(false); setTax(false); setError('');
       if (!user || !allowed) return;
       const c = new AbortController(); controller.current = c; flight.current = true; setBusy(true);
       accurateSyncAction('status', undefined, c.signal).then(v => { if (generation.current === version) setStatus(v); })
@@ -36,8 +38,9 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
     if (action === 'status') setStatus(null);
     try {
       if (action === 'netPreview') {
-        setNetPreview(null); setAck(false); setTax(false);
-        const v = await accurateXenditNetPreview(normalized, c.signal); if (generation.current === version) setNetPreview(v);
+        setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false);
+        const v = await accurateXenditNetPreview(normalized, c.signal);
+        if (generation.current === version) { if (v.mode === 'xendit_state_diagnostic_v1') setStateDiagnostic(v); else setNetPreview(v); }
       } else if (action === 'preview') {
         setPreview(null); setAck(false); setTax(false);
         const v = await accurateSyncPreview(normalized, c.signal); if (generation.current === version) setPreview(v);
@@ -74,7 +77,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
     <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
       <h4 className="font-semibold">Pratinjau booking dan periksa pemetaan</h4>
       <p>Pratinjau hanya membaca data. Gunakan kode booking yang sudah dibayar melalui Xendit Live untuk memeriksa akun, layanan, dan rincian nominal.</p>
-      <label className="block">Kode atau ID booking<input aria-label="Booking untuk pratinjau Accurate" value={booking} disabled={busy} onChange={e => { setBooking(e.target.value); setPreview(null); setNetPreview(null); setAck(false); setTax(false); setError(''); }} placeholder="SH-261022-NUOUN atau bk_SH-…" className="mt-1 block min-h-[44px] w-full rounded-lg border p-2" /></label>
+      <label className="block">Kode atau ID booking<input aria-label="Booking untuk pratinjau Accurate" value={booking} disabled={busy} onChange={e => { setBooking(e.target.value); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false); setError(''); }} placeholder="SH-261022-NUOUN atau bk_SH-…" className="mt-1 block min-h-[44px] w-full rounded-lg border p-2" /></label>
       <div className="flex flex-wrap gap-3">
         <button type="button" className={button} disabled={busy || !normalized} onClick={() => act('preview')}>Pratinjau Tanpa Mencatat</button>
         <button type="button" className={button} disabled={busy || !normalized} onClick={() => act('netPreview')}>Pratinjau Biaya &amp; Neto Xendit</button>
@@ -84,6 +87,18 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
         <p><strong>{preview.bookingCode}</strong> · {preview.itemCode || 'Belum dipetakan'}</p>
         <p>Layanan {money(preview.servicePrice)} + kunjungan {money(preview.visitFee)} − diskon {money(preview.discount)} = <strong>{money(preview.amount)}</strong>.</p>
         <p>{preview.note}</p><p>Pratinjau ini tidak membuat dokumen atau memasukkan booking ke antrean.</p>
+      </div>}
+      {stateDiagnostic && <div role="alert" aria-label="Pemeriksaan status API Xendit" className="space-y-3 rounded-lg bg-amber-50 p-3 text-amber-950">
+        <h4 className="font-semibold">Status API Xendit perlu diperiksa</h4>
+        <p><strong>{stateDiagnostic.bookingCode}</strong> · Neto belum terverifikasi.</p>
+        <div className="overflow-x-auto"><table className="w-full text-left text-xs"><caption className="mb-2 text-left">Perbandingan status yang dibaca dari API</caption>
+          <thead><tr><th scope="col" className="p-1">Kolom</th><th scope="col" className="p-1">Dari API</th><th scope="col" className="p-1">Disyaratkan</th></tr></thead>
+          <tbody>{(['type', 'status', 'cashflow'] as const).map(field => <tr key={field} className="border-t border-amber-200">
+            <th scope="row" className="p-1">{field}</th><td className="p-1">{xenditObservedStateLabel(stateDiagnostic.checks[field])}</td><td className="p-1">{XENDIT_STATE_EXPECTED[field]}</td>
+          </tr>)}</tbody>
+        </table></div>
+        <p>Diperiksa {new Date(stateDiagnostic.checkedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB. Nilai tidak dikenali disembunyikan.</p>
+        <p>Ini hasil pemeriksaan status, bukan konfirmasi neto. Tidak ada pencatatan biaya atau perubahan pembayaran.</p>
       </div>}
       {netPreview && <div role="status" aria-label="Hasil biaya dan neto Xendit" className="space-y-3 rounded-lg bg-blue-50 p-3 text-blue-950">
         <p><strong>{netPreview.bookingCode}</strong> · {netPreview.channelCategory} / {netPreview.channelCode}</p>

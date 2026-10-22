@@ -1,5 +1,50 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
+## Rincian pemeriksaan tiga kolom status API — 22 Oktober 2026
+
+Paket **SenzuHome-Xendit-State-Diagnostic.zip** berisi **8 file**, berdasarkan source main terbaru `1dc366194bf5717372b25459a737d4f34a76c015`, setelah paket Neto Validation digabung:
+
+1. src/server/xenditNetPreview.ts
+2. src/server/accurateSync.ts
+3. src/lib/accurateSyncContracts.ts
+4. src/lib/accurateSyncService.ts
+5. src/components/admin/AccurateSyncCard.tsx
+6. tests/accurateSync.test.mjs
+7. tests/accurateSyncUi.test.mjs
+8. docs/ACCURATE-SYNC.md
+
+### Bukti publik sebelum paket ini
+
+Setelah Republish, pembacaan satu kali untuk **SH-261022-NUOUN** menampilkan **Jenis, status sukses, atau arah dana transaksi Xendit belum cocok sebagai pembayaran masuk**. Pada urutan validasi source yang diperiksa, pemeriksaan business ID, referensi, product/payment ID, bruto dan mata uang sudah melewati penolakan sebelumnya. Ini belum membuktikan biaya maupun neto API berhasil diverifikasi, karena pemeriksaan fee berada setelah tiga kolom status.
+
+Transaksi yang sama dibuka langsung di dashboard Xendit: **Successful**, **Payment**, **Settled**, bruto **Rp160.000**, biaya transaksi **Rp9.000**, PPN biaya **Rp990**, neto **Rp150.010**. Tampilan dashboard tersebut tidak menunjukkan nilai mentah ketiga kolom API. Percobaan melihat pilihan ekspor dibatalkan karena memerlukan pengiriman email; tidak ada email atau transaksi baru yang dibuat.
+
+Pesan versi sebelumnya masih menggabungkan `type`, `status` dan `cashflow`, sehingga kolom dan nilai penyebab kasus publik **belum diketahui**. Paket ini menambah rincian pemeriksaan agar ketiganya dapat dilihat sekaligus. Paket ini tidak menyatakan penyebab sudah diperbaiki atau menambahkan status sukses alternatif.
+
+### Yang ditampilkan
+
+Tombol **Pratinjau Biaya & Neto Xendit** tetap memakai satu GET Transaction API yang sama. Bila tiga kolom tersebut belum persis `PAYMENT / SUCCESS / MONEY_IN`, hasil dibedakan sebagai **pemeriksaan status**, bukan hasil neto terverifikasi. Panel menampilkan judul **Status API Xendit perlu diperiksa**, kode booking, waktu pembacaan dan tabel tiga kolom:
+
+| Kolom | Disyaratkan untuk hasil neto terverifikasi |
+| --- | --- |
+| type | PAYMENT |
+| status | SUCCESS |
+| cashflow | MONEY_IN |
+
+Nilai yang boleh ditampilkan berasal dari daftar enum tetap pada kode. Field yang hilang, null, salah tipe, kapitalisasi berbeda atau tidak dikenali diberi penanda tersendiri. String di luar daftar disembunyikan, tidak dicetak sebagai payload atau dimasukkan ke log. Contoh enum seperti VA_PAYMENT, SUCCESSFUL atau CREDIT hanya diperbolehkan untuk **diagnostik**, bukan diterima sebagai pembayaran sukses.
+
+Kontrak hasil pemeriksaan memakai mode `xendit_state_diagnostic_v1`, `readOnly: true`, `verified: false`, tanpa nominal bruto/fee/neto, nomor rekening atau raw respons. HTTP `success: true` hanya berarti operasi membaca data selesai, bukan pembayaran/neto diverifikasi. Hasil neto yang lolos semua pemeriksaan tetap memakai mode `xendit_net_preview_v1` yang sudah ada. Pembaca browser menolak hasil diagnostik dengan identitas booking berbeda, field tambahan, nilai enum palsu, flag verifikasi true atau nominal finansial yang disisipkan.
+
+Otorisasi Manager dan seluruh sumber booking/pembayaran tetap diperiksa lagi setelah API dibaca, termasuk ketika hasil berupa diagnostik. Hasil neto lama dibuang sebelum pemeriksaan ulang; rincian pemeriksaan dibersihkan saat kode booking diganti, logout atau pergantian akun. Kegagalan ini tidak menghilangkan tampilan status Accurate yang sudah dimuat.
+
+### Pemasangan
+
+Unggah **8 file** sesuai folder ke GitHub, merge, **Pull Changes → Republish**. Tinjau diff jika source main sudah berubah. Tidak perlu Secret baru, aktivasi ulang atau pembayaran baru. Setelah publikasi selesai, baca sekali booking **SH-261022-NUOUN** melalui tombol **Pratinjau Biaya & Neto Xendit**. Rincian tiga kolom harus diperiksa sebelum menentukan perbaikan kompatibilitas berikutnya. Jangan mengubah status booking atau menganggap nilai status yang belum cocok otomatis sukses.
+
+Paket hanya menambah keluaran pemeriksaan baca saja. Tidak ada perubahan penagihan pelanggan, webhook/Payment Session, sumber konfirmasi lunas, pembayaran manual, Meta Pixel, antrean atau bukti operasi Accurate. Tidak ada pembuatan dokumen fee/pajak/pencairan atau penarikan dana. Pengujian lokal tidak menggantikan pembacaan API publik setelah paket ini diterbitkan.
+
+Validasi lokal pada **Node.js 22.23.4**: **166/166 grup pengujian lulus**, pemeriksaan TypeScript, build dan impor native backend lulus. Regresi baru memeriksa tiga kolom secara bersamaan; field hilang/null/salah tipe/kapitalisasi berbeda; penyembunyian string di luar daftar; pemeriksaan ulang akses/sumber setelah pembacaan diagnostik; hasil HTTP yang tetap verified false tanpa nominal finansial; pembuangan neto lama; serta pergantian akun dan respons diagnostik palsu. Seluruh suite Accurate dan Xendit Test/Live tetap dijalankan dengan fixture lokal.
+
 ## Perbaikan validasi dan pesan pratinjau neto — 22 Oktober 2026
 
 Paket **SenzuHome-Xendit-Neto-Validation.zip** berisi **6 file**. Basis source terbaru main commit `33fa1a1313125d9140a3ab1d46606bdb0eecad6a`, setelah paket 8 file pratinjau neto digabung.

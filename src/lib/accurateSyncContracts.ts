@@ -26,6 +26,51 @@ export type AccurateXenditNetPreview = {
   feeStatus: 'COMPLETED'; settlementStatus: 'SETTLED'; transactionUpdatedAt: string; checkedAt: string;
   processingFeeIncluded: false; bankPayoutVerified: false;
 };
+export const XENDIT_STATE_EXPECTED = { type: 'PAYMENT', status: 'SUCCESS', cashflow: 'MONEY_IN' } as const;
+export const XENDIT_STATE_VALUES: Record<keyof typeof XENDIT_STATE_EXPECTED, readonly string[]> = {
+  type: ['PAYMENT', 'IN_PERSON_PAYMENT', 'REFUND', 'WITHDRAWAL', 'DISBURSEMENT', 'TRANSFER_IN', 'TRANSFER_OUT', 'TOPUP',
+    'CONVERSION', 'OTHER', 'ADJUSTMENT_ADD', 'ADJUSTMENT_DEDUCT', 'VA_PAYMENT', 'VIRTUAL_ACCOUNT', 'CAPTURE', 'PAYMENT_CAPTURE'],
+  status: ['PENDING', 'SUCCESS', 'FAILED', 'VOIDED', 'REVERSED', 'SUCCESSFUL', 'SUCCEEDED', 'COMPLETED', 'SETTLED', 'PAID', 'CANCELED', 'CANCELLED'],
+  cashflow: ['MONEY_IN', 'MONEY_OUT', 'IN', 'OUT', 'CREDIT', 'DEBIT'],
+};
+export type XenditObservedState = { kind: 'known' | 'case_variant' | 'missing' | 'null' | 'unrecognized' | 'invalid_type'; value: string | null };
+export type AccurateXenditStateDiagnostic = {
+  mode: 'xendit_state_diagnostic_v1'; environment: 'live'; readOnly: true; verified: false; bookingCode: string; checkedAt: string;
+  checks: Record<keyof typeof XENDIT_STATE_EXPECTED, XenditObservedState>;
+};
+export type AccurateXenditNetResult = AccurateXenditNetPreview | AccurateXenditStateDiagnostic;
+export function observeXenditState(field: keyof typeof XENDIT_STATE_EXPECTED, raw: unknown): XenditObservedState {
+  if (raw === undefined) return { kind: 'missing', value: null };
+  if (raw === null) return { kind: 'null', value: null };
+  if (typeof raw !== 'string') return { kind: 'invalid_type', value: null };
+  if (XENDIT_STATE_VALUES[field].includes(raw)) return { kind: 'known', value: raw };
+  // A finite whitelist allows useful enum diagnostics, never arbitrary provider
+  // strings, credentials, personal data, IDs or raw payloads. No trim/coercion is
+  // performed and case variants remain unverified.
+  if (XENDIT_STATE_VALUES[field].includes(raw.toUpperCase())) return { kind: 'case_variant', value: raw.toUpperCase() };
+  return { kind: 'unrecognized', value: null };
+}
+export function isAccurateXenditStateDiagnostic(value: unknown): value is AccurateXenditStateDiagnostic {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, any>, fields = Object.keys(XENDIT_STATE_EXPECTED) as Array<keyof typeof XENDIT_STATE_EXPECTED>;
+  if (Object.keys(v).some(k => !['success', 'mode', 'environment', 'readOnly', 'verified', 'bookingCode', 'checkedAt', 'checks'].includes(k)) ||
+      Object.hasOwn(v, 'success') && v.success !== true || v.mode !== 'xendit_state_diagnostic_v1' || v.environment !== 'live' ||
+      v.readOnly !== true || v.verified !== false || typeof v.bookingCode !== 'string' || !/^SH-\d{6}-[A-Z0-9]{5,20}$/.test(v.bookingCode) ||
+      typeof v.checkedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(v.checkedAt) || !Number.isFinite(Date.parse(v.checkedAt)) ||
+      !v.checks || typeof v.checks !== 'object' || Array.isArray(v.checks) || Object.keys(v.checks).length !== 3 ||
+      Object.keys(v.checks).some(k => !fields.includes(k as keyof typeof XENDIT_STATE_EXPECTED))) return false;
+  return fields.every(field => {
+    const s = v.checks[field];
+    return s && typeof s === 'object' && !Array.isArray(s) && Object.keys(s).length === 2 && Object.hasOwn(s, 'kind') && Object.hasOwn(s, 'value') &&
+      (['known', 'case_variant'].includes(s.kind) ? typeof s.value === 'string' && XENDIT_STATE_VALUES[field].includes(s.value) :
+        ['missing', 'null', 'unrecognized', 'invalid_type'].includes(s.kind) && s.value === null);
+  }) && fields.some(field => v.checks[field].kind !== 'known' || v.checks[field].value !== XENDIT_STATE_EXPECTED[field]);
+}
+export function xenditObservedStateLabel(state: XenditObservedState) {
+  if (state.kind === 'known') return state.value!;
+  if (state.kind === 'case_variant') return `${state.value} (kapitalisasi berbeda)`;
+  return { missing: 'Tidak disediakan', null: 'Null', unrecognized: 'Nilai lain; tidak ditampilkan', invalid_type: 'Tipe data tidak sesuai' }[state.kind];
+}
 export const ACCURATE_NET_PREVIEW_ERRORS: Record<string, string> = {
   XENDIT_NET_NOT_CONFIGURED: 'Key Live atau ID bisnis Xendit di server belum dapat diverifikasi. Jangan kirim nilainya ke chat.',
   XENDIT_TRANSACTION_AUTH_INVALID: 'Xendit menolak autentikasi key Live. Periksa konfigurasi key di server.',

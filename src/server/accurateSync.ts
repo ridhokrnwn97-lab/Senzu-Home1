@@ -2,7 +2,7 @@ import type { Express, Request } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
-  type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetPreview } from '../lib/accurateSyncContracts.ts';
+  type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
 import { readXenditNetPreview } from './xenditNetPreview.ts';
 import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
@@ -185,7 +185,7 @@ export function createAccurateSync(deps: Dependencies) {
       note: historical ? MESSAGES.SYNC_HISTORICAL : blocked ? MESSAGES.SYNC_SOURCE_CHANGED : !commercial.itemCode ? MESSAGES.SYNC_SERVICE_UNMAPPED : 'Data siap untuk pencatatan setelah aktivasi.',
       ...numbers(jobId(v.booking.id)) };
   }
-  async function netPreview(req: Request): Promise<AccurateXenditNetPreview> {
+  async function netPreview(req: Request): Promise<AccurateXenditNetResult> {
     const uid = await actor(req, ['bookingId']), bookingId = req.body.bookingId;
     if (!safeId(bookingId)) throw fail(400, 'INVALID_SYNC_REQUEST');
     rate(`netPreview:${uid}`, 3);

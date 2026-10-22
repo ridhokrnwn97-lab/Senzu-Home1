@@ -11,7 +11,7 @@ import { createAccurateSyncProvider } from '../src/server/accurateSyncProvider.t
 import { createXenditLive } from '../src/server/xenditLive.ts';
 import { liveQuoteSeal } from '../src/server/xenditLiveQuote.ts';
 import { ACCURATE_MASTERS, ACCURATE_APP_KEY, ACCURATE_APP_NAME, ACCURATE_COMPANY } from '../src/lib/accurateContracts.ts';
-import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET } from '../src/lib/accurateSyncContracts.ts';
+import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, isAccurateXenditStateDiagnostic } from '../src/lib/accurateSyncContracts.ts';
 const h = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const sourceText = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('server.ts', sourceText, ts.ScriptTarget.Latest, true);
@@ -578,7 +578,7 @@ test('net preview rejects body overrides and invalid Live configuration without 
     const f = netFixture(); change(f); await rejects(f.net(), 'XENDIT_NET_NOT_CONFIGURED'); assert.equal(f.netCalls.length, 0); assert.deepEqual(f.db.writes, []);
   }
 });
-test('net preview rejects mismatched identity, amount, currency, cashflow and unsuccessful or non-payment transactions', async () => {
+test('net preview blocks mismatched identity and amounts; unsuccessful or non-payment states produce diagnostics without net values', async () => {
   const issues = { business_id: 'XENDIT_BUSINESS_MISMATCH', reference_id: 'XENDIT_REFERENCE_MISMATCH', product_id: 'XENDIT_PRODUCT_MISMATCH',
     amount: 'XENDIT_AMOUNT_MISMATCH', currency: 'XENDIT_CURRENCY_UNVERIFIED', net_amount_currency: 'XENDIT_CURRENCY_UNVERIFIED',
     cashflow: 'XENDIT_STATE_UNVERIFIED', status: 'XENDIT_STATE_UNVERIFIED', type: 'XENDIT_STATE_UNVERIFIED',
@@ -587,7 +587,12 @@ test('net preview rejects mismatched identity, amount, currency, cashflow and un
     ['product_id', 'va_payment_123e4567-e89b-12d3-a456-426614174000'], ['product_id', null], ['amount', 160001], ['amount', '160000'],
     ['currency', 'USD'], ['net_amount_currency', 'USD'], ['cashflow', 'MONEY_OUT'], ['status', 'REVERSED'], ['status', 'PENDING'],
     ['type', 'WITHDRAWAL'], ['id', 'https://evil.invalid'], ['updated', null], ['channel_code', '<script>']]) {
-    const f = netFixture(); f.row[key] = value; await rejects(f.net(), issues[key]); assert.deepEqual(f.db.writes, []);
+    const f = netFixture(); f.row[key] = value;
+    if (['cashflow', 'status', 'type'].includes(key)) {
+      const diagnostic = await f.net(); assert.equal(isAccurateXenditStateDiagnostic(diagnostic), true); assert.equal(diagnostic.verified, false);
+      assert.equal(diagnostic.checks[key].value, value); assert.equal(Object.hasOwn(diagnostic, 'netAmount'), false);
+    } else await rejects(f.net(), issues[key]);
+    assert.deepEqual(f.db.writes, []);
   }
 });
 test('net preview refuses ambiguous or paginated results and never follows navigation URLs', async () => {
@@ -677,5 +682,41 @@ test('specific validation reasons expose neither actual mismatched values nor pr
       f.row[field] = prior;
     }
     assert.deepEqual(f.db.writes, []);
+  } finally { service.stop(); await new Promise(r => server.close(r)); }
+});
+test('all three observed API states are diagnosed together; missing, null, noncanonical and unknown values never verify net or expose raw data', async () => {
+  const privateFixture = 'xnd_production_fixture_private_do_not_render';
+  for (const [raw, kind, value] of [[undefined, 'missing', null], [null, 'null', null], ['money_in', 'case_variant', 'MONEY_IN'],
+    [privateFixture, 'unrecognized', null], [{ private: privateFixture }, 'invalid_type', null], ['MONEY_OUT', 'known', 'MONEY_OUT']]) {
+    const f = netFixture(); f.row.cashflow = raw; const before = structuredClone([...f.db.data]); const diagnostic = await f.net();
+    assert.equal(isAccurateXenditStateDiagnostic(diagnostic), true); assert.equal(diagnostic.mode, 'xendit_state_diagnostic_v1'); assert.equal(diagnostic.verified, false);
+    assert.deepEqual(diagnostic.checks, { type: { kind: 'known', value: 'PAYMENT' }, status: { kind: 'known', value: 'SUCCESS' }, cashflow: { kind, value } });
+    for (const key of ['amount', 'grossAmount', 'netAmount', 'fee', 'xenditFee', 'valueAddedTax', 'productId', 'businessId', 'referenceId']) assert.equal(Object.hasOwn(diagnostic, key), false);
+    assert.equal(JSON.stringify(diagnostic).includes(privateFixture), false); assert.equal(f.netCalls.length, 1); assert.equal(f.calls.length, 0);
+    assert.deepEqual([...f.db.data], before); assert.deepEqual(f.db.writes, []);
+  }
+  const f = netFixture(); Object.assign(f.row, { type: 'VA_PAYMENT', status: 'SUCCESSFUL', cashflow: 'CREDIT' }); const d = await f.net();
+  assert.deepEqual(Object.values(d.checks).map(s => s.value), ['VA_PAYMENT', 'SUCCESSFUL', 'CREDIT']); assert.equal(Object.hasOwn(d, 'netAmount'), false);
+  assert.equal(isAccurateXenditStateDiagnostic({ ...d, verified: true }), false);
+  assert.equal(isAccurateXenditStateDiagnostic({ ...d, checks: { ...d.checks, type: { kind: 'known', value: privateFixture } } }), false);
+  assert.equal(isAccurateXenditStateDiagnostic({ ...d, private: privateFixture }), false);
+});
+test('state diagnostics still reauthorize Manager and recheck the source after the provider read', async () => {
+  for (const change of [f => f.db.data.get('staff_roles/manager').isActive = false,
+    f => f.db.data.get(`bookings/${f.v.booking.id}`).status = 'Completed']) {
+    const f = netFixture(); delete f.row.cashflow; f.state.onRead = () => change(f);
+    await assert.rejects(f.net()); assert.equal(f.netCalls.length, 1); assert.deepEqual(f.db.writes, []);
+  }
+});
+test('diagnostic HTTP success means only a completed read, with verified false and no financial values or raw secrets', async () => {
+  const f = netFixture(), app = express(); app.use(express.json()); const service = registerAccurateSync(app, f.netDeps);
+  f.row.status = 'xnd_production_fixture_private'; f.row.cashflow = null;
+  const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
+  const url = `http://127.0.0.1:${server.address().port}/api/integrations/accurate/sync/netPreview`;
+  try {
+    const response = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer manager', 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId: f.v.booking.id }) });
+    const value = await response.json(); assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /no-store/);
+    assert.equal(value.success, true); assert.equal(value.verified, false); assert.equal(isAccurateXenditStateDiagnostic(value), true);
+    assert.equal(JSON.stringify(value).includes(f.row.status), false); assert.equal(Object.hasOwn(value, 'netAmount'), false); assert.deepEqual(f.db.writes, []);
   } finally { service.stop(); await new Promise(r => server.close(r)); }
 });
