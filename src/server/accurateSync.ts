@@ -4,7 +4,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { ACCURATE_SYNC_ACK, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES,
   type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus } from '../lib/accurateSyncContracts.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
-import { createAccurateSyncProvider, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
+import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
   type AccurateDocumentKind } from './accurateSyncProvider.ts';
 
 const JOBS = 'accurate_sync_jobs', OPS = 'accurate_sync_operations', CONTROL = 'accurate_sync_private';
@@ -310,11 +310,13 @@ export function createAccurateSync(deps: Dependencies) {
         const rows = d[field] || d[`${field}No`];
         return Array.isArray(rows) ? rows.map((r: any) => typeof r === 'string' ? r : r?.no) : [];
       };
-      await ensure('customer', customerNo, customerPayload, d => d.no === customerNo && d.notes === customerMarker &&
+      await ensure('customer', customerNo, customerPayload, d => matchesAccurateCustomerNo(customerNo, d.customerNo, d.no) && d.notes === customerMarker &&
         JSON.stringify(listNo(d, 'customerReceivableAccountList')) === '["110301"]' && JSON.stringify(listNo(d, 'customerDownPaymentAccountList')) === '["210102"]');
       const paidDate = wibDate(v.payment.paidAt), description = (stage: string) => `SENZU_HOME_V1:${a.id}:${stage} | ${v.booking.bookingCode} | ${v.intent.paymentId}`;
       const currency = (d: any) => (d.currency?.code || d.currencyCode) === 'IDR';
-      const customerMatches = (d: any) => (d.customer?.no || d.customerNo) === customerNo;
+      const customerMatches = (d: any) =>
+        (d.customer === undefined || d.customer === null || typeof d.customer === 'object' && !Array.isArray(d.customer)) &&
+        matchesAccurateCustomerNo(customerNo, d.customer?.customerNo, d.customer?.no, d.customerNo);
       await ensure('down_payment', docs.downPaymentNumber, { customerNo, number: docs.downPaymentNumber, dpAmount: a.job.amount,
         transDate: paidDate, currencyCode: 'IDR', isTaxable: false, inclusiveTax: false, description: description('DP') },
       d => d.number === docs.downPaymentNumber && d.invoiceDp === true && d.totalAmount === a.job.amount && currency(d) &&
