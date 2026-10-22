@@ -26,7 +26,13 @@ export type AccurateXenditNetPreview = {
   feeStatus: 'COMPLETED'; settlementStatus: 'SETTLED'; transactionUpdatedAt: string; checkedAt: string;
   processingFeeIncluded: false; bankPayoutVerified: false;
 };
-export const XENDIT_STATE_EXPECTED = { type: 'PAYMENT', status: 'SUCCESS', cashflow: 'MONEY_IN' } as const;
+export const XENDIT_STATE_EXPECTED = { type: 'PAYMENT', status: 'SUCCESS / SUCCESSFUL', cashflow: 'MONEY_IN' } as const;
+// SUCCESS is documented by the Transaction API; SUCCESSFUL was observed on
+// the matched Live transaction and is documented in Xendit's current reports.
+// Accept only these exact spellings, with PAYMENT and MONEY_IN still required.
+export function isXenditSuccessfulIncomingPayment(type: unknown, status: unknown, cashflow: unknown) {
+  return type === 'PAYMENT' && (status === 'SUCCESS' || status === 'SUCCESSFUL') && cashflow === 'MONEY_IN';
+}
 export const XENDIT_STATE_VALUES: Record<keyof typeof XENDIT_STATE_EXPECTED, readonly string[]> = {
   type: ['PAYMENT', 'IN_PERSON_PAYMENT', 'REFUND', 'WITHDRAWAL', 'DISBURSEMENT', 'TRANSFER_IN', 'TRANSFER_OUT', 'TOPUP',
     'CONVERSION', 'OTHER', 'ADJUSTMENT_ADD', 'ADJUSTMENT_DEDUCT', 'VA_PAYMENT', 'VIRTUAL_ACCOUNT', 'CAPTURE', 'PAYMENT_CAPTURE'],
@@ -64,7 +70,8 @@ export function isAccurateXenditStateDiagnostic(value: unknown): value is Accura
     return s && typeof s === 'object' && !Array.isArray(s) && Object.keys(s).length === 2 && Object.hasOwn(s, 'kind') && Object.hasOwn(s, 'value') &&
       (['known', 'case_variant'].includes(s.kind) ? typeof s.value === 'string' && XENDIT_STATE_VALUES[field].includes(s.value) :
         ['missing', 'null', 'unrecognized', 'invalid_type'].includes(s.kind) && s.value === null);
-  }) && fields.some(field => v.checks[field].kind !== 'known' || v.checks[field].value !== XENDIT_STATE_EXPECTED[field]);
+  }) && (fields.some(field => v.checks[field].kind !== 'known') ||
+    !isXenditSuccessfulIncomingPayment(v.checks.type.value, v.checks.status.value, v.checks.cashflow.value));
 }
 export function xenditObservedStateLabel(state: XenditObservedState) {
   if (state.kind === 'known') return state.value!;

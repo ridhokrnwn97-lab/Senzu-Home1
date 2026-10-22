@@ -226,10 +226,23 @@ test('an unverified state diagnostic replaces old net values, compares all three
     await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX02'); assert.equal(await result.count(), 0);
   } finally { await f.context.close(); }
 });
+test('a SUCCESSFUL money-out diagnostic lists both accepted success spellings while withholding net and Meta events', async () => {
+  const f = await fixture(); try {
+    await ready(f.page); f.state.net = structuredClone(stateDiagnosticFixture);
+    f.state.net.checks.status = { kind: 'known', value: 'SUCCESSFUL' };
+    f.state.net.checks.cashflow = { kind: 'known', value: 'MONEY_OUT' };
+    await netPreview(f.page); const result = f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }); await result.waitFor();
+    const text = await result.innerText(); assert.match(text, /SUCCESS \/ SUCCESSFUL/); assert.match(text, /MONEY_OUT/);
+    assert.match(text, /Neto belum terverifikasi/); assert.equal(text.includes('150.010'), false);
+    assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
+    assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'netPreview']); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
+  } finally { await f.context.close(); }
+});
 test('forged diagnostic values, identifiers, verification or financial fields cannot be rendered', async () => {
   for (const change of [v => v.verified = true, v => v.readOnly = false, v => v.bookingCode = 'SH-261022-OTHER',
     v => v.checks.status.value = 'private_fixture_secret', v => v.checks.cashflow.kind = 'known', v => v.netAmount = 150010,
-    v => v.checks.cashflow = { kind: 'known', value: 'MONEY_IN' }]) {
+    v => v.checks.cashflow = { kind: 'known', value: 'MONEY_IN' },
+    v => { v.checks.status.value = 'SUCCESSFUL'; v.checks.cashflow = { kind: 'known', value: 'MONEY_IN' }; }]) {
     const f = await fixture(); try {
       await ready(f.page); f.state.net = structuredClone(stateDiagnosticFixture); change(f.state.net); await netPreview(f.page);
       await f.page.getByRole('alert').waitFor(); assert.equal(await f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }).count(), 0);

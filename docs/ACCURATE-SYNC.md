@@ -1,6 +1,46 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
-## Rincian pemeriksaan tiga kolom status API — 22 Oktober 2026
+## Kompatibilitas status SUCCESSFUL yang teramati — 22 Oktober 2026
+
+Paket **SenzuHome-Xendit-Successful-Status-Fix.zip** berisi **5 file**, berdasarkan source main terbaru **`7184401ea3ae329892a13ec58af22bcd53746a87`**, sesudah State Diagnostic digabung. Seluruh 246 file pada snapshot lokal dicocokkan dengan blob GitHub main sebelum perubahan ini.
+
+1. src/server/xenditNetPreview.ts
+2. src/lib/accurateSyncContracts.ts
+3. tests/accurateSync.test.mjs
+4. tests/accurateSyncUi.test.mjs
+5. docs/ACCURATE-SYNC.md
+
+### Hasil pembacaan aplikasi publik
+
+Setelah publikasi State Diagnostic, satu pembacaan **SH-261022-NUOUN** pada **22 Oktober 2026, 16:42:02 WIB** menampilkan:
+
+| Kolom | Dari API | Syarat versi sebelumnya |
+| --- | --- | --- |
+| type | PAYMENT | PAYMENT |
+| status | SUCCESSFUL | SUCCESS |
+| cashflow | MONEY_IN | MONEY_IN |
+
+Penyebab penolakan tiga kolom sudah teridentifikasi: ejaan status. Identitas akun, referensi, payment/product ID, bruto dan mata uang telah melewati pemeriksaan sebelumnya. **Biaya, withholding, settlement dan neto belum dibaca melewati gate ini**, sehingga hasil ini belum membuktikan pratinjau neto API produksi berhasil.
+
+Referensi resmi [List Transactions](https://docs.xendit.co/apidocs/list-transactions) masih mencantumkan status `SUCCESS`. Dokumentasi [Transactions report](https://docs.xendit.co/docs/transactions-report), diperiksa 22 Oktober 2026, mendefinisikan `SUCCESSFUL` sebagai transaksi selesai dengan sukses. Dukungan `SUCCESSFUL` pada endpoint ini didasarkan pada hasil API yang benar-benar teramati pada transaksi dengan identitas cocok, diperkuat arti status pada laporan dan pemeriksaan dashboard sebelumnya. Ini bukan klaim bahwa enum spesifikasi API sudah diperbarui.
+
+### Perubahan
+
+Pratinjau menerima **tepat `SUCCESS` atau `SUCCESSFUL`**, tetap mensyaratkan **`PAYMENT` dan `MONEY_IN`**. Kedua ejaan melewati fungsi bersama yang juga dipakai kontrak diagnostik. Tabel diagnostik kini mencantumkan **SUCCESS / SUCCESSFUL** sebagai syarat status. String dengan spasi tambahan, beda kapitalisasi, `SUCCEEDED`, `COMPLETED`, `PAID`, `SETTLED`, refund atau status lain tetap tidak dianggap sukses. Tidak ada normalisasi string atau penerimaan status berdasarkan tampilan dashboard saja.
+
+Semua pemeriksaan berikutnya tetap berlaku: tepat satu hasil tanpa halaman lanjutan, identitas/nominal/mata uang cocok, fee `COMPLETED`, settlement `SETTLED`, empat komponen biaya numerik lengkap, withholding nol serta bruto dikurangi fee dan PPN sama persis dengan neto. Nilai kosong tidak dianggap nol. Hasil status yang belum cocok tetap hanya diagnostik tanpa nominal finansial. Diagnostik yang sebenarnya memenuhi ketiga syarat sukses ditolak kontrak agar tidak salah diberi label gagal.
+
+Alur ini tetap satu GET Transaction API baca saja; tidak membuat dokumen biaya/pajak/pencairan, tidak memperbarui status pembayaran, tidak menjalankan antrean Accurate dan tidak memicu event Meta. Pembayaran manual, checkout pelanggan, webhook, autentikasi dan bukti operasi Accurate berada di luar perubahan ini.
+
+### Pemasangan dan verifikasi
+
+Unggah **5 file** sesuai folder, merge ke main, lalu **Pull Changes → Republish**. Setelah publikasi, gunakan **Pratinjau Biaya & Neto Xendit** satu kali untuk booking yang sama **SH-261022-NUOUN**. Tidak perlu Secret, aktivasi, checkout atau pembayaran baru. Bila pemeriksaan biaya/settlement berikutnya belum lolos, periksa pesan aktualnya; jangan menganggap fee yang hilang nol atau mengubah catatan transaksi agar lolos.
+
+Nilai dashboard sebelumnya adalah bruto **Rp160.000**, biaya **Rp9.000**, PPN biaya **Rp990**, neto satu pembayaran **Rp150.010**. Nilai API setelah perbaikan masih harus diperiksa setelah publikasi. Neto satu pembayaran belum termasuk processing fee harian dan bukan bukti uang diterima rekening bank. Pembukuan biaya dan pencairan tetap memerlukan bukti dan keputusan pemetaan Finance.
+
+Validasi lokal pada **Node.js 22.23.4**: **170/170 grup pengujian lulus**, tanpa gagal/dilewati/dibatalkan; pemeriksaan TypeScript, build dan impor native backend lulus. Pengujian memakai fixture lokal, bukan panggilan Xendit atau Accurate produksi. Regresi mencakup kedua status sukses; ejaan mirip/spasi/kapitalisasi/status refund; seluruh gate identitas/nominal/mata uang/fee/settlement/withholding/perhitungan untuk `SUCCESSFUL`; penolakan transaksi money-out; keluaran HTTP baca saja; serta kontrak/tabel diagnostik tanpa event Meta.
+
+## Riwayat: Rincian pemeriksaan tiga kolom status API — 22 Oktober 2026
 
 Paket **SenzuHome-Xendit-State-Diagnostic.zip** berisi **8 file**, berdasarkan source main terbaru `1dc366194bf5717372b25459a737d4f34a76c015`, setelah paket Neto Validation digabung:
 
