@@ -1,6 +1,16 @@
 # Senzu Home — Pencatatan Xendit Live ke Accurate
 
-Basis: `origin/main` commit `2c3742e` (22 Oktober 2026), dibaca ulang sebelum perubahan. Database Accurate yang diperbolehkan untuk pengiriman: **2974047 — PT KSBONE UNTUK KITA**. Aplikasi: **Senzu Home**, App Key `212b755a-ada6-428c-8243-dd2e3874b66b`.
+## Perbaikan pembaca akun — 22 Oktober 2026
+
+Patch **SenzuHome-Accurate-Mapping-Fix.zip** berisi **3 file**: src/server/accurateSyncProvider.ts, tests/accurateSync.test.mjs, dan docs/ACCURATE-SYNC.md. Source terbaru dibaca dari main commit 447d5e3 sebelum patch dibuat.
+
+Pratinjau publik menampilkan ACCURATE_ITEM_ACCOUNTS_UNVERIFIED. Pembaca versi awal belum mendukung kolom akun item yang didokumentasikan Accurate sebagai salesGlAccountNo dan salesDiscountGlAccountNo, serta bentuk objek salesGlAccount / salesDiscountGlAccount. Patch menambahkan pembacaan kolom tersebut dan tetap memeriksa nomor 400005/400004; kolom yang kosong, salah, atau bertentangan tetap ditolak. Pemeriksaan pajak juga mencakup tax4 dan usePpn.
+
+Unggah ketiga file sesuai folder, merge, Pull Changes, lalu Republish. Tidak ada Secret baru, penggantian token, pengubahan akun master, perluasan hak akses, atau aktivasi pengiriman yang diperlukan. Setelah publikasi, ulangi Pratinjau Tanpa Mencatat untuk booking SH-261021-DLJNW. Pratinjau publik sesudah patch dan pembuatan dokumen akuntansi belum terbukti oleh hasil tes lokal.
+
+Validasi patch: 136/136 grup pengujian lokal, pemeriksaan tipe, build, dan impor modul backend native pada Node.js 22.23.4. Ringkasan 132 pengujian di bawah adalah hasil paket awal 13 file.
+
+Basis paket awal 13 file: `origin/main` commit `2c3742e` (22 Oktober 2026). Database Accurate yang diperbolehkan untuk pengiriman: **2974047 — PT KSBONE UNTUK KITA**. Aplikasi: **Senzu Home**, App Key `212b755a-ada6-428c-8243-dd2e3874b66b`.
 
 ## Apa yang ditambahkan
 
@@ -29,7 +39,7 @@ Biaya kunjungan ditulis sebagai biaya lainnya pada faktur dengan akun 400005. Pr
 
 Versi ini hanya mendukung pencatatan **tanpa tambahan pajak**, dengan konfirmasi Finance pada panel. Pengaturan master yang menunjukkan pajak atau pemetaan akun yang tidak bisa dibuktikan akan menahan proses. Versi ini tidak menentukan kewajiban pajak perusahaan. Jika transaksi memerlukan PPN/PPh/PBJT atau pemisahan kewajiban poin, siapkan pemetaan tersebut sebelum aktivasi.
 
-## 13 file dalam paket
+## 13 file dalam paket awal
 
 1. server.ts
 2. src/server/xenditLive.ts
