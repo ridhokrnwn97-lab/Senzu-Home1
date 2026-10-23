@@ -18,6 +18,7 @@ const active=()=>({bookingId:booking.id,referenceId:'shl_'+'a'.repeat(48),amount
   creationState:'ready',sessionStatus:'ACTIVE',paymentStatus:'pending',sessionId:'ps-'+'1'.repeat(24),
   checkoutUrl:'https://xen.to/local_fixture',expiresAt:'2099-01-01T00:00:00Z',lastWebhookAt:null,lastCheckedAt:null,reconciliationRequired:false});
 const mocks={
+  metaSettings:`export async function getMetaAdsSettings(){return {enabled:false,pixels:[],events:[]};}`,
   firebase:`const listeners=new Set();const user=uid=>uid?{uid,getIdToken:async()=> 'fixture_token'}:null;
     export const auth={currentUser:user('alice')},db={};
     export function subscribe(callback){listeners.add(callback);queueMicrotask(()=>{if(listeners.has(callback))callback(auth.currentUser);});return()=>listeners.delete(callback);}
@@ -38,7 +39,7 @@ before(async()=>{
       <XenditLivePaymentPage booking={window.__fixture.returnBooking}/>);`,resolveDir:root,loader:'tsx'},
     bundle:true,format:'esm',outfile:path.join(temp,'bundle.js'),plugins:[{name:'firebase-fixtures',setup(builder){
       builder.onResolve({filter:/.*/},args=>{
-        const key=args.path.startsWith('fixture:')?args.path.slice(8):args.path==='firebase/auth'?'auth':args.path==='firebase/firestore'?'firestore':/(^|\/)firebase$/.test(args.path)?'firebase':null;
+        const key=/(^|\/)metaAdsService$/.test(args.path)?'metaSettings':args.path.startsWith('fixture:')?args.path.slice(8):args.path==='firebase/auth'?'auth':args.path==='firebase/firestore'?'firestore':/(^|\/)firebase$/.test(args.path)?'firebase':null;
         if(key)return{path:key,namespace:'fixture'};
       });
       builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'js'}));
