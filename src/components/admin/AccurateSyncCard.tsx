@@ -1,3 +1,4 @@
+import { AccurateProcessingFeeCard } from './AccurateProcessingFeeCard';
 import React, { useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
@@ -151,5 +152,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
         <p>Faktur: {j.invoiceNumber} ({j.confirmed.includes('invoice') ? 'terverifikasi' : 'belum terverifikasi'})</p>
       </td></tr>)}</tbody>
     </table>{status.jobs.length === 0 && <p className="mt-3 text-sm text-slate-600">Belum ada booking dalam antrean pencatatan.</p>}</div>}
+    <AccurateProcessingFeeCard currentUser={currentUser} />
   </section>;
 }
+
