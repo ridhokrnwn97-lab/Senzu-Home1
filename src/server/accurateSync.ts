@@ -3,6 +3,8 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, isAccurateXenditNetPreview, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
   type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
+import { createProcessingFeeSync, PROCESSING_SYNC_ERRORS } from './accurateProcessingFees.ts';
+import { PROCESSING_ERRORS } from './xenditProcessingFees.ts';
 import { FEE_POLICY, feeNumber, feePlan, matchesFeeJournal } from './accurateFeePosting.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
 import { readXenditNetPreview } from './xenditNetPreview.ts';
@@ -24,7 +26,7 @@ const providerDate = (value: unknown) => typeof value === 'string' ? /^\d{2}\/\d
   /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value) ? `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}` : null : null;
 const numbers = (id: string) => ({ downPaymentNumber: `SHDP-${id.slice(0, 24)}`, receiptNumber: `SHRC-${id.slice(0, 24)}`, invoiceNumber: `SHIV-${id.slice(0, 24)}` });
 const MESSAGES: Record<string, string> = {
-  ...ACCURATE_NET_PREVIEW_ERRORS,
+  ...ACCURATE_NET_PREVIEW_ERRORS, ...PROCESSING_ERRORS, ...PROCESSING_SYNC_ERRORS,
   FEE_APPROVAL_REQUIRED: 'Konfirmasi Finance bahwa biaya dan PPN biaya dibebankan sebagai biaya diperlukan.',
   FEE_POSTING_PAUSED: 'Pengiriman jurnal biaya dijeda. Antrean biaya tetap disimpan.',
   FEE_EVIDENCE_CHANGED: 'Rincian biaya Xendit berubah. Finance perlu memeriksa jurnal sebelum melanjutkan.',
@@ -137,6 +139,20 @@ export function createAccurateSync(deps: Dependencies) {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(k => !keys.includes(k))) throw fail(400, 'INVALID_SYNC_REQUEST');
     return identity.uid;
   }
+  const processing = createProcessingFeeSync({ db, env, clock, ref, configured, provider,
+    fetch: deps.fetch, authorizeManager: deps.authorizeManager });
+  async function processingStatus(req: Request) { const uid = await actor(req, []); const value = await processing.status();
+    await db!.runTransaction(t => deps.authorizeManager(t, uid)); return { processing: value }; }
+  async function processingPreview(req: Request) { const uid = await actor(req, ['fromDate', 'toDate']); rate(`processingPreview:${uid}`, 3);
+    const value = await processing.preview(req.body.fromDate, req.body.toDate);
+    await db!.runTransaction(t => deps.authorizeManager(t, uid)); return { preview: value }; }
+  async function activateProcessing(req: Request) { const uid = await actor(req, ['fromDate', 'expectedTransactionIds', 'acknowledgement']); rate(`activateProcessing:${uid}`, 2);
+    return { processing: await processing.activate(uid, req.body) }; }
+  async function pauseProcessing(req: Request) { const uid = await actor(req, []); return { processing: await processing.pause(uid) }; }
+  async function reconcileProcessing(req: Request) { const uid = await actor(req, ['id']); rate(`reconcileProcessing:${uid}`, 3);
+    return { processing: await processing.reconcile(uid, req.body.id) }; }
+  async function runProcessing(req: Request) { const uid = await actor(req, []); rate(`runProcessing:${uid}`, 3);
+    await processing.runOnce(); return { processing: await processing.status() }; }
   async function stagePaid(t: Transaction, v: AccuratePaidEvent) {
     // Called inside the payment transaction BEFORE its first write. Failure rolls
     // back payment + queue together; the provider webhook/status retry can recover.
@@ -484,14 +500,15 @@ export function createAccurateSync(deps: Dependencies) {
     if (!schedulerConfigured() || typeof value !== 'string' || !/^[A-Za-z0-9_-]{43,128}$/.test(value) || count > 1 || req.headers.authorization ||
         value.length !== env.ACCURATE_SYNC_WORKER_TOKEN!.length || !timingSafeEqual(Buffer.from(value), Buffer.from(env.ACCURATE_SYNC_WORKER_TOKEN!))) throw fail(401, 'AUTH_INVALID');
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length) throw fail(400, 'INVALID_SYNC_REQUEST');
-    return runOnce();
+    const gross = await runOnce(), daily = await processing.runOnce();
+    return daily.processingProcessed || 'processingScanned' in daily ? { ...gross, ...daily } : gross;
   }
-  return { stagePaid, status, preview, netPreview, activate, activateFees, pauseFees, pause, retry, run, runOnce, scheduled, wake };
+  return { processingStatus, processingPreview, activateProcessing, pauseProcessing, reconcileProcessing, runProcessing, stagePaid, status, preview, netPreview, activate, activateFees, pauseFees, pause, retry, run, runOnce, scheduled, wake };
 }
 
 export function registerAccurateSync(app: Express, deps: Dependencies) {
   const service = createAccurateSync(deps);
-  for (const action of ['status', 'preview', 'netPreview', 'activate', 'activateFees', 'pauseFees', 'pause', 'retry', 'run', 'scheduled'] as const) {
+  for (const action of ['status', 'preview', 'netPreview', 'activate', 'activateFees', 'pauseFees', 'pause', 'retry', 'run', 'scheduled', 'processingStatus', 'processingPreview', 'activateProcessing', 'pauseProcessing', 'reconcileProcessing', 'runProcessing'] as const) {
     app.post(`/api/integrations/accurate/sync/${action}`, async (req, res) => {
       res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
       try { res.json({ success: true, ...await service[action](req) }); }
@@ -508,3 +525,4 @@ export function registerAccurateSync(app: Express, deps: Dependencies) {
   const timer = setInterval(() => service.wake(), 30000); timer.unref?.();
   return { ...service, stop: () => clearInterval(timer) };
 }
+

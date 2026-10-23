@@ -11,8 +11,8 @@ export function matchesAccurateCustomerNo(expected: string, ...aliases: unknown[
   // Never prefer one alias when another supplied value contradicts it.
   return supplied.length > 0 && supplied.every(v => typeof v === 'string' && v === expected);
 }
-export type AccurateDocumentKind = 'customer' | 'down_payment' | 'receipt' | 'invoice' | 'fee';
-const resource = (kind: AccurateDocumentKind) => kind === 'fee' ? 'journal-voucher' : kind === 'customer' ? 'customer' : kind === 'receipt' ? 'sales-receipt' : 'sales-invoice';
+export type AccurateDocumentKind = 'customer' | 'down_payment' | 'receipt' | 'invoice' | 'fee' | 'processing_fee';
+const resource = (kind: AccurateDocumentKind) => ['fee', 'processing_fee'].includes(kind) ? 'journal-voucher' : kind === 'customer' ? 'customer' : kind === 'receipt' ? 'sales-receipt' : 'sales-invoice';
 export function syncCredentialsConfigured(env: NodeJS.ProcessEnv) {
   return /^aat\.[A-Za-z0-9+/=._-]{32,16380}$/.test(env.ACCURATE_API_TOKEN || '') &&
     /^[!-~]{16,512}$/.test(env.ACCURATE_SIGNATURE_SECRET || '') &&
@@ -130,10 +130,19 @@ export function createAccurateSyncProvider(deps: Dependencies) {
         }
       }
     }
+    async function feeMasters() {
+      for (const code of ['600031', '110103']) {
+        const expected = ACCURATE_MASTERS.find(v => v.kind === 'account' && v.code === code);
+        const data = await get('glaccount/detail.do', { no: code });
+        if (!expected || !data || !positiveId(data.id) || data.no !== code || data.suspended === true ||
+            normalizeAccurate(data.name) !== normalizeAccurate(expected.name) || data.accountType !== expected.type ||
+            code === '110103' && (data.currency?.code || data.currencyCode) !== 'IDR') throw syncFailure('ACCURATE_MASTER_MISMATCH', true);
+      }
+    }
     async function save(kind: AccurateDocumentKind, payload: Record<string, any>) {
-      if (kind === 'fee' && (Object.keys(payload).sort().join(',') !== 'description,detailJournalVoucher,number,transDate' ||
-          !/^SHXF-[a-f0-9]{24}$/.test(payload.number || '') || typeof payload.description !== 'string' ||
-          !/^SENZU_HOME_FEE_V1:[a-f0-9]{64} \| /.test(payload.description) ||
+      if (['fee', 'processing_fee'].includes(kind) && (Object.keys(payload).sort().join(',') !== 'description,detailJournalVoucher,number,transDate' ||
+          !(kind === 'fee' ? /^SHXF-[a-f0-9]{24}$/ : /^SHPF-[a-f0-9]{24}$/).test(payload.number || '') || typeof payload.description !== 'string' ||
+          !(kind === 'fee' ? /^SENZU_HOME_FEE_V1:[a-f0-9]{64} \| / : /^SENZU_HOME_PROCESSING_V1:[a-f0-9]{64} \| PROCESSING_FEE_(?:VAT_)?DEDUCTION \| /).test(payload.description) ||
           !Array.isArray(payload.detailJournalVoucher) || payload.detailJournalVoucher.length !== 2 ||
           payload.detailJournalVoucher.some((r: any, i: number) => Object.keys(r).sort().join(',') !== 'accountNo,amount,amountType' ||
             r.accountNo !== (i === 0 ? '600031' : '110103') || r.amountType !== (i === 0 ? 'DEBIT' : 'CREDIT') ||
@@ -143,7 +152,8 @@ export function createAccurateSyncProvider(deps: Dependencies) {
       const path = kind === 'down_payment' ? 'sales-invoice/create-down-payment.do' : `${resource(kind)}/save.do`;
       return request(`${origin}/accurate/api/${path}`, 'POST', payload);
     }
-    return { lookup, masters, save };
+    return { lookup, masters, feeMasters, save };
   }
   return { connect };
 }
+
