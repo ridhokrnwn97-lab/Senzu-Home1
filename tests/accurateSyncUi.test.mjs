@@ -31,6 +31,7 @@ const stateDiagnosticFixture = { success: true, mode: 'xendit_state_diagnostic_v
 before(async () => {
   temp = await fs.mkdtemp(path.join(os.tmpdir(), 'senzu-accurate-sync-ui-'));
   const mocks = {
+    processingCard: `export const AccurateProcessingFeeCard=()=>null;`,
     firebase: `const listeners=new Set();const makeUser=uid=>uid?{uid,getIdToken:async()=> 'fixture_'+uid}:null;
       export const auth={currentUser:makeUser('manager1')};
       export function subscribe(fn){listeners.add(fn);queueMicrotask(()=>{if(listeners.has(fn))fn(auth.currentUser);});return()=>listeners.delete(fn);}
@@ -42,7 +43,7 @@ before(async () => {
     resolveDir: root, loader: 'tsx' }, bundle: true, format: 'esm', outfile: path.join(temp, 'bundle.js'),
     plugins: [{ name: 'firebase-fixture', setup(builder) {
       builder.onResolve({ filter: /.*/ }, args => {
-        const key = args.path.startsWith('fixture:') ? args.path.slice(8) : args.path === 'firebase/auth' ? 'auth' : /(^|\/)firebase$/.test(args.path) ? 'firebase' : null;
+        const key = /AccurateProcessingFeeCard$/.test(args.path) ? 'processingCard' : args.path.startsWith('fixture:') ? args.path.slice(8) : args.path === 'firebase/auth' ? 'auth' : /(^|\/)firebase$/.test(args.path) ? 'firebase' : null;
         if (key) return { path: key, namespace: 'fixture' };
       }); builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: mocks[args.path], loader: 'js' }));
     } }] });
@@ -299,3 +300,4 @@ test('fee journal status is distinct from gross documents and historical exclusi
     assert.deepEqual(await f.page.evaluate(()=>window.__events),[]);
   }finally{await f.context.close();}
 });
+
