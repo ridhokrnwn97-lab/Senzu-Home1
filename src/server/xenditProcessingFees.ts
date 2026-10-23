@@ -7,6 +7,12 @@ export const PROCESSING_ERRORS: Record<string, string> = {
   PROCESSING_NOT_CONFIGURED: 'Konfigurasi pembacaan Xendit Live belum lengkap.',
   PROCESSING_READ_UNAVAILABLE: 'Riwayat potongan Xendit belum dapat dibaca. Tidak ada jurnal baru yang dikirim.',
   PROCESSING_READ_REJECTED: 'Xendit menolak pembacaan potongan. Periksa izin Transaction Read.',
+  PROCESSING_QUERY_REJECTED: 'Xendit menolak parameter pembacaan (HTTP 400). Tidak ada jurnal baru yang dikirim.',
+  PROCESSING_QUERY_UNPROCESSABLE: 'Xendit tidak dapat memproses parameter pembacaan (HTTP 422). Tidak ada jurnal baru yang dikirim.',
+  PROCESSING_RATE_LIMITED: 'Pembacaan Xendit dibatasi sementara (HTTP 429). Tidak ada jurnal baru yang dikirim.',
+  PROCESSING_UPSTREAM_ERROR: 'Server Xendit mengembalikan kesalahan (HTTP 5xx). Tidak ada jurnal baru yang dikirim.',
+  PROCESSING_READ_TIMEOUT: 'Pembacaan Xendit melewati batas waktu. Tidak ada jurnal baru yang dikirim.',
+  PROCESSING_NETWORK_UNAVAILABLE: 'Koneksi server ke Xendit belum berhasil. Tidak ada jurnal baru yang dikirim.',
   PROCESSING_FORMAT_INVALID: 'Bentuk riwayat processing fee perlu diperiksa. Tidak menebak potongan dari tarif.',
   PROCESSING_SCAN_INCOMPLETE: 'Riwayat belum terbaca lengkap. Persempit rentang tanggal sebelum mencatat.',
   PROCESSING_SOURCE_INVALID: 'Identitas, arah kas, nominal, atau tanggal potongan Xendit belum terverifikasi.',
@@ -63,26 +69,41 @@ export async function readProcessingFees(fromDate: string, toDate: string, deps:
       Date.parse(toDate) - Date.parse(fromDate) > 30 * 86400000) throw processingFailure('PROCESSING_RANGE_INVALID');
   const lower = Date.parse(`${fromDate}T00:00:00+07:00`), upper = Math.min(Date.parse(`${toDate}T23:59:59.999+07:00`), clock());
   const end = clock() + 35000, charges: ProcessingCharge[] = [], seen = new Set<string>();
-  let cursor = '', otherOutflowCount = 0;
-  for (let page = 0; page < 10; page++) {
+  let cursor = '', otherOutflowCount = 0, completeHistory = false, scanned = 0;
+  for (let page = 0; page < (completeHistory ? 100 : 10); page++) {
     if (end - clock() < 1000) throw processingFailure('PROCESSING_SCAN_INCOMPLETE');
     const url = new URL('https://api.xendit.co/transactions');
     // No PAYMENT/type filter: standalone daily debit types are separate entries.
-    url.search = new URLSearchParams({ currency: 'IDR', 'created[gte]': new Date(lower).toISOString(),
-      'created[lte]': new Date(upper).toISOString(), limit: '100', ...(cursor ? { after_id: cursor } : {}) }).toString();
+    url.search = new URLSearchParams({ currency: 'IDR', limit: completeHistory ? '10' : '100',
+      ...(!completeHistory ? { 'created[gte]': new Date(lower).toISOString(), 'created[lte]': new Date(upper).toISOString() } : {}),
+      ...(cursor ? { after_id: cursor } : {}) }).toString();
     let response: Response, body: any;
     try { response = await (deps.fetch || fetch)(url.href, { method: 'GET', redirect: 'error', cache: 'no-store',
       signal: AbortSignal.timeout(Math.min(10000, end - clock())), headers: { Authorization: `Basic ${Buffer.from(`${key}:`).toString('base64')}`, Accept: 'application/json' } }); }
-    catch { throw processingFailure('PROCESSING_READ_UNAVAILABLE'); }
+    catch (e: any) { throw processingFailure(['TimeoutError', 'AbortError'].includes(e?.name) ? 'PROCESSING_READ_TIMEOUT' : 'PROCESSING_NETWORK_UNAVAILABLE'); }
     if ([401, 403].includes(response.status)) throw processingFailure('PROCESSING_READ_REJECTED');
+    // A rejected optional date/large-page query can be read using the documented
+    // default page size and no date filter. Accept it only after the ENTIRE
+    // bounded history reaches has_more=false; do not stop at a guessed date order.
+    if (!response.redirected && [400, 422].includes(response.status) && page === 0 && !completeHistory) {
+      await response.body?.cancel().catch(() => {});
+      completeHistory = true; page = -1; continue;
+    }
+    if (response.status === 400) throw processingFailure('PROCESSING_QUERY_REJECTED');
+    if (response.status === 422) throw processingFailure('PROCESSING_QUERY_UNPROCESSABLE');
+    if (response.status === 429) throw processingFailure('PROCESSING_RATE_LIMITED');
+    if (response.status >= 500) throw processingFailure('PROCESSING_UPSTREAM_ERROR');
     if (!response.ok || response.redirected) throw processingFailure('PROCESSING_READ_UNAVAILABLE');
     try { body = await response.json(); } catch { throw processingFailure('PROCESSING_FORMAT_INVALID'); }
-    if (!body || !Array.isArray(body.data) || !Array.isArray(body.links) || typeof body.has_more !== 'boolean' || body.data.length > 100 ||
+    if (!body || !Array.isArray(body.data) || !Array.isArray(body.links) || typeof body.has_more !== 'boolean' || body.data.length > (completeHistory ? 10 : 100) ||
         body.has_more && !body.data.length) throw processingFailure('PROCESSING_FORMAT_INVALID');
+    scanned += body.data.length;
+    if (scanned > 1000) throw processingFailure('PROCESSING_SCAN_INCOMPLETE');
     for (const t of body.data) {
       if (!t || typeof t.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(t.id) || seen.has(t.id) || t.business_id !== businessId ||
-          !stamp(t.created) || Date.parse(t.created) < lower || Date.parse(t.created) > upper) throw processingFailure('PROCESSING_SOURCE_INVALID');
+          !stamp(t.created) || Date.parse(t.created) > clock() || !completeHistory && (Date.parse(t.created) < lower || Date.parse(t.created) > upper)) throw processingFailure('PROCESSING_SOURCE_INVALID');
       seen.add(t.id);
+      if (Date.parse(t.created) < lower || Date.parse(t.created) > upper) continue;
       if (PROCESSING_TYPES.includes(t.type)) charges.push(processingCharge(t, businessId!));
       else if (t.cashflow === 'MONEY_OUT') otherOutflowCount++;
     }
