@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Firestore, Transaction, DocumentReference } from 'firebase-admin/firestore';
 import { createAccurateSyncProvider, positiveId, syncFailure } from './accurateSyncProvider.ts';
 import { matchesFeeJournal } from './accurateFeePosting.ts';
-import { isoDay, processingJournal, readProcessingFees, wibDay, type ProcessingCharge } from './xenditProcessingFees.ts';
+import { isoDay, processingJournal, readProcessingFees, wibDay, PROCESSING_ERRORS, type ProcessingCharge } from './xenditProcessingFees.ts';
 
 export const PROCESSING_ACK = 'ACTUAL_XENDIT_PROCESSING_DEBITS_AS_EXPENSE_NO_PRIOR_MANUAL_POSTING';
 export const PROCESSING_SYNC_ERRORS: Record<string, string> = {
@@ -141,8 +141,7 @@ export function createProcessingFeeSync(deps: Deps) {
         t.update(rowRef, { state: 'confirmed', providerId: document.id, wakeAt: PARKED, issue: '', updatedAt: now() }); });
       return { processingProcessed: 1 };
     } catch (e: any) {
-      const issue = [...Object.keys(PROCESSING_SYNC_ERRORS), 'PROCESSING_SCAN_INCOMPLETE', 'PROCESSING_PENDING', 'PROCESSING_READ_REJECTED',
-        'PROCESSING_SOURCE_INVALID', 'PROCESSING_FORMAT_INVALID', 'PROCESSING_READ_UNAVAILABLE', 'SYNC_BUSY', 'SYNC_PAUSED', 'PROCESSING_DISABLED'].includes(e?.code) ? e.code : 'PROCESSING_READ_UNAVAILABLE';
+      const issue = [...Object.keys(PROCESSING_SYNC_ERRORS), ...Object.keys(PROCESSING_ERRORS), 'SYNC_BUSY', 'SYNC_PAUSED', 'PROCESSING_DISABLED'].includes(e?.code) ? e.code : 'PROCESSING_READ_UNAVAILABLE';
       await db.runTransaction(async t => {
         const c = (await t.get(ref())).data(); if (c?.leaseToken !== token) return;
         t.update(ref(), { processingIssue: issue, processingNextScanAt: clock() + 60000 });
