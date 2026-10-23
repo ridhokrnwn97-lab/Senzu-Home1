@@ -1,4 +1,5 @@
 export const META_ADS_TRIGGERS = {
+  xendit_live_paid: 'Pembayaran Xendit Live terverifikasi',
   booking_submitted: 'Konfirmasi & Ajukan Booking Senzu berhasil',
   payment_confirmation_or_proof: 'Konfirmasi pembayaran atau bukti pembayaran terkirim',
   payment_confirmation_clicked: 'Klik Bantuan / Konfirmasi via WA',
@@ -34,7 +35,7 @@ export function defaultMetaAdsSettings(): MetaAdsSettings {
     schemaVersion: 1, enabled: false, revision: 0, pixels: [],
     events: [
       { id: 'booking_add_to_cart', trigger: 'booking_submitted', kind: 'standard', eventName: 'AddToCart', pixelIds: 'all', enabled: true },
-      { id: 'payment_lead', trigger: 'payment_confirmation_or_proof', kind: 'standard', eventName: 'Lead', pixelIds: 'all', enabled: true },
+      { id: 'payment_lead', trigger: 'xendit_live_paid', kind: 'standard', eventName: 'Lead', pixelIds: 'all', enabled: true },
     ],
   };
 }
@@ -72,7 +73,9 @@ export function validateMetaAdsSettings(value: unknown): MetaAdsSettings {
       return invalid('Periksa pemicu, nama peristiwa, dan target Pixel. Nama custom memakai huruf, angka, atau garis bawah (maksimal 40 karakter).');
     }
     eventIds.add(event.id);
-    return { id: event.id, trigger: event.trigger, kind: event.kind, eventName: event.eventName, pixelIds: event.pixelIds === 'all' ? 'all' as const : [...event.pixelIds], enabled: event.enabled };
+    // Upgrade saved Lead rules too, retaining opt-out and Pixel targets.
+    const trigger: MetaAdsTrigger = event.kind === 'standard' && event.eventName === 'Lead' ? 'xendit_live_paid' : event.trigger;
+    return { id: event.id, trigger, kind: event.kind, eventName: event.eventName, pixelIds: event.pixelIds === 'all' ? 'all' as const : [...event.pixelIds], enabled: event.enabled };
   });
   return { schemaVersion: 1, enabled: data.enabled, revision: data.revision, pixels, events };
 }

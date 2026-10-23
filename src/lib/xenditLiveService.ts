@@ -1,5 +1,6 @@
 import { auth } from './firebase';
 import { safeLiveCheckoutUrl, type XenditLiveSession } from './xenditLiveContracts';
+import { trackMetaAdsAction } from './metaPixel';
 
 const base = '/api/integrations/xendit/live';
 export async function xenditLiveAvailable(signal?: AbortSignal): Promise<boolean> {
@@ -20,12 +21,21 @@ async function request(action: string, body: Record<string, unknown>) {
   return value;
 }
 async function session(action: string, bookingId: string, sessionId?: string): Promise<XenditLiveSession | null> {
+  const customer = auth.currentUser;
   const value = await request(action, { bookingId, ...(sessionId ? { sessionId } : {}) });
   const s = value.session;
   if (s === null) return null;
   if (!s || s.bookingId !== bookingId || s.environment !== 'live' || s.currency !== 'IDR' ||
       !Number.isInteger(s.amount) || s.amount < 10000 || !/^shl_[a-f0-9]{48}$/.test(s.referenceId || '')) throw new Error('Respons pembayaran tidak valid.');
   if (s.checkoutUrl) safeLiveCheckoutUrl(s.checkoutUrl);
+  // Only customer responses from the authenticated Live backend qualify.
+  // Manager inspection, return URLs and Test/manual payments never fire Lead.
+  if (['status', 'refresh', 'checkout'].includes(action) && customer && auth.currentUser === customer
+      && s.creationState === 'ready' && s.sessionStatus === 'COMPLETED' && s.paymentStatus === 'paid'
+      && s.reconciliationRequired === false && /^ps-[A-Za-z0-9-]{16,100}$/.test(s.sessionId || '')
+      && ['webhook', 'check', 'recovery', 'create'].includes(s.paidSource || '')) {
+    void trackMetaAdsAction('xendit_live_paid', { entityId: bookingId, value: s.amount });
+  }
   return s;
 }
 export const readLivePayment = (bookingId: string) => session('status', bookingId);

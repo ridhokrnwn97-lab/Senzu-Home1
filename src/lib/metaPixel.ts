@@ -63,7 +63,8 @@ function targets(settings: MetaAdsSettings, action: MetaAdsTrigger) {
   const result = new Map<string, { pixelId: string; kind: 'standard' | 'custom'; eventName: string }>();
   if (!settings.enabled) return [];
   for (const pixel of settings.pixels) if (pixel.enabled) {
-    for (const event of settings.events) if (event.enabled && (event.trigger === action
+    for (const event of settings.events) if (event.enabled
+      && (event.eventName !== 'Lead' || action === 'xendit_live_paid') && (event.trigger === action
       || (event.trigger === 'payment_confirmation_or_proof' && ['payment_confirmation_clicked', 'payment_proof_submitted'].includes(action)))
       && (event.pixelIds === 'all' || event.pixelIds.includes(pixel.id))) {
       result.set(`${pixel.pixelId}:${event.kind}:${event.eventName}`, { pixelId: pixel.pixelId, kind: event.kind, eventName: event.eventName });
