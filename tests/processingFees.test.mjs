@@ -111,18 +111,97 @@ test('bad range, impossible date, future date and Test key rejected before netwo
  await assert.rejects(()=>readProcessingFees(...range,{env,clock:()=>NOW,fetch:()=>assert.fail('network')}));
  await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env:{...env,XENDIT_LIVE_SECRET_KEY:'xnd_development_fixture'},clock:()=>NOW,fetch:()=>assert.fail('network')}));
 });
+test('rejected date query falls back once to complete default-page history and filters WIB locally',async()=>{
+ const older={...charge(),id:'44444444-4444-4444-8444-444444444444',created:'2026-10-21T00:00:00Z',updated:'2026-10-21T00:00:01Z'};
+ let n=0;
+ const r=await readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async(url,init)=>{
+  const u=new URL(url);assert.equal(init.method,'GET');assert.equal(u.origin,'https://api.xendit.co');assert.equal(u.searchParams.has('types'),false);
+  if(n++===0){assert.equal(u.searchParams.get('limit'),'100');assert.ok(u.searchParams.has('created[gte]'));return Response.json({message:'private provider body'},{status:400});}
+  assert.equal(u.searchParams.has('created[gte]'),false);assert.equal(u.searchParams.has('created[lte]'),false);assert.equal(u.searchParams.get('limit'),'10');
+  if(n===2)return Response.json({has_more:true,data:[older,charge()],links:[{href:'https://evil.invalid'}]});
+  assert.equal(u.searchParams.get('after_id'),fid);return Response.json(body([charge(true)]));
+ }});
+ assert.equal(n,3);assert.equal(r.charges.length,2);assert.equal(r.totalAmount,8880);
+});
+test('fallback cannot treat a partial history containing fees as complete',async()=>{
+ let n=0;await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>{
+  if(n++===0)return new Response('',{status:422});if(n===2)return Response.json({has_more:true,data:[charge()],links:[]});
+  throw new TypeError('private provider connection details');
+ }}),e=>e.code==='PROCESSING_NETWORK_UNAVAILABLE'&&!e.message.includes('private'));
+ assert.equal(n,3);
+});
+test('fallback does not infer a date ordering or stop after an older transaction',async()=>{
+ let n=0;const old={...charge(),created:'2026-10-21T00:00:00Z'};
+ const r=await readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>{
+  n++;if(n===1)return new Response('',{status:400});if(n===2)return Response.json({has_more:true,data:[old],links:[]});
+  return Response.json(body([charge(true)]));
+ }});assert.equal(n,3);assert.equal(r.totalAmount,880);
+});
+for(const [name,mutate] of [['wrong business',r=>r.business_id='wrong'],['bad timestamp',r=>r.created='bad'],['future timestamp',r=>r.created='2026-10-24T00:00:00Z']]){
+ test('fallback still validates out-of-range '+name,async()=>{
+  const old={...charge(),created:'2026-10-21T00:00:00Z'};mutate(old);let n=0;
+  await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>n++===0?new Response('',{status:400}):Response.json(body([old,charge(true)]))}),e=>e.code==='PROCESSING_SOURCE_INVALID');
+ });
+}
+test('fallback rejects duplicate IDs even outside the chosen date range',async()=>{
+ let n=0;const old={...charge(),created:'2026-10-21T00:00:00Z'};
+ await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>n++===0?new Response('',{status:400}):Response.json(body([old,old]))}),e=>e.code==='PROCESSING_SOURCE_INVALID');
+});
+test('fallback reaches the history/page limit without returning partial evidence',async()=>{
+ let n=0;await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>{
+  if(n++===0)return new Response('',{status:400});
+  return Response.json({has_more:true,data:Array.from({length:10},(_,i)=>({...charge(),id:`history_${n}_${i}`,type:'PAYMENT',created:'2026-10-21T00:00:00Z'})),links:[]});
+ }}),e=>e.code==='PROCESSING_SCAN_INCOMPLETE');assert.equal(n,101);
+});
+test('fallback remains inside the shared time budget even after finding a fee',async()=>{
+ let time=NOW,n=0;await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>time,fetch:async()=>{
+  if(n++===0)return new Response('',{status:400});time+=36000;
+  return Response.json({has_more:true,data:[charge()],links:[]});
+ }}),e=>e.code==='PROCESSING_SCAN_INCOMPLETE');assert.equal(n,2);
+});
+test('range response outside requested dates still fails; only explicit fallback filters locally',async()=>{
+ const old={...charge(),created:'2026-10-21T00:00:00Z'};
+ await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:fetchRows([old])}),e=>e.code==='PROCESSING_SOURCE_INVALID');
+});
+for(const [status,code,calls] of [[400,'PROCESSING_QUERY_REJECTED',2],[422,'PROCESSING_QUERY_UNPROCESSABLE',2],[401,'PROCESSING_READ_REJECTED',1],[403,'PROCESSING_READ_REJECTED',1],[429,'PROCESSING_RATE_LIMITED',1],[500,'PROCESSING_UPSTREAM_ERROR',1],[503,'PROCESSING_UPSTREAM_ERROR',1]]){
+ test('provider HTTP '+status+' reports safe cause and bounded read attempts',async()=>{
+  let n=0;await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>{n++;return Response.json({message:'private upstream token',error_code:'PRIVATE_TOKEN'},{status});}}),e=>e.code===code&&!e.message.includes('private'));
+  assert.equal(n,calls);
+ });
+}
+for(const name of ['TimeoutError','AbortError','TypeError']){
+ test('provider '+name+' is classified without exposing exception details',async()=>{
+  await assert.rejects(()=>readProcessingFees('2026-10-23','2026-10-23',{env,clock:()=>NOW,fetch:async()=>{throw Object.assign(new Error('private connection token'),{name});}}),e=>e.code===(name==='TypeError'?'PROCESSING_NETWORK_UNAVAILABLE':'PROCESSING_READ_TIMEOUT')&&!e.message.includes('private'));
+ });
+}
 function fixture(){
  let time=NOW, failPost=false, hide=false;const clock=()=>time,db=new DB(clock), control=db.collection('accurate_sync_private').doc('control');
  db.seed(control.path,{schemaVersion:1,databaseId:2974047,enabled:true,taxPolicy:'no_extra_tax',activatedAt:'2026-10-21T00:00:00Z'});
  const remote=new Map(),posts=[],reads=[],provider={connect:async()=>({feeMasters:async()=>{},lookup:async(kind,no)=>{reads.push(no);return hide?null:remote.get(no)||null;},save:async(kind,p)=>{
  posts.push(structuredClone(p));remote.set(p.number,{...structuredClone(p),id:42});if(failPost)throw new Error('network lost after accepted');}})};
- const service=createProcessingFeeSync({db,env,clock,ref:()=>control,configured:()=>true,provider,fetch:fetchRows([charge(),charge(true)]),authorizeManager:async(_,uid)=>{assert.equal(uid,'manager');}});
- return {db,control,service,posts,reads,remote,tick:()=>time+=600000,setFail:()=>failPost=true,setHide:v=>hide=v};
+ let readSource=fetchRows([charge(),charge(true)]);
+ const service=createProcessingFeeSync({db,env,clock,ref:()=>control,configured:()=>true,provider,fetch:(...args)=>readSource(...args),authorizeManager:async(_,uid)=>{assert.equal(uid,'manager');}});
+ return {db,control,service,posts,reads,remote,tick:()=>time+=600000,setFail:()=>failPost=true,setHide:v=>hide=v,setRead:fn=>readSource=fn};
 }
 const activate=f=>f.service.activate('manager',{fromDate:'2026-10-23',expectedTransactionIds:[fid,vid],acknowledgement:PROCESSING_ACK});
 test('activation requires known actual IDs and approval; creates no journal',async()=>{
  const f=fixture();await assert.rejects(()=>f.service.activate('manager',{fromDate:'2026-10-23',expectedTransactionIds:['unknown'],acknowledgement:PROCESSING_ACK}));
  await activate(f);assert.equal(f.posts.length,0);assert.equal((await f.service.status()).enabled,true);
+});
+test('provider failure cannot activate or enqueue fees and worker preserves its safe issue',async()=>{
+ const f=fixture();await activate(f);f.setRead(async()=>new Response('',{status:503}));
+ await f.service.runOnce();assert.equal(f.posts.length,0);assert.equal((await f.service.status()).issue,'PROCESSING_UPSTREAM_ERROR');assert.equal((await f.service.status()).jobs.length,0);
+ const g=fixture();g.setRead(async()=>new Response('',{status:400}));await assert.rejects(()=>activate(g),e=>e.code==='PROCESSING_QUERY_REJECTED');
+ assert.equal((await g.service.status()).enabled,false);assert.equal(g.posts.length,0);assert.equal((await g.service.status()).jobs.length,0);
+});
+test('complete-history evidence supports the same consent calibration and one journal per fee ID',async()=>{
+ const f=fixture();let reads=0;f.setRead(async url=>{
+  reads++;return new URL(url).searchParams.has('created[gte]')?new Response('',{status:400}):Response.json(body([charge(),charge(true)]));
+ });
+ await activate(f);assert.equal(f.posts.length,0);await f.service.runOnce();await f.service.runOnce();await f.service.runOnce();
+ assert.equal(f.posts.length,2);assert.equal(f.posts.reduce((n,p)=>n+p.detailJournalVoucher[0].amount,0),8880);
+ assert.ok((await f.service.status()).jobs.every(j=>j.state==='confirmed'));
+ f.tick();await f.service.runOnce();await f.service.runOnce();assert.equal(f.posts.length,2);assert.ok(reads>=8);
 });
 test('worker scans then posts each independent debit once; full rescan is idempotent',async()=>{
  const f=fixture();await activate(f);await f.service.runOnce();assert.equal(f.posts.length,0);
