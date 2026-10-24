@@ -358,7 +358,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
           Pembayaran Non-Tunai Resmi
         </span>
         <div className="flex items-center gap-2">
-          <h3 className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
+          <h3 className="font-serif font-bold text-sm sm:text-base text-senzu-brand">
             Reservasi #{booking.bookingCode}
           </h3>
           {isPaid ? (
@@ -409,10 +409,10 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
     >
 
       {/* Total Amount Card */}
-      <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-[#082A4F] to-[#0D3866] text-white flex items-center justify-between gap-3 shadow-sm">
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-senzu-brand to-senzu-brand-hover text-white flex items-center justify-between gap-3 shadow-sm">
         <div>
           <span className="text-[10px] text-slate-300 block uppercase font-medium">Total Pembayaran</span>
-          <div className="font-mono font-bold text-lg sm:text-xl text-[#FDF3CD]">
+          <div className="font-mono font-bold text-lg sm:text-xl text-senzu-cream">
             {formatRupiah(booking.totalAmount)}
           </div>
           <span className="text-[11px] text-slate-300 block">
@@ -423,7 +423,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
         <button
           type="button"
           onClick={() => handleCopy(booking.totalAmount.toString(), 'amount')}
-          className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 cursor-pointer text-[#FDF3CD]"
+          className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 cursor-pointer text-senzu-cream"
         >
           {copiedType === 'amount' ? (
             <>
@@ -445,7 +445,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
           className={`p-3 sm:p-3.5 rounded-2xl border-2 transition-all ${
             isWarningState
               ? 'bg-amber-500/10 border-amber-500/40 text-amber-950'
-              : 'bg-[#FAF9F6] border-[#D4AF37]/40 text-[#082A4F]'
+              : 'bg-senzu-canvas border-senzu-gold/40 text-senzu-brand'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
@@ -453,7 +453,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
               <div className="flex items-center gap-1.5">
                 <Clock
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    isWarningState ? 'text-amber-600 animate-pulse' : 'text-[#B89628]'
+                    isWarningState ? 'text-amber-600 animate-pulse' : 'text-senzu-caramel'
                   }`}
                 />
                 <span className="text-[11px] uppercase tracking-wider font-bold text-slate-600 truncate">
@@ -472,7 +472,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
             <div className="text-right shrink-0">
               <div
                 className={`font-mono font-extrabold text-base sm:text-lg tracking-wider ${
-                  isWarningState ? 'text-amber-600' : 'text-[#082A4F]'
+                  isWarningState ? 'text-amber-600' : 'text-senzu-brand'
                 }`}
               >
                 {formatCountdown(timeLeftMs)}
@@ -507,7 +507,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
             <button
               type="button"
               onClick={() => onOpenTracking(booking.bookingCode)}
-              className="mt-2 px-4 py-2 rounded-xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition inline-flex items-center gap-1.5 cursor-pointer"
+              className="mt-2 px-4 py-2 rounded-xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition inline-flex items-center gap-1.5 cursor-pointer"
             >
               <span>Lacak Status Pesanan</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -518,14 +518,14 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
         <>
           {/* Payment Method Selector Tabs */}
           <div className="space-y-1.5">
-            <span className="text-xs font-semibold text-[#082A4F] block">Pilih Metode Pembayaran:</span>
+            <span className="text-xs font-semibold text-senzu-brand block">Pilih Metode Pembayaran:</span>
             <div className="grid grid-cols-4 gap-1.5 text-xs font-bold">
               <button
                 type="button"
                 onClick={() => handleSelectMethod('qris')}
                 className={`py-2 px-1 rounded-xl border transition flex flex-col items-center gap-1 cursor-pointer ${
                   selectedMethod === 'qris'
-                    ? 'border-[#082A4F] bg-[#082A4F] text-[#FDF3CD] shadow-xs'
+                    ? 'border-senzu-brand bg-senzu-brand text-senzu-cream shadow-xs'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -537,7 +537,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                 onClick={() => handleSelectMethod('mandiri')}
                 className={`py-2 px-1 rounded-xl border transition flex flex-col items-center gap-1 cursor-pointer ${
                   selectedMethod === 'mandiri'
-                    ? 'border-[#082A4F] bg-[#082A4F] text-[#FDF3CD] shadow-xs'
+                    ? 'border-senzu-brand bg-senzu-brand text-senzu-cream shadow-xs'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -549,7 +549,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                 onClick={() => handleSelectMethod('bni')}
                 className={`py-2 px-1 rounded-xl border transition flex flex-col items-center gap-1 cursor-pointer ${
                   selectedMethod === 'bni'
-                    ? 'border-[#082A4F] bg-[#082A4F] text-[#FDF3CD] shadow-xs'
+                    ? 'border-senzu-brand bg-senzu-brand text-senzu-cream shadow-xs'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -561,7 +561,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                 onClick={() => handleSelectMethod('bri')}
                 className={`py-2 px-1 rounded-xl border transition flex flex-col items-center gap-1 cursor-pointer ${
                   selectedMethod === 'bri'
-                    ? 'border-[#082A4F] bg-[#082A4F] text-[#FDF3CD] shadow-xs'
+                    ? 'border-senzu-brand bg-senzu-brand text-senzu-cream shadow-xs'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -576,7 +576,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-center">
               <div className="space-y-0.5">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Merchant QRIS Resmi</span>
-                <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">{qrisData.merchantName}</h4>
+                <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">{qrisData.merchantName}</h4>
                 <p className="text-[11px] font-mono text-slate-500">NMID: {qrisData.nmid}</p>
               </div>
 
@@ -607,7 +607,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Tujuan Transfer Bank</span>
-                  <h4 className="font-bold text-sm text-[#082A4F]">{activeBank?.bankName}</h4>
+                  <h4 className="font-bold text-sm text-senzu-brand">{activeBank?.bankName}</h4>
                 </div>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-100 text-blue-800">
                   PT KSBONE UNTUK KITA
@@ -618,7 +618,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
               <div className="p-3 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2">
                 <div>
                   <span className="text-[10px] text-slate-400 block uppercase font-semibold">Nomor Rekening</span>
-                  <span className="font-mono font-bold text-base sm:text-lg text-[#082A4F] tracking-wider">
+                  <span className="font-mono font-bold text-base sm:text-lg text-senzu-brand tracking-wider">
                     {activeBank?.accountNumber}
                   </span>
                   <span className="text-[10px] text-slate-500 block">
@@ -629,7 +629,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                 <button
                   type="button"
                   onClick={() => handleCopy(activeBank?.accountNumber || '', 'account')}
-                  className="px-3.5 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-xs"
+                  className="px-3.5 py-2 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-xs"
                 >
                   {copiedType === 'account' ? (
                     <>
@@ -638,7 +638,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                     </>
                   ) : (
                     <>
-                      <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <Copy className="w-3.5 h-3.5 text-senzu-gold" />
                       <span>Salin Rekening</span>
                     </>
                   )}
@@ -661,7 +661,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
           <div className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-bold text-xs text-[#082A4F]">Unggah Bukti Transfer</h4>
+                <h4 className="font-bold text-xs text-senzu-brand">Unggah Bukti Transfer</h4>
                 <p className="text-[11px] text-slate-500">Format JPG, PNG, atau PDF (maks. 15MB)</p>
               </div>
               {isProofUploaded && (
@@ -693,7 +693,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsPreviewProof(true)}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#082A4F] hover:underline pt-0.5 cursor-pointer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-senzu-brand hover:underline pt-0.5 cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>Lihat Bukti Yang Telah Diunggah</span>
@@ -727,10 +727,10 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                 {/* Drop / Select Area */}
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-300 hover:border-[#082A4F] rounded-2xl p-3 text-center cursor-pointer transition bg-slate-50 hover:bg-slate-100/80 flex flex-col items-center justify-center gap-1.5"
+                  className="border-2 border-dashed border-slate-300 hover:border-senzu-brand rounded-2xl p-3 text-center cursor-pointer transition bg-slate-50 hover:bg-slate-100/80 flex flex-col items-center justify-center gap-1.5"
                 >
                   <Upload className="w-5 h-5 text-slate-400" />
-                  <span className="text-xs font-semibold text-[#082A4F]">
+                  <span className="text-xs font-semibold text-senzu-brand">
                     {selectedFile ? selectedFile.name : 'Pilih File Bukti Transfer'}
                   </span>
                   <span className="text-[10px] text-slate-400">
@@ -779,16 +779,16 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
                     type="button"
                     disabled={isUploading}
                     onClick={handleUploadSubmit}
-                    className="w-full py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-sm"
+                    className="w-full py-2.5 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-sm"
                   >
                     {isUploading ? (
                       <>
-                        <RefreshCw className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                        <RefreshCw className="w-4 h-4 animate-spin text-senzu-gold" />
                         <span>Mengirim bukti...</span>
                       </>
                     ) : (
                       <>
-                        <Upload className="w-4 h-4 text-[#D4AF37]" />
+                        <Upload className="w-4 h-4 text-senzu-gold" />
                         <span>Kirim Bukti Pembayaran</span>
                       </>
                     )}
@@ -855,7 +855,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
         >
           <div className="bg-white rounded-3xl p-5 max-w-sm w-full text-center space-y-3 shadow-2xl">
             <div className="flex justify-between items-center border-b pb-2">
-              <span className="font-bold text-xs text-[#082A4F]">QRIS Senzu Home</span>
+              <span className="font-bold text-xs text-senzu-brand">QRIS Senzu Home</span>
               <button
                 type="button"
                 onClick={() => setIsFullscreenQr(false)}
@@ -870,7 +870,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
               className="w-full h-auto rounded-xl object-contain mx-auto"
               referrerPolicy="no-referrer"
             />
-            <div className="font-mono font-bold text-base text-[#082A4F]">
+            <div className="font-mono font-bold text-base text-senzu-brand">
               {formatRupiah(booking.totalAmount)}
             </div>
             <p className="text-[11px] text-slate-500">
@@ -890,7 +890,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
         >
           <div className="bg-white rounded-3xl p-5 max-w-md w-full text-center space-y-3 shadow-2xl">
             <div className="flex justify-between items-center border-b pb-2">
-              <span className="font-bold text-xs text-[#082A4F]">Bukti Pembayaran Tersimpan</span>
+              <span className="font-bold text-xs text-senzu-brand">Bukti Pembayaran Tersimpan</span>
               <button
                 type="button"
                 onClick={() => setIsPreviewProof(false)}
@@ -901,7 +901,7 @@ const ManualPendingPaymentCard: React.FC<PendingPaymentCardProps> = ({
             </div>
             {activePayment.paymentProofMimeType === 'application/pdf' ? (
               <div className="p-8 bg-slate-50 rounded-2xl border border-slate-200 text-center space-y-2">
-                <FileText className="w-12 h-12 text-[#082A4F] mx-auto" />
+                <FileText className="w-12 h-12 text-senzu-brand mx-auto" />
                 <p className="text-xs font-semibold text-slate-700">{activePayment.paymentProofFileName || 'Dokumen Bukti Transfer (PDF)'}</p>
               </div>
             ) : (
