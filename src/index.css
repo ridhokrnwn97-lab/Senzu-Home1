@@ -1,15 +1,126 @@
 @import "tailwindcss";
 
+/* Senzu's warm spa palette. Status colors (success, warning, error) stay semantic. */
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --color-senzu-canvas: #F8F3EC;
+  --color-senzu-paper: #FFFCF7;
+  --color-senzu-brand: #754C31;
+  --color-senzu-brand-hover: #5E3B28;
+  --color-senzu-espresso: #4F3222;
+  --color-senzu-caramel: #B48456;
+  --color-senzu-gold: #DEC3A2;
+  --color-senzu-cream: #F5E7D6;
+  --color-slate-50: #FAF7F2;
+  --color-slate-100: #F2ECE4;
+  --color-slate-200: #E5DCD0;
+  --color-slate-300: #D3C5B5;
+  --color-slate-400: #A69280;
+  --color-slate-500: #7B6A5C;
+  --color-slate-600: #655447;
+  --color-slate-700: #514236;
+  --color-slate-800: #3D3027;
+  --color-slate-900: #2D231D;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    scroll-padding-top: 7rem;
   }
   body {
-    background-color: #FAF9F6;
-    color: #1E293B;
+    background-color: var(--color-senzu-canvas);
+    color: var(--color-slate-800);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+  :focus-visible {
+    outline: 2px solid var(--color-senzu-brand);
+    outline-offset: 4px;
+  }
+  button:not(:disabled), a, input, select, textarea {
+    touch-action: manipulation;
+  }
+}
+
+.senzu-home { --home-rule: #E6D8C8; }
+.senzu-home section { scroll-margin-top: 7rem; }
+.senzu-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
+.senzu-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr);
+  border: 1px solid var(--home-rule);
+  border-radius: 28px;
+  overflow: hidden;
+  background: var(--color-senzu-paper);
+  box-shadow: 0 16px 48px -32px #754C3140;
+}
+.senzu-hero-copy { padding: clamp(24px, 4vw, 52px); }
+.senzu-hero-title { font-size: clamp(34px, 4.3vw, 58px); line-height: 1.12; font-weight: 500; letter-spacing: -.035em; }
+.senzu-hero-art {
+  min-height: 340px;
+  padding: 32px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  color: var(--color-senzu-cream);
+  background: linear-gradient(145deg, #9B704B, #68432C 65%, #4F3222);
+}
+.senzu-hero-art::before, .senzu-hero-art::after {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 350px;
+  right: -70px;
+  top: 30px;
+  border: 1px solid #DEC3A259;
+  border-radius: 50%;
+  transform: rotate(-28deg);
+  pointer-events: none;
+}
+.senzu-hero-art::after { right: -40px; top: 50px; }
+.senzu-hero-art svg { width: 100%; height: 190px; position: relative; color: #E5CAAA; }
+.senzu-primary, .senzu-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 12px 14px; border-radius: 14px;
+  font-size: 12px; white-space: nowrap; font-weight: 700; transition: background-color .2s, transform .2s;
+}
+.senzu-primary { background: var(--color-senzu-brand); color: #FFFCF7; border: 1px solid var(--color-senzu-brand); }
+.senzu-primary:hover { background: var(--color-senzu-brand-hover); }
+.senzu-secondary { color: var(--color-senzu-brand); border: 1px solid #D8C5B1; background: transparent; }
+.senzu-secondary:hover { background: var(--color-senzu-cream); }
+.senzu-primary:active, .senzu-secondary:active { transform: scale(.98); }
+.senzu-service-card {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between;
+  border: 1px solid var(--home-rule); border-radius: 22px; padding: 22px;
+  background: var(--color-senzu-paper); transition: border-color .2s, box-shadow .2s;
+}
+.senzu-service-card:hover { border-color: var(--color-senzu-caramel); box-shadow: 0 12px 28px -24px #754C3166; }
+.senzu-service-card:focus-within { outline: 2px solid var(--color-senzu-brand); outline-offset: 3px; }
+.senzu-service-card button::after { content: ""; position: absolute; inset: 0; border-radius: 22px; }
+.senzu-service-card button:focus-visible { outline: none; }
+.senzu-how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 20px 8px; }
+.senzu-how > div { display: flex; align-items: flex-start; gap: 12px; }
+.senzu-how-number { flex-shrink: 0; font-family: var(--font-serif); font-size: 24px; line-height: 1; color: #A47A55; }
+.senzu-bottom-nav { background: #FFFCF7F5; border-top: 1px solid #E6D8C8; box-shadow: 0 -4px 24px #754C3108; }
+
+@media (max-width: 639px) {
+  .senzu-hero { grid-template-columns: minmax(0, 1fr); border-radius: 24px; }
+  .senzu-hero-art { display: none; }
+  .senzu-hero-copy { padding: 26px 22px; }
+  .senzu-how { gap: 12px; padding: 6px 2px 14px; }
+  .senzu-how > div { flex-direction: column; gap: 8px; }
+  .senzu-how-number { font-size: 22px; }
+  .senzu-service-card { padding: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 
 /* Custom utility classes for iPhone and mobile wellness UX */
