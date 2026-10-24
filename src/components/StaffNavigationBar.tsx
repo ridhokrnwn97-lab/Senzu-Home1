@@ -172,7 +172,7 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
             onClick={() => handleScroll('left')}
             aria-label="Scroll tab navigasi ke kiri"
             title="Scroll ke kiri"
-            className="absolute left-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-r from-senzu-brand via-senzu-brand/90 to-transparent text-senzu-gold hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold"
+            className="absolute left-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-r from-[#082A4F] via-[#082A4F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
           >
             <ChevronLeft className="w-5 h-5 drop-shadow-sm" />
           </button>
@@ -202,17 +202,17 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
                 type="button"
                 onClick={() => setActiveStaffTab(tab.id)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`group relative flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold ${
+                className={`group relative flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] ${
                   isActive
-                    ? 'bg-gradient-to-r from-senzu-gold to-senzu-caramel text-senzu-brand font-bold shadow-md shadow-amber-950/20 ring-1 ring-senzu-cream/50'
+                    ? 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F] font-bold shadow-md shadow-amber-950/20 ring-1 ring-[#FDF3CD]/50'
                     : 'bg-white/5 text-slate-200 hover:text-white hover:bg-white/15 border border-white/5'
                 }`}
               >
                 <Icon
                   className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-transform ${
                     isActive
-                      ? 'text-senzu-brand'
-                      : 'text-amber-300/80 group-hover:text-senzu-gold'
+                      ? 'text-[#082A4F]'
+                      : 'text-amber-300/80 group-hover:text-[#D4AF37]'
                   }`}
                 />
                 <span>{tab.label}</span>
@@ -235,7 +235,7 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
             onClick={() => handleScroll('right')}
             aria-label="Scroll tab navigasi ke kanan"
             title="Scroll ke kanan"
-            className="absolute right-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-l from-senzu-brand via-senzu-brand/90 to-transparent text-senzu-gold hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold"
+            className="absolute right-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-l from-[#082A4F] via-[#082A4F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
           >
             <ChevronRight className="w-5 h-5 drop-shadow-sm" />
           </button>

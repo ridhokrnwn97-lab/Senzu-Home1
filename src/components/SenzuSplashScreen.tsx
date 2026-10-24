@@ -32,15 +32,15 @@ export const SenzuSplashScreen: React.FC<SenzuSplashScreenProps> = ({
           id="senzu-splash-screen"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.45, ease: 'easeInOut' } }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-senzu-brand via-[#0A2644] to-[#05172A] text-white p-6 select-none overflow-hidden"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-[#082A4F] via-[#0A2644] to-[#05172A] text-white p-6 select-none overflow-hidden"
           onClick={() => setIsVisible(false)} // Tap to skip instantly
         >
           {/* Subtle Ambient Zen Glow inspired by VIP Signature Room Warm Lighting */}
-          <div className="absolute w-72 h-72 rounded-full bg-senzu-gold/10 blur-3xl pointer-events-none -top-12 -right-12" />
+          <div className="absolute w-72 h-72 rounded-full bg-[#D4AF37]/10 blur-3xl pointer-events-none -top-12 -right-12" />
           <div className="absolute w-80 h-80 rounded-full bg-blue-900/15 blur-3xl pointer-events-none -bottom-16 -left-16" />
 
           {/* Gentle Ensō Zen Ring Accent */}
-          <div className="absolute w-64 h-64 rounded-full border border-senzu-gold/15 pointer-events-none animate-pulse" />
+          <div className="absolute w-64 h-64 rounded-full border border-[#D4AF37]/15 pointer-events-none animate-pulse" />
 
           {/* Main Brand Logo Lockup - Official Senzu Logo */}
           <motion.div
@@ -59,7 +59,7 @@ export const SenzuSplashScreen: React.FC<SenzuSplashScreenProps> = ({
             </div>
 
             {/* Separate subtitle text */}
-            <p className="mt-4 text-xs sm:text-sm text-senzu-gold font-medium tracking-[0.2em] uppercase">
+            <p className="mt-4 text-xs sm:text-sm text-[#D4AF37] font-medium tracking-[0.2em] uppercase">
               Home Service Palembang
             </p>
 
@@ -69,7 +69,7 @@ export const SenzuSplashScreen: React.FC<SenzuSplashScreenProps> = ({
                 initial={{ x: '-100%' }}
                 animate={{ x: '100%' }}
                 transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-                className="w-1/2 h-full bg-gradient-to-r from-transparent via-senzu-gold to-transparent"
+                className="w-1/2 h-full bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent"
               />
             </div>
           </motion.div>

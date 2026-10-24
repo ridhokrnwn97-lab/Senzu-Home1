@@ -196,12 +196,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <>
-    <header className="sticky top-0 z-40 bg-senzu-brand/95 text-white shadow-md border-b border-senzu-gold/30 backdrop-blur-md transition-all">
+    <header className="sticky top-0 z-40 bg-[#082A4F]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all">
       {/* Top Banner / Announcement - Hidden on mobile to save vertical viewport */}
-      <div className="hidden sm:flex bg-senzu-espresso text-[11px] sm:text-xs py-1 px-3 sm:px-4 text-center border-b border-white/5 text-slate-300 items-center justify-center gap-1.5 sm:gap-2">
+      <div className="hidden sm:flex bg-[#051C34] text-[11px] sm:text-xs py-1 px-3 sm:px-4 text-center border-b border-white/5 text-slate-300 items-center justify-center gap-1.5 sm:gap-2">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <span className="truncate">Home Service Senzu Reflexology & Massage Palembang</span>
-        <span className="hidden md:inline text-senzu-gold font-medium">• Hadirkan Home Massage & Refleksi di Rumah Anda</span>
+        <span className="hidden md:inline text-[#D4AF37] font-medium">• Hadirkan Home Massage & Refleksi di Rumah Anda</span>
       </div>
 
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
@@ -214,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={handleHomeClick}
               aria-label="Kembali ke Beranda Senzu"
               title="Kembali ke Beranda Senzu"
-              className="flex items-center cursor-pointer active:opacity-80 hover:opacity-95 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold rounded-lg p-0.5"
+              className="flex items-center cursor-pointer active:opacity-80 hover:opacity-95 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded-lg p-0.5"
             >
               <SenzuLogo
                 variant="light"
@@ -225,25 +225,25 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Compact Location Chip: Palembang - hidden on tablet to preserve space for navigation */}
             <div className="hidden min-[1120px]:flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-[10px] sm:text-[11px] text-slate-200 shrink-0">
-              <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-senzu-gold shrink-0" />
+              <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#D4AF37] shrink-0" />
               <span className="font-semibold tracking-wide">Palembang</span>
             </div>
           </div>
 
           {/* RIGHT ACTIONS - MOBILE COMPACT (Target 56-72px, uncluttered) */}
-          <div className="flex lg:hidden items-center gap-1.5">
+          <div className="flex md:hidden items-center gap-1.5">
             {/* Notification Bell with Realtime Badge */}
             <button
               id="btn-mobile-nav-notif"
               type="button"
               onClick={onOpenNotifications}
-              className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 active:bg-white/20 text-white border border-white/15 transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold"
+              className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 active:bg-white/20 text-white border border-white/15 transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
               aria-label="Pusat Notifikasi"
               title="Notifikasi"
             >
-              <Bell className="w-4 h-4 text-senzu-gold" />
+              <Bell className="w-4 h-4 text-[#D4AF37]" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-sm border border-senzu-brand animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-sm border border-[#082A4F] animate-pulse">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -260,14 +260,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-haspopup="true"
                   aria-label="Menu akun staff"
                   title="Menu Akun Staff"
-                  className="flex items-center gap-1.5 px-2.5 h-10 rounded-xl bg-amber-500/20 active:bg-amber-500/30 text-senzu-cream border border-senzu-gold/50 text-xs font-bold transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold"
+                  className="flex items-center gap-1.5 px-2.5 h-10 rounded-xl bg-amber-500/20 active:bg-amber-500/30 text-[#FDF3CD] border border-[#D4AF37]/50 text-xs font-bold transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
                 >
-                  <ShieldCheck className="w-4 h-4 text-senzu-gold shrink-0" />
+                  <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
                   <span className="uppercase text-[10px] font-bold tracking-wider">
                     {currentUser.role?.toUpperCase() || 'STAFF'}
                   </span>
                   <ChevronDown
-                    className={`w-3.5 h-3.5 text-senzu-gold/80 shrink-0 transition-transform duration-200 ${
+                    className={`w-3.5 h-3.5 text-[#D4AF37]/80 shrink-0 transition-transform duration-200 ${
                       isStaffAccountMenuOpen ? 'rotate-180' : ''
                     }`}
                   />
@@ -292,14 +292,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                       aria-labelledby="btn-mobile-staff-account"
                     >
                       {/* Current Staff Info */}
-                      <div className="p-3.5 bg-gradient-to-br from-senzu-brand to-senzu-brand-hover text-white border-b border-senzu-gold/30">
+                      <div className="p-3.5 bg-gradient-to-br from-[#082A4F] to-[#0D3B66] text-white border-b border-[#D4AF37]/30">
                         <p id="mobile-staff-name" className="font-bold text-xs text-white truncate leading-tight">
                           {currentUser.name || 'Staff Senzu'}
                         </p>
                         <div className="flex items-center gap-1.5 mt-1">
                           <span
                             id="mobile-staff-role-badge"
-                            className="inline-block text-[9px] font-extrabold uppercase tracking-wider text-senzu-cream bg-senzu-gold/25 px-1.5 py-0.5 rounded border border-senzu-gold/40"
+                            className="inline-block text-[9px] font-extrabold uppercase tracking-wider text-[#FDF3CD] bg-[#D4AF37]/25 px-1.5 py-0.5 rounded border border-[#D4AF37]/40"
                           >
                             {currentUser.role?.toUpperCase() || 'STAFF'}
                           </span>
@@ -358,11 +358,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   if (onOpenAccount) onOpenAccount();
                   else if (onOpenCustomerPortal) onOpenCustomerPortal();
                 }}
-                className="flex items-center gap-1.5 px-2.5 h-10 rounded-xl bg-amber-500/20 active:bg-amber-500/30 text-senzu-cream border border-senzu-gold/60 text-xs font-bold transition active:scale-95 cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 h-10 rounded-xl bg-amber-500/20 active:bg-amber-500/30 text-[#FDF3CD] border border-[#D4AF37]/60 text-xs font-bold transition active:scale-95 cursor-pointer"
                 aria-label="Akun Pelanggan"
                 title={`Akun: ${currentCustomer.displayName || currentCustomer.name}`}
               >
-                <div className="w-5 h-5 rounded-full bg-senzu-gold text-senzu-brand flex items-center justify-center text-[10px] font-extrabold">
+                <div className="w-5 h-5 rounded-full bg-[#D4AF37] text-[#082A4F] flex items-center justify-center text-[10px] font-extrabold">
                   {(currentCustomer.displayName || currentCustomer.name || 'M').charAt(0).toUpperCase()}
                 </div>
                 <span className="text-[11px] truncate max-w-[70px]">
@@ -381,27 +381,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-label="Akun Saya"
                 title="Akun Saya"
               >
-                <User className="w-4 h-4 text-senzu-gold" />
+                <User className="w-4 h-4 text-[#D4AF37]" />
               </button>
             )}
           </div>
 
           {/* RIGHT ACTIONS - DESKTOP & TABLET FULL (>= 768px) */}
-          <div className="hidden lg:flex items-center gap-1.5 md:gap-2 lg:gap-2.5 shrink-0">
+          <div className="hidden md:flex items-center gap-1.5 md:gap-2 lg:gap-2.5 shrink-0">
             {/* 1. Beranda */}
             <button
               id="btn-nav-beranda"
               type="button"
               onClick={handleHomeClick}
-              className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] ${
                 isHomeActive
-                  ? 'bg-senzu-gold/20 text-senzu-cream border-senzu-gold/60 font-semibold shadow-sm ring-1 ring-senzu-gold/30'
+                  ? 'bg-[#D4AF37]/20 text-[#FDF3CD] border-[#D4AF37]/60 font-semibold shadow-sm ring-1 ring-[#D4AF37]/30'
                   : 'bg-white/10 hover:bg-white/15 active:bg-white/20 text-white/90 hover:text-white border-white/20 font-medium'
               }`}
               aria-label="Beranda"
               title="Beranda"
             >
-              <Home className="w-4 h-4 text-senzu-gold shrink-0" />
+              <Home className="w-4 h-4 text-[#D4AF37] shrink-0" />
               <span>Beranda</span>
             </button>
 
@@ -411,15 +411,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 id="btn-nav-portal"
                 type="button"
                 onClick={onOpenCustomerPortal}
-                className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold ${
+                className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] ${
                   isOrdersActive
-                    ? 'bg-senzu-gold/20 text-senzu-cream border-senzu-gold/60 font-semibold shadow-sm ring-1 ring-senzu-gold/30'
+                    ? 'bg-[#D4AF37]/20 text-[#FDF3CD] border-[#D4AF37]/60 font-semibold shadow-sm ring-1 ring-[#D4AF37]/30'
                     : 'bg-white/10 hover:bg-white/15 active:bg-white/20 text-white/90 hover:text-white border-white/20 font-medium'
                 }`}
                 aria-label="Akun & Riwayat Treatment"
                 title="Akun & Riwayat Treatment"
               >
-                <User className="w-4 h-4 text-senzu-gold shrink-0" />
+                <User className="w-4 h-4 text-[#D4AF37] shrink-0" />
                 <span>Pesanan Saya</span>
               </button>
             )}
@@ -429,15 +429,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="btn-nav-lacak"
               type="button"
               onClick={onOpenTracking}
-              className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 md:px-3 lg:px-3.5 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] ${
                 isTrackingActive
-                  ? 'bg-senzu-gold/20 text-senzu-cream border-senzu-gold/60 font-semibold shadow-sm ring-1 ring-senzu-gold/30'
+                  ? 'bg-[#D4AF37]/20 text-[#FDF3CD] border-[#D4AF37]/60 font-semibold shadow-sm ring-1 ring-[#D4AF37]/30'
                   : 'bg-white/10 hover:bg-white/15 active:bg-white/20 text-white/90 hover:text-white border-white/20 font-medium'
               }`}
               aria-label="Lacak Status Pesanan"
               title="Lacak Status Pesanan"
             >
-              <Search className="w-4 h-4 text-senzu-gold shrink-0" />
+              <Search className="w-4 h-4 text-[#D4AF37] shrink-0" />
               <span>Lacak</span>
             </button>
 
@@ -452,7 +452,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 className={`flex items-center gap-1.5 px-3 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm rounded-xl border transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 ${
                   customerTab === 'account'
-                    ? 'bg-senzu-gold/20 text-senzu-cream border-senzu-gold/60 font-semibold shadow-sm ring-1 ring-senzu-gold/30'
+                    ? 'bg-[#D4AF37]/20 text-[#FDF3CD] border-[#D4AF37]/60 font-semibold shadow-sm ring-1 ring-[#D4AF37]/30'
                     : 'bg-white/10 hover:bg-white/15 active:bg-white/20 text-white/90 hover:text-white border-white/20 font-medium'
                 }`}
                 aria-label="Akun Pelanggan"
@@ -460,14 +460,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 {isCustomerAuthenticated && currentCustomer ? (
                   <>
-                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-senzu-gold to-senzu-caramel text-senzu-brand flex items-center justify-center font-bold text-[10px]">
+                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#D4AF37] to-[#B89628] text-[#082A4F] flex items-center justify-center font-bold text-[10px]">
                       {(currentCustomer.displayName || currentCustomer.name || 'M').charAt(0).toUpperCase()}
                     </div>
                     <span>{currentCustomer.nickname || currentCustomer.displayName || 'Akun Saya'}</span>
                   </>
                 ) : (
                   <>
-                    <User className="w-4 h-4 text-senzu-gold shrink-0" />
+                    <User className="w-4 h-4 text-[#D4AF37] shrink-0" />
                     <span>Akun</span>
                   </>
                 )}
@@ -479,13 +479,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="btn-nav-notif"
               type="button"
               onClick={onOpenNotifications}
-              className="relative flex items-center justify-center p-2.5 min-h-[40px] md:min-h-[44px] min-w-[40px] md:min-w-[44px] rounded-xl bg-white/10 hover:bg-white/15 active:bg-white/20 text-white border border-white/20 transition active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold"
+              className="relative flex items-center justify-center p-2.5 min-h-[40px] md:min-h-[44px] min-w-[40px] md:min-w-[44px] rounded-xl bg-white/10 hover:bg-white/15 active:bg-white/20 text-white border border-white/20 transition active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
               aria-label="Pusat Notifikasi"
               title="Pusat Notifikasi"
             >
-              <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-senzu-gold" />
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-[#D4AF37]" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-extrabold text-white shadow-md border-2 border-senzu-brand animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-extrabold text-white shadow-md border-2 border-[#082A4F] animate-pulse">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -498,7 +498,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="text-xs font-semibold text-white leading-tight">
                     {currentUser?.name || 'Staff Senzu'}
                   </span>
-                  <span className="text-[10px] text-senzu-gold uppercase font-bold tracking-wider">
+                  <span className="text-[10px] text-[#D4AF37] uppercase font-bold tracking-wider">
                     {currentUser.role === 'css'
                       ? 'CSS / Admin'
                       : currentUser.role === 'supervisor'
@@ -526,7 +526,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 id="btn-nav-login"
                 type="button"
                 onClick={onOpenLogin}
-                className="flex items-center justify-center gap-1.5 px-3 md:px-4 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-senzu-gold to-senzu-caramel hover:from-senzu-cream hover:to-senzu-caramel text-senzu-brand shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-brand"
+                className="flex items-center justify-center gap-1.5 px-3 md:px-4 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#082A4F]"
               >
                 <UserCheck className="w-4 h-4 shrink-0" />
                 <span>Staff Login</span>

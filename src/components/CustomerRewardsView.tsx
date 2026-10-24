@@ -174,22 +174,22 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
       {/* Phone Connect Header */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
         {isCustomerPreviewMode && (
-          <div className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-senzu-brand">
+          <div className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[#082A4F]">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-senzu-gold shrink-0" />
-              <span className="text-xs font-semibold text-senzu-brand">
+              <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
+              <span className="text-xs font-semibold text-[#082A4F]">
                 Mode Pratinjau Rewards & Poin Pelanggan
               </span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-senzu-brand text-senzu-cream">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#082A4F] text-[#FDF3CD]">
               Sesi Staf Aktif
             </span>
           </div>
         )}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-serif font-bold text-lg sm:text-xl text-senzu-brand flex items-center gap-2">
-              <Award className="w-5 h-5 text-senzu-gold" />
+            <h1 className="font-serif font-bold text-lg sm:text-xl text-[#082A4F] flex items-center gap-2">
+              <Award className="w-5 h-5 text-[#D4AF37]" />
               <span>Senzu Rewards & Membership</span>
             </h1>
             <p className="text-xs text-slate-500">
@@ -201,11 +201,11 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
         {/* Input Phone — signed-out visitors can't read loyalty data, so offer sign-in instead */}
         {isSignedOutVisitor ? (
           <div className="text-center space-y-3 py-2">
-            <div className="w-12 h-12 rounded-2xl bg-senzu-brand/5 border border-senzu-gold/30 flex items-center justify-center mx-auto">
-              <Award className="w-6 h-6 text-senzu-gold" />
+            <div className="w-12 h-12 rounded-2xl bg-[#082A4F]/5 border border-[#D4AF37]/30 flex items-center justify-center mx-auto">
+              <Award className="w-6 h-6 text-[#D4AF37]" />
             </div>
             <div className="space-y-1">
-              <h2 className="font-serif font-bold text-base text-senzu-brand">
+              <h2 className="font-serif font-bold text-base text-[#082A4F]">
                 Masuk untuk melihat poin Anda
               </h2>
               <p className="text-xs text-slate-500 max-w-xs mx-auto">
@@ -216,7 +216,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
               <button
                 type="button"
                 onClick={onRequestLogin}
-                className="flex-1 py-2 rounded-2xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition cursor-pointer flex items-center justify-center gap-1.5"
+                className="flex-1 py-2 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>Masuk</span>
@@ -224,7 +224,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
               <button
                 type="button"
                 onClick={onRequestRegister}
-                className="flex-1 py-2 rounded-2xl bg-white border border-slate-200 text-senzu-brand text-xs font-bold hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5"
+                className="flex-1 py-2 rounded-2xl bg-white border border-slate-200 text-[#082A4F] text-xs font-bold hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>Daftar Akun</span>
@@ -239,14 +239,14 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
                 value={phoneInput}
                 onChange={(e) => setPhoneInput(e.target.value)}
                 placeholder="Masukkan nomor WhatsApp member Anda"
-                className="w-full pl-9 pr-3 py-2 rounded-2xl border border-slate-200 text-xs focus:ring-2 focus:ring-senzu-brand bg-slate-50/50"
+                className="w-full pl-9 pr-3 py-2 rounded-2xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
               />
               <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             </div>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 rounded-2xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition cursor-pointer shrink-0"
+              className="px-4 py-2 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer shrink-0"
             >
               {isLoading ? 'Memuat...' : 'Cek Poin'}
             </button>
@@ -272,8 +272,8 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
 
       {/* Membership Card (Benchmark: Alfagift / Grab Rewards Card) — hidden when signed out, a read without auth always reports 0 points */}
       {!isSignedOutVisitor && (
-      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-senzu-brand via-senzu-brand-hover to-[#061F3B] text-white p-5 sm:p-6 shadow-xl border border-senzu-gold/40">
-        <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-senzu-gold/15 blur-2xl pointer-events-none" />
+      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-[#082A4F] via-[#0D3866] to-[#061F3B] text-white p-5 sm:p-6 shadow-xl border border-[#D4AF37]/40">
+        <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-[#D4AF37]/15 blur-2xl pointer-events-none" />
 
         <div className="relative z-10 space-y-4">
           <div className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -285,14 +285,14 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
                 <span className="font-serif text-lg font-bold text-white tracking-wide">
                   {account?.customerName || 'Member Baru Senzu'}
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-gradient-to-r from-senzu-gold to-senzu-caramel text-senzu-brand">
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F]">
                   {account?.currentTierName || 'MEMBER'}
                 </span>
               </div>
             </div>
 
-            <div className="w-10 h-10 rounded-xl bg-white/10 border border-senzu-gold/40 flex items-center justify-center">
-              <Award className="w-5 h-5 text-senzu-gold" />
+            <div className="w-10 h-10 rounded-xl bg-white/10 border border-[#D4AF37]/40 flex items-center justify-center">
+              <Award className="w-5 h-5 text-[#D4AF37]" />
             </div>
           </div>
 
@@ -301,8 +301,8 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
             <div>
               <span className="text-[10px] text-slate-300 block uppercase font-medium">Saldo Poin Anda</span>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <Coins className="w-5 h-5 text-senzu-gold" />
-                <span className="font-mono text-2xl sm:text-3xl font-extrabold text-senzu-cream">
+                <Coins className="w-5 h-5 text-[#D4AF37]" />
+                <span className="font-mono text-2xl sm:text-3xl font-extrabold text-[#FDF3CD]">
                   {account?.pointsBalance ?? 0}
                 </span>
                 <span className="text-xs text-slate-300">Poin</span>
@@ -311,7 +311,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
 
             <div className="text-right">
               <span className="text-[10px] text-slate-300 block uppercase font-medium">Nilai Tukar</span>
-              <span className="font-mono text-sm font-bold text-senzu-gold">
+              <span className="font-mono text-sm font-bold text-[#D4AF37]">
                 ≈ {formatRupiah((account?.pointsBalance ?? 0) * (settings?.pointRupiahRedemptionValue || settings?.pointsPerCurrencyUnit || 100))}
               </span>
             </div>
@@ -322,11 +322,11 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
             <div className="space-y-1.5 pt-1 border-t border-white/10">
               <div className="flex justify-between text-[11px] text-slate-300">
                 <span>Menuju tier <strong>{nextTier.name}</strong></span>
-                <span className="font-mono font-bold text-senzu-gold">{spendProgress}%</span>
+                <span className="font-mono font-bold text-[#D4AF37]">{spendProgress}%</span>
               </div>
               <div className="w-full h-2 rounded-full bg-white/15 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-senzu-gold to-senzu-cream rounded-full transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-[#D4AF37] to-[#FDF3CD] rounded-full transition-all duration-500"
                   style={{ width: `${spendProgress}%` }}
                 />
               </div>
@@ -344,11 +344,11 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
         <div className="bg-gradient-to-r from-amber-500/10 via-amber-400/15 to-orange-500/10 border border-amber-300 rounded-3xl p-4 sm:p-5 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-senzu-brand text-senzu-gold flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center">
                 <Users className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="font-bold text-xs sm:text-sm text-senzu-brand">
+                <h3 className="font-bold text-xs sm:text-sm text-[#082A4F]">
                   Program Ajak Teman (Referral)
                 </h3>
                 <p className="text-[10px] text-slate-600">
@@ -361,7 +361,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
           <div className="bg-white p-3 rounded-2xl border border-amber-200 flex items-center justify-between gap-2">
             <div>
               <span className="text-[10px] text-slate-400 uppercase font-bold block">Kode Referral Anda</span>
-              <span className="font-mono font-bold text-sm text-senzu-brand tracking-wider">
+              <span className="font-mono font-bold text-sm text-[#082A4F] tracking-wider">
                 {account.referralCode}
               </span>
             </div>
@@ -391,8 +391,8 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
 
       {/* Vouchers & Promo Codes List */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-        <h3 className="font-serif font-bold text-sm sm:text-base text-senzu-brand flex items-center gap-2">
-          <Ticket className="w-4 h-4 text-senzu-gold" />
+        <h3 className="font-serif font-bold text-sm sm:text-base text-[#082A4F] flex items-center gap-2">
+          <Ticket className="w-4 h-4 text-[#D4AF37]" />
           <span>Voucher Saya ({vouchers.filter((v) => v.status === 'available').length})</span>
         </h3>
 
@@ -417,7 +417,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
                   }`}
                 >
                   <div className="space-y-0.5 min-w-0">
-                    <span className="font-mono font-bold text-xs text-senzu-brand">
+                    <span className="font-mono font-bold text-xs text-[#082A4F]">
                       {vch.voucherCode}
                     </span>
                     <p className="font-semibold text-xs text-slate-800 truncate">
@@ -436,7 +436,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
                       type="button"
                       onClick={onStartBooking}
                       disabled={!isAvailable}
-                      className="mt-1 px-3 py-1 rounded-lg bg-senzu-brand text-senzu-cream text-[10px] font-bold hover:bg-senzu-brand-hover transition disabled:opacity-50 cursor-pointer"
+                      className="mt-1 px-3 py-1 rounded-lg bg-[#082A4F] text-[#FDF3CD] text-[10px] font-bold hover:bg-[#0D3866] transition disabled:opacity-50 cursor-pointer"
                     >
                       Pakai
                     </button>
@@ -451,7 +451,7 @@ export const CustomerRewardsView: React.FC<CustomerRewardsViewProps> = ({
       {/* Points History (Mutasi) */}
       {transactions.length > 0 && (
         <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-          <h3 className="font-serif font-bold text-sm sm:text-base text-senzu-brand">
+          <h3 className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
             Riwayat Mutasi Poin
           </h3>
 

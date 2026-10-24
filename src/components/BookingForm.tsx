@@ -781,17 +781,17 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   if (services.length === 0) {
     return (
       <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center max-w-xl mx-auto shadow-sm my-8">
-        <div className="w-14 h-14 rounded-2xl bg-senzu-brand/10 text-senzu-brand flex items-center justify-center mx-auto mb-4">
-          <Clock className="w-7 h-7 text-senzu-brand" />
+        <div className="w-14 h-14 rounded-2xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center mx-auto mb-4">
+          <Clock className="w-7 h-7 text-[#082A4F]" />
         </div>
-        <h3 className="font-serif text-xl font-bold text-senzu-brand">Menyiapkan Menu Treatment</h3>
+        <h3 className="font-serif text-xl font-bold text-[#082A4F]">Menyiapkan Menu Treatment</h3>
         <p className="text-xs text-slate-500 mt-2">
           Layanan home service Senzu sedang disinkronkan. Mohon tunggu sebentar.
         </p>
         <div className="mt-6 flex justify-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-senzu-gold animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-2 h-2 rounded-full bg-senzu-gold animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-2 h-2 rounded-full bg-senzu-gold animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '0ms' }} />
+          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '150ms' }} />
+          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '300ms' }} />
         </div>
       </div>
     );
@@ -824,11 +824,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           {repeatData && (
             <div className="bg-gradient-to-r from-amber-500/15 via-amber-400/20 to-amber-500/15 border-b border-amber-300 p-4 px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-senzu-brand text-senzu-gold flex items-center justify-center shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#082A4F] text-[#D4AF37] flex items-center justify-center shrink-0">
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="font-bold text-senzu-brand block">
+                  <span className="font-bold text-[#082A4F] block">
                     Mode Repeat Order: {repeatData.serviceName || 'Layanan Sebelumnya'}
                   </span>
                   <span className="text-slate-600 text-[11px]">
@@ -849,9 +849,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           )}
 
           {/* Header Card */}
-          <div className="bg-gradient-to-r from-senzu-brand via-senzu-brand-hover to-senzu-brand text-white p-5 sm:p-8 border-b border-senzu-gold/30">
-            <div className="inline-flex items-center gap-2 bg-senzu-gold/20 border border-senzu-gold/40 px-3 py-1 rounded-full text-[11px] font-semibold text-senzu-cream mb-2.5">
-              <Sparkles className="w-3.5 h-3.5 text-senzu-gold" />
+          <div className="bg-gradient-to-r from-[#082A4F] via-[#0B3461] to-[#082A4F] text-white p-5 sm:p-8 border-b border-[#D4AF37]/30">
+            <div className="inline-flex items-center gap-2 bg-[#D4AF37]/20 border border-[#D4AF37]/40 px-3 py-1 rounded-full text-[11px] font-semibold text-[#FDF3CD] mb-2.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
               Reservasi Home Service Palembang
             </div>
             <h2 className="font-serif text-xl sm:text-3xl font-bold tracking-tight text-white">
@@ -873,7 +873,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   <div
                     className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                       s.done
-                        ? 'bg-senzu-gold text-senzu-brand shadow-sm'
+                        ? 'bg-[#D4AF37] text-[#082A4F] shadow-sm'
                         : 'bg-white/10 text-slate-300 border border-white/20'
                     }`}
                   >
@@ -898,8 +898,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             {/* Step 1: Pilih Layanan Treatment */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-sm sm:text-base font-bold text-senzu-brand flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-senzu-brand text-white text-xs flex items-center justify-center font-sans font-bold">
+                <label className="text-sm sm:text-base font-bold text-[#082A4F] flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-[#082A4F] text-white text-xs flex items-center justify-center font-sans font-bold">
                     1
                   </span>
                   Pilih Layanan Treatment
@@ -916,17 +916,17 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       onClick={() => setSelectedServiceId(srv.id)}
                       className={`relative rounded-2xl p-4 cursor-pointer transition border-2 flex flex-col justify-between active:scale-[0.99] min-h-[140px] ${
                         isSelected
-                          ? 'border-senzu-brand bg-senzu-brand/5 shadow-md ring-2 ring-senzu-brand/20'
+                          ? 'border-[#082A4F] bg-[#082A4F]/5 shadow-md ring-2 ring-[#082A4F]/20'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
                       {srv.isPopular && (
-                        <span className="absolute -top-2.5 right-3 bg-gradient-to-r from-senzu-gold to-senzu-caramel text-senzu-brand text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+                        <span className="absolute -top-2.5 right-3 bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
                           Terfavorit
                         </span>
                       )}
                       {isSelected && (
-                        <span className="absolute -top-2.5 left-3 bg-senzu-brand text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
+                        <span className="absolute -top-2.5 left-3 bg-[#082A4F] text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
                           <Check className="w-3 h-3" />
                           Dipilih
                         </span>
@@ -934,9 +934,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
                       <div>
                         <div className="flex items-center justify-between">
-                          <h4 className="font-bold text-sm text-senzu-brand">{srv.name}</h4>
+                          <h4 className="font-bold text-sm text-[#082A4F]">{srv.name}</h4>
                           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 font-semibold bg-slate-100 px-2 py-0.5 rounded-md">
-                            <Clock className="w-3 h-3 text-senzu-caramel" />
+                            <Clock className="w-3 h-3 text-[#B89628]" />
                             {srv.duration}m
                           </span>
                         </div>
@@ -947,7 +947,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
                       <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                         <span className="text-[11px] text-slate-500">Tarif Layanan:</span>
-                        <span className="text-sm font-bold text-senzu-brand">
+                        <span className="text-sm font-bold text-[#082A4F]">
                           {formatRupiah(srv.price)}
                         </span>
                       </div>
@@ -959,8 +959,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
             {/* Step 2: Jadwal Kedatangan */}
             <div className="space-y-4">
-              <label className="text-sm sm:text-base font-bold text-senzu-brand flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-senzu-brand text-white text-xs flex items-center justify-center font-sans font-bold">
+              <label className="text-sm sm:text-base font-bold text-[#082A4F] flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#082A4F] text-white text-xs flex items-center justify-center font-sans font-bold">
                   2
                 </span>
                 Jadwal Kedatangan
@@ -969,7 +969,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-senzu-brand" />
+                    <Calendar className="w-3.5 h-3.5 text-[#082A4F]" />
                     Pilih Tanggal Kedatangan:
                   </label>
                   <input
@@ -979,20 +979,20 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     value={scheduleDate}
                     onChange={(e) => setScheduleDate(e.target.value)}
                     required
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white font-medium"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-senzu-brand" />
+                    <Clock className="w-3.5 h-3.5 text-[#082A4F]" />
                     Pilih Jam Mulai (WIB):
                   </label>
                   <select
                     id="select-booking-time"
                     value={scheduleTime}
                     onChange={(e) => setScheduleTime(e.target.value)}
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white font-medium"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
                   >
                     {TIME_SLOTS.map((slot) => (
                       <option key={slot} value={slot}>
@@ -1016,8 +1016,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       onClick={() => setScheduleTime(slot)}
                       className={`px-3 py-2 min-h-[44px] text-xs rounded-xl font-medium border transition cursor-pointer active:scale-95 ${
                         scheduleTime === slot
-                          ? 'bg-senzu-brand text-white border-senzu-brand font-bold shadow-sm'
-                          : 'bg-senzu-canvas hover:bg-slate-100 text-slate-700 border-slate-200'
+                          ? 'bg-[#082A4F] text-white border-[#082A4F] font-bold shadow-sm'
+                          : 'bg-[#FAF9F6] hover:bg-slate-100 text-slate-700 border-slate-200'
                       }`}
                     >
                       {slot}
@@ -1031,8 +1031,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
             {/* Step 3: Alamat & Kontak Pelanggan */}
             <div className="space-y-4">
-              <label className="text-sm sm:text-base font-bold text-senzu-brand flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-senzu-brand text-white text-xs flex items-center justify-center font-sans font-bold">
+              <label className="text-sm sm:text-base font-bold text-[#082A4F] flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#082A4F] text-white text-xs flex items-center justify-center font-sans font-bold">
                   3
                 </span>
                 Data Pemesan & Alamat di Kota Palembang
@@ -1041,7 +1041,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                    <User className="w-3.5 h-3.5 text-senzu-brand" />
+                    <User className="w-3.5 h-3.5 text-[#082A4F]" />
                     Nama Lengkap: <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1051,13 +1051,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     value={customerName ?? ''}
                     onChange={(e) => setCustomerName(e.target.value)}
                     required
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white font-medium"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                    <Phone className="w-3.5 h-3.5 text-senzu-brand" />
+                    <Phone className="w-3.5 h-3.5 text-[#082A4F]" />
                     Nomor WhatsApp: <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1067,7 +1067,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     value={customerWhatsApp ?? ''}
                     onChange={(e) => setCustomerWhatsApp(e.target.value)}
                     required
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white font-medium"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
                     Digunakan untuk konfirmasi & melacak kedatangan terapis.
@@ -1086,7 +1086,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     placeholder="email@domain.com"
                     value={customerEmail ?? ''}
                     onChange={(e) => setCustomerEmail(e.target.value)}
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white"
                   />
                 </div>
               </div>
@@ -1094,7 +1094,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               {/* Gender Pelanggan: dari data akun jika login, wajib dipilih jika belum ada */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1">
-                  <User className="w-3.5 h-3.5 text-senzu-brand" />
+                  <User className="w-3.5 h-3.5 text-[#082A4F]" />
                   Gender Pelanggan: <span className="text-red-500">*</span>
                 </label>
                 {currentCustomer?.gender ? (
@@ -1111,8 +1111,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                         onClick={() => setCustomerGender(g)}
                         className={`min-h-[44px] py-2.5 px-3 text-xs font-semibold rounded-xl border transition text-center cursor-pointer active:scale-95 ${
                           customerGender === g
-                            ? 'bg-senzu-brand text-white border-senzu-brand shadow-sm'
-                            : 'bg-senzu-canvas text-slate-700 border-slate-200 hover:bg-slate-100'
+                            ? 'bg-[#082A4F] text-white border-[#082A4F] shadow-sm'
+                            : 'bg-[#FAF9F6] text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
                         {g}
@@ -1129,8 +1129,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               {savedCustomerAddresses.length > 0 && (
                 <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-senzu-brand flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-senzu-caramel" />
+                    <span className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-[#B89628]" />
                       <span>Gunakan Alamat Tersimpan:</span>
                     </span>
                     <span className="text-[10px] text-slate-500">Pilih untuk isi otomatis</span>
@@ -1152,7 +1152,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                           }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer flex items-center gap-1.5 active:scale-95 ${
                             isCurrent
-                              ? 'bg-senzu-brand text-white border-senzu-brand shadow-xs'
+                              ? 'bg-[#082A4F] text-white border-[#082A4F] shadow-xs'
                               : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
                           }`}
                         >
@@ -1209,11 +1209,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   placeholder="Contoh: Fokus pada leher kaku dan betis pegal, hindari tekanan terlalu keras pada pinggang"
                   value={customerNotes}
                   onChange={(e) => setCustomerNotes(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-senzu-brand bg-white"
+                  className="w-full p-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white"
                 />
                 {repeatData?.therapistName && (
                   <p className="text-[11px] text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200 mt-2 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 shrink-0 text-senzu-caramel" />
+                    <Sparkles className="w-3.5 h-3.5 shrink-0 text-[#B89628]" />
                     <span>
                       Permintaan terapis (<strong>{repeatData.therapistName}</strong>) akan disesuaikan dengan ketersediaan jadwal. Supervisor tetap menentukan penugasan final.
                     </span>
@@ -1224,8 +1224,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
             {/* Step 4: Metode Pembayaran */}
             <div className="space-y-3">
-              <label className="text-sm sm:text-base font-bold text-senzu-brand flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-senzu-brand text-white text-xs flex items-center justify-center font-sans font-bold">
+              <label className="text-sm sm:text-base font-bold text-[#082A4F] flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#082A4F] text-white text-xs flex items-center justify-center font-sans font-bold">
                   4
                 </span>
                 Pilih Metode Pembayaran
@@ -1266,19 +1266,19 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       onClick={() => { selectXenditTest(false); setPaymentMethod(pm.id as PaymentMethod); }}
                       className={`p-3.5 min-h-[64px] rounded-2xl border-2 cursor-pointer transition flex items-center gap-3 active:scale-[0.98] ${
                         isSelected
-                          ? 'border-senzu-brand bg-senzu-brand/5 shadow-sm ring-1 ring-senzu-brand'
+                          ? 'border-[#082A4F] bg-[#082A4F]/5 shadow-sm ring-1 ring-[#082A4F]'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
                       <div
                         className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                          isSelected ? 'bg-senzu-brand text-white' : 'bg-slate-100 text-slate-600'
+                          isSelected ? 'bg-[#082A4F] text-white' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
                         <Icon className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="text-xs font-bold text-senzu-brand">{pm.name}</div>
+                        <div className="text-xs font-bold text-[#082A4F]">{pm.name}</div>
                         <div className="text-[11px] text-slate-500">{pm.desc}</div>
                       </div>
                     </div>
@@ -1286,14 +1286,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 })}
                 {liveAvailable && pricingBreakdown.finalAmount >= 10000 && <button type="button" id="payment-xendit-live" aria-pressed={!xenditTestSelected && paymentMethod === 'Xendit'}
                   onClick={() => { selectXenditTest(false); setPaymentMethod('Xendit'); }}
-                  className={`rounded-2xl border-2 p-3.5 text-left ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'border-senzu-brand bg-senzu-brand/5' : 'border-slate-200 bg-white'}`}>
-                  <span className="block text-xs font-bold text-senzu-brand">Bayar Online — Xendit</span>
+                  className={`rounded-2xl border-2 p-3.5 text-left ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'border-[#082A4F] bg-[#082A4F]/5' : 'border-slate-200 bg-white'}`}>
+                  <span className="block text-xs font-bold text-[#082A4F]">Bayar Online — Xendit</span>
                   <span className="text-[11px] text-slate-500">QRIS & Virtual Account · Bayar 100% di awal</span>
                 </button>}
                 {canTestXendit && <button type="button" id="payment-xendit-test" aria-pressed={xenditTestSelected}
                   onClick={() => selectXenditTest(true)}
-                  className={`rounded-2xl border-2 p-3.5 text-left ${xenditTestSelected ? 'border-senzu-brand bg-senzu-brand/5' : 'border-slate-200 bg-white'}`}>
-                  <span className="block text-xs font-bold text-senzu-brand">Xendit — Mode Tes</span>
+                  className={`rounded-2xl border-2 p-3.5 text-left ${xenditTestSelected ? 'border-[#082A4F] bg-[#082A4F]/5' : 'border-slate-200 bg-white'}`}>
+                  <span className="block text-xs font-bold text-[#082A4F]">Xendit — Mode Tes</span>
                   <span className="text-[11px] text-slate-500">Simulasi checkout · Khusus Manager/Admin</span>
                 </button>}
               </div>
@@ -1305,7 +1305,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
               {/* Official Non-Cash Policy Notice */}
               <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-start gap-2.5">
-                <ShieldCheck className="w-4 h-4 text-senzu-brand flex-shrink-0 mt-0.5" />
+                <ShieldCheck className="w-4 h-4 text-[#082A4F] flex-shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
                   {xenditTestSelected ? <><strong>Mode Tes:</strong> gunakan tombol pada panel Xendit untuk simulasi 100% total ringkasan. Formulir ini tidak mengajukan pesanan layanan selama Mode Tes dipilih.</>
                     : paymentMethod === 'Xendit' ? <><strong>Pembayaran Online:</strong> bayar 100% melalui Xendit sebelum terapis berangkat. Pesanan dikonfirmasi setelah pembayaran berhasil diverifikasi.</>
@@ -1322,7 +1322,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                     <Gift className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-senzu-brand">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#082A4F]">
                       Voucher, Poin & Promo
                     </h4>
                     <p className="text-[11px] text-slate-500">
@@ -1331,8 +1331,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   </div>
                 </div>
                 {customerLoyalty && (
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-senzu-brand text-white flex items-center gap-1">
-                    <Coins className="w-3 h-3 text-senzu-gold" />
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-[#082A4F] text-white flex items-center gap-1">
+                    <Coins className="w-3 h-3 text-[#D4AF37]" />
                     {customerLoyalty.pointsBalance} Poin
                   </span>
                 )}
@@ -1349,13 +1349,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       value={promoInput}
                       onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
                       placeholder="Contoh: SENZUWELCOME"
-                      className="w-full pl-9 pr-3 py-2 text-xs uppercase font-mono tracking-wider border border-slate-300 rounded-xl focus:ring-2 focus:ring-senzu-brand focus:border-senzu-brand outline-none"
+                      className="w-full pl-9 pr-3 py-2 text-xs uppercase font-mono tracking-wider border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#082A4F] focus:border-[#082A4F] outline-none"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => handleApplyPromo()}
-                    className="px-4 py-2 bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-semibold rounded-xl transition cursor-pointer"
+                    className="px-4 py-2 bg-[#082A4F] hover:bg-[#0B3461] text-white text-xs font-semibold rounded-xl transition cursor-pointer"
                   >
                     Terapkan
                   </button>
@@ -1404,7 +1404,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                           }}
                           className={`p-2.5 rounded-xl border cursor-pointer transition text-xs flex items-center justify-between ${
                             isSelected
-                              ? 'border-senzu-brand bg-senzu-brand/5 text-senzu-brand ring-1 ring-senzu-brand'
+                              ? 'border-[#082A4F] bg-[#082A4F]/5 text-[#082A4F] ring-1 ring-[#082A4F]'
                               : 'border-slate-200 hover:border-slate-300 bg-slate-50'
                           }`}
                         >
@@ -1414,7 +1414,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                               Min. transaksi {formatRupiah(cv.minimumSpend)}
                             </div>
                           </div>
-                          <span className="font-bold text-senzu-brand">
+                          <span className="font-bold text-[#082A4F]">
                             {cv.voucherType === 'percentage_discount' ? `${cv.value}%` : formatRupiah(cv.value)}
                           </span>
                         </div>
@@ -1447,7 +1447,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                             setPointsToRedeem(0);
                           }
                         }}
-                        className="rounded text-senzu-brand focus:ring-senzu-brand w-4 h-4 cursor-pointer"
+                        className="rounded text-[#082A4F] focus:ring-[#082A4F] w-4 h-4 cursor-pointer"
                       />
                     </div>
                   </div>
@@ -1466,7 +1466,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                         step={10}
                         value={pointsToRedeem ?? 0}
                         onChange={(e) => setPointsToRedeem(Number(e.target.value))}
-                        className="w-full accent-senzu-brand cursor-pointer"
+                        className="w-full accent-[#082A4F] cursor-pointer"
                       />
                       <div className="flex justify-between text-[10px] text-slate-500">
                         <span>Min: {loyaltySettings?.minimumPointsToRedeem || 50} Poin</span>
@@ -1492,7 +1492,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                       setReferralMsg(null);
                     }}
                     placeholder="Contoh: SENZU-ALEX89"
-                    className="flex-1 px-3 py-2 text-xs uppercase font-mono tracking-wider border border-slate-300 rounded-xl focus:ring-2 focus:ring-senzu-brand focus:border-senzu-brand outline-none"
+                    className="flex-1 px-3 py-2 text-xs uppercase font-mono tracking-wider border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#082A4F] focus:border-[#082A4F] outline-none"
                   />
                   <button
                     type="button"
@@ -1512,7 +1512,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             </div>
 
             {/* Rincian Biaya & Total */}
-            <div className="bg-senzu-canvas border border-slate-200 rounded-2xl p-5 space-y-2.5">
+            <div className="bg-[#FAF9F6] border border-slate-200 rounded-2xl p-5 space-y-2.5">
               <div className="text-xs uppercase tracking-wider font-bold text-slate-500">
                 Rincian Biaya Layanan
               </div>
@@ -1525,7 +1525,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               {/* Home Service Fee according to Authoritative Route Distance Rules */}
               <div className="flex justify-between text-xs sm:text-sm text-slate-700 items-center">
                 <span>Biaya Home Service</span>
-                <span className={`font-semibold ${feeCalc.isFree ? 'text-emerald-700 font-bold' : 'text-senzu-brand'}`}>
+                <span className={`font-semibold ${feeCalc.isFree ? 'text-emerald-700 font-bold' : 'text-[#082A4F]'}`}>
                   {feeCalc.isFree ? 'GRATIS' : formatRupiah(homeServiceFee)}
                 </span>
               </div>
@@ -1550,21 +1550,21 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                   <SparklesIcon className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   Estimasi Poin yang Didapat:
                 </span>
-                <span className="font-bold text-senzu-brand">
+                <span className="font-bold text-[#082A4F]">
                   +{pricingBreakdown.estimatedPointsEarned} Senzu Points
                 </span>
               </div>
 
               <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
                 <div>
-                  <span className="text-sm sm:text-base font-bold text-senzu-brand">
+                  <span className="text-sm sm:text-base font-bold text-[#082A4F]">
                     Total Pembayaran:
                   </span>
                   <p className="text-[11px] text-slate-500">
                     Termasuk minyak aromaterapi & perlengkapan higienis
                   </p>
                 </div>
-                <span className="text-xl sm:text-2xl font-bold font-serif text-senzu-brand">
+                <span className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F]">
                   {formatRupiah(totalAmount)}
                 </span>
               </div>
@@ -1575,7 +1575,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               id="btn-submit-booking"
               type="submit"
               disabled={xenditTestSelected || isSubmitting || isCalculatingRoute || Boolean(routeError)}
-              className="w-full min-h-[52px] py-3.5 rounded-2xl bg-gradient-to-r from-senzu-brand via-senzu-brand-hover to-senzu-brand hover:from-senzu-brand-hover hover:to-senzu-brand-hover text-white font-semibold text-base shadow-lg shadow-senzu-brand/20 flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer"
+              className="w-full min-h-[52px] py-3.5 rounded-2xl bg-gradient-to-r from-[#082A4F] via-[#0E3D73] to-[#082A4F] hover:from-[#0B3461] hover:to-[#0B3461] text-white font-semibold text-base shadow-lg shadow-[#082A4F]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer"
             >
               {xenditTestSelected ? 'Gunakan panel checkout Test di atas' : isSubmitting ? (
                 <div className="flex items-center gap-2">
@@ -1584,7 +1584,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
                 </div>
               ) : isCalculatingRoute ? (
                 <div className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 text-senzu-gold animate-spin" />
+                  <Loader2 className="w-5 h-5 text-[#D4AF37] animate-spin" />
                   <span>Menghitung Rute Berkendara...</span>
                 </div>
               ) : routeError ? (
@@ -1595,7 +1595,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               ) : (
                 <>
                   <span>Konfirmasi & Ajukan Booking Senzu</span>
-                  <ChevronRight className="w-5 h-5 text-senzu-gold" />
+                  <ChevronRight className="w-5 h-5 text-[#D4AF37]" />
                 </>
               )}
             </button>
@@ -1612,7 +1612,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               <div className="text-[10px] text-slate-500 truncate max-w-[150px]">
                 {selectedService?.name || 'Senzu Home'}
               </div>
-              <div className="text-base font-bold font-serif text-senzu-brand">
+              <div className="text-base font-bold font-serif text-[#082A4F]">
                 {formatRupiah(totalAmount)}
               </div>
             </div>
@@ -1620,7 +1620,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
             <button
               type="submit"
               disabled={xenditTestSelected || isSubmitting || isCalculatingRoute || Boolean(routeError)}
-              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0B3461] text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               {xenditTestSelected ? 'Mode Tes' : isSubmitting ? (
                 <span>Memproses...</span>
@@ -1631,7 +1631,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               ) : (
                 <>
                   <span>Pesan Sekarang</span>
-                  <ArrowRight className="w-4 h-4 text-senzu-gold" />
+                  <ArrowRight className="w-4 h-4 text-[#D4AF37]" />
                 </>
               )}
             </button>

@@ -291,7 +291,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
       );
     }
     return (
-      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-senzu-brand/10 text-senzu-brand border border-senzu-brand/20">
+      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#082A4F]/10 text-[#082A4F] border border-[#082A4F]/20">
         {status}
       </span>
     );
@@ -310,21 +310,21 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
       {/* Header Card */}
       <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
         {isCustomerPreviewMode && (
-          <div className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-senzu-brand">
+          <div className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[#082A4F]">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-senzu-gold shrink-0" />
-              <span className="text-xs font-semibold text-senzu-brand">
+              <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
+              <span className="text-xs font-semibold text-[#082A4F]">
                 Mode Pratinjau Pesanan Pelanggan
               </span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-senzu-brand text-senzu-cream">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#082A4F] text-[#FDF3CD]">
               Sesi Staf Aktif
             </span>
           </div>
         )}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-serif font-bold text-lg sm:text-xl text-senzu-brand">
+            <h1 className="font-serif font-bold text-lg sm:text-xl text-[#082A4F]">
               Pesanan Saya
             </h1>
             <p className="text-xs text-slate-500">
@@ -339,13 +339,13 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
               title="Segarkan riwayat pesanan"
               className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs transition active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-1 font-semibold"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin text-senzu-brand' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin text-[#082A4F]' : ''}`} />
               <span className="hidden sm:inline text-[11px]">Segarkan</span>
             </button>
             <button
               type="button"
               onClick={onStartBooking}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-senzu-gold to-senzu-caramel text-senzu-brand text-xs font-bold shadow-2xs hover:shadow-sm transition active:scale-95 cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F] text-xs font-bold shadow-2xs hover:shadow-sm transition active:scale-95 cursor-pointer"
             >
               Pesan Baru
             </button>
@@ -354,14 +354,14 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
 
         {/* Authenticated Customer Profile Notice or Guest Security Notice */}
         {isCustomerAuthenticated && currentCustomer ? (
-          <div className="p-3 rounded-2xl bg-senzu-brand/5 border border-senzu-brand/15 flex items-center justify-between gap-2">
+          <div className="p-3 rounded-2xl bg-[#082A4F]/5 border border-[#082A4F]/15 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-senzu-brand text-senzu-cream flex items-center justify-center font-bold text-xs shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-[#082A4F] text-[#FDF3CD] flex items-center justify-center font-bold text-xs shrink-0">
                 {currentCustomer.name ? currentCustomer.name.slice(0, 2).toUpperCase() : 'SH'}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-xs text-senzu-brand truncate">
+                  <span className="font-bold text-xs text-[#082A4F] truncate">
                     {currentCustomer.name}
                   </span>
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
@@ -377,7 +377,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
         ) : !isCustomerAuthenticated ? (
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
             <div className="flex items-start gap-2.5">
-              <ShieldCheck className="w-5 h-5 text-senzu-brand shrink-0 mt-0.5" />
+              <ShieldCheck className="w-5 h-5 text-[#082A4F] shrink-0 mt-0.5" />
               <div className="text-xs">
                 <p className="font-semibold text-slate-800">Privasi & Keamanan Riwayat Pesanan</p>
                 <p className="text-slate-500 text-[11px] mt-0.5 leading-relaxed">
@@ -395,14 +395,14 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
             onClick={() => setActiveTab('active')}
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
               activeTab === 'active'
-                ? 'border-senzu-brand text-senzu-brand font-bold'
+                ? 'border-[#082A4F] text-[#082A4F] font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-600'
             }`}
           >
             <span>AKTIF</span>
             <span
               className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                activeTab === 'active' ? 'bg-senzu-brand text-white' : 'bg-slate-100 text-slate-500'
+                activeTab === 'active' ? 'bg-[#082A4F] text-white' : 'bg-slate-100 text-slate-500'
               }`}
             >
               {activeList.length}
@@ -416,14 +416,14 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
             onClick={() => setActiveTab('history')}
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
               activeTab === 'history'
-                ? 'border-senzu-brand text-senzu-brand font-bold'
+                ? 'border-[#082A4F] text-[#082A4F] font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-600'
             }`}
           >
             <span>RIWAYAT</span>
             <span
               className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                activeTab === 'history' ? 'bg-senzu-brand text-white' : 'bg-slate-100 text-slate-500'
+                activeTab === 'history' ? 'bg-[#082A4F] text-white' : 'bg-slate-100 text-slate-500'
               }`}
             >
               {historyList.length}
@@ -434,14 +434,14 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
             onClick={() => setActiveTab('all')}
             className={`pb-2.5 px-3 border-b-2 transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
               activeTab === 'all'
-                ? 'border-senzu-brand text-senzu-brand font-bold'
+                ? 'border-[#082A4F] text-[#082A4F] font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-600'
             }`}
           >
             <span>SEMUA</span>
             <span
               className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                activeTab === 'all' ? 'bg-senzu-brand text-white' : 'bg-slate-100 text-slate-500'
+                activeTab === 'all' ? 'bg-[#082A4F] text-white' : 'bg-slate-100 text-slate-500'
               }`}
             >
               {customerBookings.length}
@@ -453,7 +453,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
       {/* Loading State (Requirement 9: Differentiate LOADING, ERROR, EMPTY) */}
       {(isAuthLoading || (isFetching && customerBookings.length === 0)) ? (
         <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center space-y-3 shadow-2xs my-4 animate-in fade-in duration-200">
-          <Loader2 className="w-8 h-8 text-senzu-brand animate-spin mx-auto" />
+          <Loader2 className="w-8 h-8 text-[#082A4F] animate-spin mx-auto" />
           <p className="text-xs text-slate-500">Memuat riwayat pesanan Anda...</p>
         </div>
       ) : fetchError && customerBookings.length === 0 ? (
@@ -462,7 +462,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center mx-auto">
             <AlertCircle className="w-6 h-6" />
           </div>
-          <h3 className="font-serif font-bold text-base text-senzu-brand">
+          <h3 className="font-serif font-bold text-base text-[#082A4F]">
             Riwayat Pesanan Belum Dapat Dimuat
           </h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
@@ -471,9 +471,9 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
           <button
             type="button"
             onClick={() => loadAuthoritative(false)}
-            className="px-5 py-2.5 rounded-2xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition active:scale-95 shadow-sm inline-flex items-center gap-2 cursor-pointer mt-2"
+            className="px-5 py-2.5 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition active:scale-95 shadow-sm inline-flex items-center gap-2 cursor-pointer mt-2"
           >
-            <RotateCcw className="w-4 h-4 text-senzu-gold" />
+            <RotateCcw className="w-4 h-4 text-[#D4AF37]" />
             <span>Coba Lagi</span>
           </button>
         </div>
@@ -483,7 +483,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
             <Calendar className="w-6 h-6" />
           </div>
-          <h3 className="font-serif font-bold text-base text-senzu-brand">
+          <h3 className="font-serif font-bold text-base text-[#082A4F]">
             {activeTab === 'active'
               ? 'Belum Ada Pesanan Aktif'
               : activeTab === 'history'
@@ -502,9 +502,9 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
           <button
             type="button"
             onClick={onStartBooking}
-            className="px-5 py-2.5 rounded-2xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition active:scale-95 shadow-sm inline-flex items-center gap-2 cursor-pointer mt-2"
+            className="px-5 py-2.5 rounded-2xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition active:scale-95 shadow-sm inline-flex items-center gap-2 cursor-pointer mt-2"
           >
-            <Sparkles className="w-4 h-4 text-senzu-gold" />
+            <Sparkles className="w-4 h-4 text-[#D4AF37]" />
             <span>Pesan Treatment Sekarang</span>
           </button>
         </div>
@@ -529,12 +529,12 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
             return (
               <div
                 key={b.id}
-                className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm hover:border-senzu-gold/60 transition space-y-3"
+                className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm hover:border-[#D4AF37]/60 transition space-y-3"
               >
                 {/* Top Row: Code & Status */}
                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-xs text-senzu-brand">
+                    <span className="font-mono font-bold text-xs text-[#082A4F]">
                       {b.bookingCode}
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
@@ -547,16 +547,16 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                 {/* Treatment Details */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1 min-w-0">
-                    <h3 className="font-bold text-sm text-senzu-brand truncate">
+                    <h3 className="font-bold text-sm text-[#082A4F] truncate">
                       {b.serviceName}
                     </h3>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                       <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5 text-senzu-gold" />
+                        <Calendar className="w-3.5 h-3.5 text-[#D4AF37]" />
                         <span>{formatDateIndo(b.scheduleDate)}</span>
                       </span>
                       <span className="flex items-center gap-1 font-mono">
-                        <Clock className="w-3.5 h-3.5 text-senzu-gold" />
+                        <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
                         <span>{b.scheduleTime} WIB</span>
                       </span>
                       <span>({b.serviceDuration} Menit)</span>
@@ -577,7 +577,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
 
                   <div className="text-right shrink-0">
                     <span className="text-[10px] text-slate-400 block uppercase font-semibold">Total</span>
-                    <span className="font-mono font-bold text-sm text-senzu-brand">
+                    <span className="font-mono font-bold text-sm text-[#082A4F]">
                       {formatRupiah(b.totalAmount)}
                     </span>
                     <span className="text-[10px] text-slate-500 block truncate max-w-[120px]">
@@ -626,10 +626,10 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onOpenTracking(b.bookingCode)}
-                        className="px-3.5 py-1.5 rounded-xl bg-senzu-brand text-senzu-cream hover:bg-senzu-brand-hover font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                        className="px-3.5 py-1.5 rounded-xl bg-[#082A4F] text-[#FDF3CD] hover:bg-[#0D3866] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shadow-2xs"
                       >
                         <span>Lacak Pesanan</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-senzu-gold" />
+                        <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
                       </button>
                     )}
 
@@ -637,9 +637,9 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onRepeatBooking(b)}
-                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-senzu-gold to-senzu-caramel text-senzu-brand font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shadow-2xs"
                       >
-                        <RotateCcw className="w-3.5 h-3.5 text-senzu-brand" />
+                        <RotateCcw className="w-3.5 h-3.5 text-[#082A4F]" />
                         <span>Pesan Lagi</span>
                       </button>
                     )}
@@ -658,7 +658,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-bold block">Detail Reservasi</span>
-                <h4 className="font-mono font-bold text-sm text-senzu-brand">
+                <h4 className="font-mono font-bold text-sm text-[#082A4F]">
                   #{selectedBookingForDetail.bookingCode}
                 </h4>
               </div>
@@ -687,11 +687,11 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
               <div className="space-y-3 text-xs">
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5">
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Layanan</span>
-                  <p className="font-bold text-sm text-senzu-brand">
+                  <p className="font-bold text-sm text-[#082A4F]">
                     {selectedBookingForDetail.serviceName} ({selectedBookingForDetail.serviceDuration} Menit)
                   </p>
                   <p className="text-slate-600 flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-senzu-gold" />
+                    <Calendar className="w-3.5 h-3.5 text-[#D4AF37]" />
                     <span>
                       {formatDateIndo(selectedBookingForDetail.scheduleDate)} • {selectedBookingForDetail.scheduleTime} WIB
                     </span>
@@ -733,7 +733,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                       <span className="font-mono">-{formatRupiah(selectedBookingForDetail.discountAmount)}</span>
                     </div>
                   ) : null}
-                  <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-sm text-senzu-brand">
+                  <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-sm text-[#082A4F]">
                     <span>Total Pembayaran</span>
                     <span className="font-mono">{formatRupiah(selectedBookingForDetail.totalAmount)}</span>
                   </div>
@@ -758,7 +758,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                   setSelectedBookingForDetail(null);
                   onOpenTracking(code);
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-senzu-brand text-white text-xs font-bold hover:bg-senzu-brand-hover transition cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0D3866] transition cursor-pointer"
               >
                 Lacak Status Pesanan
               </button>
