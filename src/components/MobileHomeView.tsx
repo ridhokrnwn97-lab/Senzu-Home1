@@ -244,21 +244,21 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       case 'confirmed':
         return {
           label: 'Booking Dikonfirmasi',
-          badgeClass: 'bg-blue-50 text-[#082A4F] border-[#D4AF37]/50',
-          dotClass: 'bg-[#D4AF37]',
+          badgeClass: 'bg-blue-50 text-senzu-brand border-senzu-gold/50',
+          dotClass: 'bg-senzu-gold',
         };
       case 'assigned':
       case 'therapist_assigned':
         return {
           label: 'Terapis Ditugaskan',
-          badgeClass: 'bg-sky-50 text-[#082A4F] border-sky-300',
+          badgeClass: 'bg-sky-50 text-senzu-brand border-sky-300',
           dotClass: 'bg-sky-600',
         };
       case 'on_the_way':
         return {
           label: 'Terapis Menuju Lokasi',
-          badgeClass: 'bg-[#FDF3CD] text-[#082A4F] border-[#D4AF37] font-bold',
-          dotClass: 'bg-[#D4AF37] animate-ping',
+          badgeClass: 'bg-senzu-cream text-senzu-brand border-senzu-gold font-bold',
+          dotClass: 'bg-senzu-gold animate-ping',
         };
       case 'arrived':
         return {
@@ -269,8 +269,8 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       case 'in_progress':
         return {
           label: 'Sedang Treatment',
-          badgeClass: 'bg-[#082A4F] text-[#FDF3CD] border-[#D4AF37]',
-          dotClass: 'bg-[#D4AF37] animate-pulse',
+          badgeClass: 'bg-senzu-brand text-senzu-cream border-senzu-gold',
+          dotClass: 'bg-senzu-gold animate-pulse',
         };
       case 'completed':
         return {
@@ -294,38 +294,38 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 sm:space-y-6 pb-28 max-w-2xl mx-auto px-1 sm:px-0">
+    <div className="senzu-home space-y-6 sm:space-y-8 pb-8 max-w-6xl mx-auto">
       {/* 1. GREETING & LOCATION SECTION */}
-      <section className="space-y-2 px-1 pt-1">
+      <section className="space-y-2 px-1 pt-1 sm:pt-3">
         {isCustomerPreviewMode && (
           <div
             id="badge-customer-preview-mode"
-            className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[#082A4F]"
+            className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-senzu-brand"
           >
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
-              <span className="text-xs font-semibold text-[#082A4F]">
+              <ShieldCheck className="w-4 h-4 text-senzu-gold shrink-0" />
+              <span className="text-xs font-semibold text-senzu-brand">
                 Mode Pratinjau Tampilan Publik
               </span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#082A4F] text-[#FDF3CD]">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-senzu-brand text-senzu-cream">
               Sesi Staf Aktif
             </span>
           </div>
         )}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold text-[#082A4F] truncate tracking-tight">
+            <h1 className="text-sm sm:text-base font-semibold text-senzu-brand tracking-tight">
               {greetingName ? `Halo, ${greetingName}` : 'Selamat datang di Senzu'}
             </h1>
             <p className="text-xs text-slate-500 truncate">
-              Home Service Reflexology & Family Massage Palembang
+              Waktu untuk kembali rileks.
             </p>
           </div>
 
           {/* Location Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/90 border border-slate-200/80 text-[11px] font-semibold text-[#082A4F] shrink-0">
-            <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/90 border border-slate-200/80 text-[11px] font-semibold text-senzu-brand shrink-0">
+            <MapPin className="w-3.5 h-3.5 text-senzu-gold" />
             <span>Kota Palembang</span>
           </div>
         </div>
@@ -335,19 +335,19 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {activeBooking && (
         <section
           id="active-booking-card"
-          className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-br from-[#082A4F] via-[#0D3866] to-[#051C34] text-white border-2 border-[#D4AF37]/50 shadow-xl space-y-3 relative overflow-hidden transition"
+          className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-br from-senzu-brand via-senzu-brand-hover to-senzu-espresso text-white border-2 border-senzu-gold/50 shadow-xl space-y-3 relative overflow-hidden transition"
         >
           {/* Subtle Background Glow */}
-          <div className="absolute top-0 right-0 w-36 h-36 bg-[#D4AF37]/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="absolute top-0 right-0 w-36 h-36 bg-senzu-gold/10 rounded-full blur-2xl pointer-events-none" />
 
           {/* Top Row: Code & Status */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#D4AF37] opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-[#D4AF37]"></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-senzu-gold opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-senzu-gold"></span>
               </span>
-              <span className="text-[11px] font-mono font-bold tracking-wider text-[#FDF3CD] uppercase">
+              <span className="text-[11px] font-mono font-bold tracking-wider text-senzu-cream uppercase">
                 Pesanan Aktif • #{activeBooking.bookingCode}
               </span>
             </div>
@@ -373,18 +373,18 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             </h3>
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300 mt-1">
               <span className="flex items-center gap-1 font-medium">
-                <Calendar className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <Calendar className="w-3.5 h-3.5 text-senzu-gold" />
                 <span>{formatDateIndo(activeBooking.scheduleDate)}</span>
               </span>
               <span>•</span>
               <span className="flex items-center gap-1 font-mono font-semibold">
-                <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <Clock className="w-3.5 h-3.5 text-senzu-gold" />
                 <span>{activeBooking.scheduleTime} WIB</span>
               </span>
               {activeBooking.therapistName && (
                 <>
                   <span>•</span>
-                  <span className="text-[#FDF3CD] font-medium">
+                  <span className="text-senzu-cream font-medium">
                     Terapis: {activeBooking.therapistName}
                   </span>
                 </>
@@ -392,8 +392,8 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             </div>
 
             {(activeBooking.status === 'On The Way' || (activeBooking.status as any) === 'on_the_way') && (
-              <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 text-[#FDF3CD] border border-[#D4AF37]/40 text-xs font-semibold">
-                <Navigation className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" />
+              <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 text-senzu-cream border border-senzu-gold/40 text-xs font-semibold">
+                <Navigation className="w-3.5 h-3.5 text-senzu-gold animate-pulse" />
                 <span>Terapis Sedang Menuju Lokasi Anda</span>
               </div>
             )}
@@ -403,7 +403,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <div className="mt-2.5 p-3 rounded-2xl bg-black/25 border border-amber-300/30 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between text-slate-300">
                   <span>Total Tagihan:</span>
-                  <span className="font-mono font-bold text-sm text-[#FDF3CD]">
+                  <span className="font-mono font-bold text-sm text-senzu-cream">
                     {formatRupiah(activeBooking.totalAmount)}
                   </span>
                 </div>
@@ -425,9 +425,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                   if (onOpenPayment) onOpenPayment(activeBooking);
                   else setPayingBooking(activeBooking);
                 }}
-                className="w-full py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-[#082A4F] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-senzu-brand font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <CreditCard className="w-4 h-4 text-[#082A4F]" />
+                <CreditCard className="w-4 h-4 text-senzu-brand" />
                 <span>Lanjutkan Pembayaran Sekarang</span>
               </button>
             )}
@@ -440,7 +440,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 className={`px-3.5 py-2.5 min-h-[44px] rounded-xl font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeBooking.status === 'Menunggu Pembayaran'
                     ? 'bg-white/15 hover:bg-white/20 text-white border border-white/20'
-                    : 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F]'
+                    : 'bg-gradient-to-r from-senzu-gold to-senzu-caramel hover:from-senzu-cream hover:to-senzu-caramel text-senzu-brand'
                 }`}
               >
                 <Search className="w-4 h-4" />
@@ -478,134 +478,105 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
         </section>
       )}
 
-      {/* 3. PRIMARY HERO / BOOKING CTA (Compact & Focused) */}
-      <section
-        id="hero-booking-cta"
-        className="relative rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-[#082A4F] via-[#0B3461] to-[#051C34] text-white p-5 sm:p-6 shadow-md border border-[#D4AF37]/35"
-      >
-        <div className="relative z-10 space-y-3">
-          <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/15 border border-[#D4AF37]/35 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-[#FDF3CD]">
-            <Sparkles className="w-3 h-3 text-[#D4AF37]" />
-            <span>Reflexology & Family Massage</span>
-          </div>
-
-          <div>
-            <h2 className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-white leading-tight">
-              Wellness Senzu,{' '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FDF3CD] via-[#D4AF37] to-[#B89628]">
-                langsung ke rumah.
-              </span>
-            </h2>
-            <p className="text-slate-300 text-xs sm:text-sm leading-relaxed mt-1 max-w-md">
-              Reflexology & Family Massage dengan terapis profesional di Kota Palembang.
-            </p>
-          </div>
-
-          {/* Dual Action CTAs */}
-          <div className="pt-1.5 grid grid-cols-2 gap-2.5">
-            <button
-              id="btn-hero-order-now"
-              type="button"
-              onClick={() => onStartBooking()}
-              className="px-4 py-3 min-h-[46px] rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-[#082A4F]" />
-              <span>Pesan Sekarang</span>
+      {/* A calm introduction, one primary booking action, and clear payment expectations. */}
+      <section id="hero-booking-cta" className="senzu-hero" aria-labelledby="senzu-hero-title">
+        <div className="senzu-hero-copy">
+          <p className="senzu-eyebrow text-senzu-brand mb-5 flex items-center gap-2">
+            <span className="w-6 h-px bg-senzu-caramel" aria-hidden="true" />
+            SENZU HOME · PALEMBANG
+          </p>
+          <h2 id="senzu-hero-title" className="senzu-hero-title font-serif text-senzu-espresso">
+            Ruang tenang,<br />
+            <em className="font-normal text-senzu-brand">di rumah Anda.</em>
+          </h2>
+          <p className="text-slate-600 text-sm sm:text-base leading-relaxed mt-5 max-w-md">
+            Nikmati reflexology &amp; family massage tanpa perjalanan.
+            Pilih treatment, tentukan waktu, kami hadir di tempat Anda.
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button id="btn-hero-order-now" type="button" onClick={() => onStartBooking()} className="senzu-primary flex-1 sm:flex-none">
+              Pesan Sekarang <ArrowRight className="hidden sm:block w-4 h-4" aria-hidden="true" />
             </button>
-
-            <button
-              id="btn-hero-track-booking"
-              type="button"
-              onClick={() => onOpenTracking()}
-              className="px-4 py-3 min-h-[46px] rounded-xl bg-white/10 hover:bg-white/15 active:bg-white/20 text-white font-semibold text-xs sm:text-sm border border-white/20 transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Search className="w-4 h-4 text-[#D4AF37]" />
-              <span>Lacak Booking</span>
+            <button id="btn-hero-track-booking" type="button" onClick={() => onOpenTracking()} className="senzu-secondary flex-1 sm:flex-none">
+              <Search className="hidden sm:block w-4 h-4" aria-hidden="true" /> Lacak Pesanan
             </button>
+          </div>
+          <p className="mt-5 flex items-center gap-2 text-[11px] sm:text-xs text-slate-500">
+            <ShieldCheck className="w-4 h-4 shrink-0 text-senzu-brand" aria-hidden="true" />
+            Pembayaran 100% sebelum terapis berangkat.
+          </p>
+        </div>
+        <div className="senzu-hero-art" aria-hidden="true">
+          <span className="senzu-eyebrow relative z-10">A little pause, just for you.</span>
+          <svg viewBox="0 0 240 210" fill="none">
+            <path d="M116 194C118 151 113 106 148 33M123 143C83 145 56 115 53 82C91 83 119 101 123 143ZM133 113C177 111 204 84 207 51C171 54 141 77 133 113ZM144 77C112 69 98 45 100 15C133 27 148 46 144 77ZM116 175C83 182 59 170 42 147C77 137 100 147 116 175Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M34 195H206" stroke="currentColor" strokeOpacity=".35" />
+          </svg>
+          <div className="relative z-10">
+            <p className="font-serif text-3xl leading-tight">Sentuhan nyaman.<br /><em>Tanpa terburu-buru.</em></p>
+            <p className="text-xs mt-3 text-senzu-cream/80">Reflexology &amp; Family Massage</p>
           </div>
         </div>
+      </section>
+
+      <section className="senzu-how" aria-label="Cara memesan treatment">
+        {[
+          ['01', 'Pilih treatment', 'Temukan waktu untuk diri Anda.'],
+          ['02', 'Atur jadwal', 'Tentukan waktu & lokasi.'],
+          ['03', 'Bayar & rileks', 'Lunasi sebelum terapis berangkat.'],
+        ].map(([number, title, description]) => (
+          <div key={number}>
+            <span className="senzu-how-number" aria-hidden="true">{number}</span>
+            <div><h3 className="text-xs sm:text-sm font-bold text-senzu-espresso">{title}</h3><p className="text-[11px] sm:text-xs text-slate-500 leading-relaxed mt-1">{description}</p></div>
+          </div>
+        ))}
       </section>
 
       {/* 4. QUICK SERVICES ("Layanan Senzu") */}
       <section id="services-section" className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div>
-            <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F] flex items-center gap-1.5">
-              <span>Layanan Senzu</span>
+            <h2 className="font-serif font-medium text-2xl sm:text-3xl text-senzu-espresso flex flex-wrap items-center gap-2">
+              <span>Pilih waktu rileks Anda</span>
               <span className="text-[10px] font-sans font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
                 Home Service
               </span>
             </h2>
-            <p className="text-[11px] text-slate-500">
-              Pilih treatment untuk langsung reservasi ke lokasi Anda
+            <p className="text-xs sm:text-sm text-slate-500 mt-2">
+              Treatment pilihan, langsung ke tempat Anda.
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => onStartBooking()}
-            className="text-xs font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer select-none"
+            className="text-xs font-bold text-senzu-brand hover:text-senzu-gold flex items-center gap-0.5 cursor-pointer select-none"
           >
             <span>Semua</span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Services Cards Grid (Clean, Touch-Friendly, Tapping selects service) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {(safeServices || []).slice(0, 4).map((srv) => (
-            <div
-              key={srv.id}
-              onClick={() => onStartBooking(srv.id)}
-              className="bg-white p-4 rounded-2xl border border-slate-200/90 hover:border-[#D4AF37] shadow-sm hover:shadow-md transition active:scale-[0.99] cursor-pointer flex flex-col justify-between relative group"
-            >
-              {srv.isPopular && (
-                <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-white text-[9px] font-black uppercase tracking-wider shadow-xs flex items-center gap-1">
-                  <Star className="w-2.5 h-2.5 fill-white" />
-                  <span>Favorit</span>
-                </span>
-              )}
-
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
+          {safeServices.slice(0, 4).map((srv) => (
+            <article key={srv.id} className="senzu-service-card group">
               <div>
-                <div className="flex items-center gap-2.5 mb-1.5">
-                  <div className="w-8 h-8 rounded-xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center font-serif font-bold text-sm shrink-0">
-                    {srv.name.charAt(0)}
-                  </div>
-                  <div className="min-w-0 pr-12">
-                    <h3 className="font-bold text-xs sm:text-sm text-[#082A4F] group-hover:text-[#0D3866] transition truncate">
-                      {srv.name}
-                    </h3>
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
-                      <Clock className="w-3 h-3 text-[#D4AF37]" />
-                      <span>{srv.duration} Menit</span>
-                      <span>•</span>
-                      <span>Home Service</span>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed mt-1">
-                  {srv.description || 'Pijat relaksasi & refleksi profesional langsung ke hunian Anda.'}
-                </p>
-              </div>
-
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase font-semibold block">Tarif</span>
-                  <span className="font-mono font-bold text-sm text-[#082A4F]">
-                    {formatRupiah(srv.price)}
+                <div className="flex items-center justify-between mb-5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-senzu-brand">
+                    <Clock className="w-3.5 h-3.5" aria-hidden="true" />{srv.duration} menit
                   </span>
+                  {srv.isPopular && <span className="inline-flex items-center gap-1 rounded-full border border-senzu-gold bg-senzu-cream px-2.5 py-1 text-[10px] font-bold text-senzu-espresso"><Star className="w-3 h-3" aria-hidden="true" />Favorit</span>}
                 </div>
-
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded-xl bg-slate-100 group-hover:bg-[#082A4F] text-slate-700 group-hover:text-white text-xs font-bold transition flex items-center gap-1 min-h-[36px]"
-                >
-                  <span>Pilih</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <h3 className="font-serif font-medium text-xl sm:text-2xl text-senzu-espresso leading-snug">{srv.name}</h3>
+                <p className="text-xs sm:text-sm text-slate-500 line-clamp-2 leading-relaxed mt-2">{srv.description || 'Pijat relaksasi & refleksi profesional langsung ke hunian Anda.'}</p>
+              </div>
+              <div className="mt-5 pt-4 border-t border-slate-200 flex items-end justify-between gap-3">
+                <div><span className="text-[10px] text-slate-500 block mb-1">Tarif treatment</span><span className="font-semibold text-lg text-senzu-brand tabular-nums">{formatRupiah(srv.price)}</span></div>
+                <button type="button" onClick={() => onStartBooking(srv.id)} aria-label={`Pilih ${srv.name}`} className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-senzu-brand group-hover:bg-senzu-brand group-hover:text-white transition-colors">
+                  Pilih <ArrowRight className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
-            </div>
+            </article>
           ))}
         </div>
       </section>
@@ -618,7 +589,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center shrink-0 shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-senzu-brand text-senzu-gold flex items-center justify-center shrink-0 shadow-xs">
                 <RotateCcw className="w-5 h-5" />
               </div>
               <div className="min-w-0">
@@ -644,10 +615,10 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               id="btn-repeat-order"
               type="button"
               onClick={() => onRepeatBooking(recentCompletedBooking)}
-              className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-[#FDF3CD] text-xs font-bold flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer shadow-xs"
+              className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-senzu-cream text-xs font-bold flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer shadow-xs"
             >
               <span>Pesan Lagi</span>
-              <ArrowRight className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <ArrowRight className="w-3.5 h-3.5 text-senzu-gold" />
             </button>
           </div>
         </section>
@@ -660,11 +631,11 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs flex items-center justify-between gap-3"
         >
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/15 text-[#B89628] flex items-center justify-center shrink-0">
-              <Star className="w-5 h-5 fill-[#D4AF37] text-[#D4AF37]" />
+            <div className="w-10 h-10 rounded-xl bg-senzu-gold/15 text-senzu-caramel flex items-center justify-center shrink-0">
+              <Star className="w-5 h-5 fill-senzu-gold text-senzu-gold" />
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#082A4F] block">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-senzu-brand block">
                 Treatment Favorit Anda
               </span>
               <p className="text-xs sm:text-sm font-bold text-slate-800 truncate">
@@ -679,10 +650,10 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           <button
             type="button"
             onClick={() => onStartBooking(favoriteService.id)}
-            className="px-3 py-2 min-h-[40px] rounded-xl bg-slate-100 hover:bg-[#082A4F] text-slate-800 hover:text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
+            className="px-3 py-2 min-h-[40px] rounded-xl bg-slate-100 hover:bg-senzu-brand text-slate-800 hover:text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
           >
             <span>Pesan</span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <ChevronRight className="w-3.5 h-3.5 text-senzu-gold" />
           </button>
         </section>
       )}
@@ -691,15 +662,15 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {savedAddresses.length > 0 && (
         <section id="saved-address-section" className="space-y-2.5">
           <div className="flex items-center justify-between px-1">
-            <h2 className="font-serif font-bold text-xs sm:text-sm text-[#082A4F] flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <h2 className="font-serif font-bold text-xs sm:text-sm text-senzu-brand flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-senzu-gold" />
               <span>Lokasi Tersimpan Anda</span>
             </h2>
             {onOpenAccount && (
               <button
                 type="button"
                 onClick={onOpenAccount}
-                className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] cursor-pointer"
+                className="text-[11px] font-bold text-senzu-brand hover:text-senzu-gold cursor-pointer"
               >
                 Kelola Alamat
               </button>
@@ -711,11 +682,11 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <div
                 key={addr.id}
                 onClick={() => onStartBooking()}
-                className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 hover:border-[#D4AF37]/60 transition cursor-pointer flex items-center justify-between gap-2"
+                className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 hover:border-senzu-gold/60 transition cursor-pointer flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-[#082A4F]">{addr.label}</span>
+                    <span className="text-xs font-bold text-senzu-brand">{addr.label}</span>
                     {addr.isDefault && (
                       <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
                         Utama
@@ -737,18 +708,18 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {loyaltyAccount && (
         <section
           id="rewards-summary-section"
-          className="rounded-2xl p-4 bg-gradient-to-br from-[#082A4F] to-[#0D3866] text-white border border-[#D4AF37]/40 shadow-sm flex items-center justify-between gap-3"
+          className="rounded-2xl p-4 bg-gradient-to-br from-senzu-brand to-senzu-brand-hover text-white border border-senzu-gold/40 shadow-sm flex items-center justify-between gap-3"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
-              <Award className="w-5 h-5 text-[#D4AF37]" />
+            <div className="w-10 h-10 rounded-xl bg-senzu-gold/20 border border-senzu-gold/40 flex items-center justify-center shrink-0">
+              <Award className="w-5 h-5 text-senzu-gold" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-[#FDF3CD]">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-senzu-cream">
                   Senzu Rewards
                 </span>
-                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-[#D4AF37] text-[#082A4F]">
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-senzu-gold text-senzu-brand">
                   {loyaltyAccount.currentTierName}
                 </span>
               </div>
@@ -769,10 +740,10 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             id="btn-view-rewards"
             type="button"
             onClick={onOpenRewards}
-            className="px-3 py-2 min-h-[40px] rounded-xl bg-white/15 hover:bg-white/20 active:bg-white/25 text-[#FDF3CD] text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer border border-white/20"
+            className="px-3 py-2 min-h-[40px] rounded-xl bg-white/15 hover:bg-white/20 active:bg-white/25 text-senzu-cream text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer border border-white/20"
           >
             <span>Rewards</span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <ChevronRight className="w-3.5 h-3.5 text-senzu-gold" />
           </button>
         </section>
       )}
@@ -780,14 +751,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {/* 9. PROMO SECTION (Carousel / Compact Cards) */}
       <section id="promo-section" className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-serif font-bold text-xs sm:text-sm text-[#082A4F] flex items-center gap-1.5">
-            <Gift className="w-3.5 h-3.5 text-[#D4AF37]" />
+          <h2 className="font-serif font-bold text-xs sm:text-sm text-senzu-brand flex items-center gap-1.5">
+            <Gift className="w-3.5 h-3.5 text-senzu-gold" />
             <span>Promo & Penawaran Spesial</span>
           </h2>
           <button
             type="button"
             onClick={onOpenRewards}
-            className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+            className="text-[11px] font-bold text-senzu-brand hover:text-senzu-gold flex items-center gap-0.5 cursor-pointer"
           >
             <span>Katalog</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -815,7 +786,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                     )}
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-1">
-                    <p className="font-bold text-xs text-[#082A4F]">Kode: {promo.code}</p>
+                    <p className="font-bold text-xs text-senzu-brand">Kode: {promo.code}</p>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -842,7 +813,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onStartBooking(undefined, promo.code)}
-                    className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+                    className="text-[11px] font-bold text-senzu-brand hover:text-senzu-gold flex items-center gap-0.5 cursor-pointer"
                   >
                     <span>Gunakan</span>
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -860,7 +831,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 <Ticket className="w-3.5 h-3.5 text-amber-600" />
                 <span>Diskon Pengguna Baru</span>
               </div>
-              <p className="font-bold text-xs text-[#082A4F]">Kode: SENZUWELCOME</p>
+              <p className="font-bold text-xs text-senzu-brand">Kode: SENZUWELCOME</p>
               <p className="text-[11px] text-slate-600 mt-0.5">
                 Potongan Rp 20.000 untuk treatment pertama Anda di Kota Palembang.
               </p>
@@ -876,7 +847,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <Users className="w-3.5 h-3.5 text-indigo-600" />
               <span>Ajak Teman (Referral)</span>
             </div>
-            <p className="font-bold text-xs text-[#082A4F]">Dapatkan 200 Poin</p>
+            <p className="font-bold text-xs text-senzu-brand">Dapatkan 200 Poin</p>
             <p className="text-[11px] text-slate-600 mt-0.5">
               Bagikan kode referral Anda dan raih saldo poin setiap teman selesai treatment.
             </p>
@@ -891,7 +862,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <Award className="w-3.5 h-3.5 text-emerald-600" />
               <span>Keuntungan Member</span>
             </div>
-            <p className="font-bold text-xs text-[#082A4F]">Cashback Poin Hingga 1.5x</p>
+            <p className="font-bold text-xs text-senzu-brand">Cashback Poin Hingga 1.5x</p>
             <p className="text-[11px] text-slate-600 mt-0.5">
               Nikmati diskon eksklusif dan prioritas terapis di level Silver, Gold & Platinum.
             </p>
@@ -902,14 +873,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {/* 10. RECENT ORDERS ("Pesanan Terakhir") */}
       <section id="recent-orders-section" className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
+          <h2 className="font-serif font-bold text-sm sm:text-base text-senzu-brand">
             Pesanan Terakhir
           </h2>
           {recentCustomerBookings.length > 0 && (
             <button
               type="button"
               onClick={onOpenOrders}
-              className="text-xs font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+              className="text-xs font-bold text-senzu-brand hover:text-senzu-gold flex items-center gap-0.5 cursor-pointer"
             >
               <span>Riwayat</span>
               <ChevronRight className="w-4 h-4" />
@@ -928,7 +899,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 >
                   <div className="min-w-0 space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#082A4F] truncate">
+                      <span className="text-xs font-bold text-senzu-brand truncate">
                         {b.serviceName}
                       </span>
                       <span
@@ -954,14 +925,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenTracking(b.bookingCode)}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#082A4F] text-xs font-semibold transition active:scale-95 cursor-pointer min-h-[36px]"
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-senzu-brand text-xs font-semibold transition active:scale-95 cursor-pointer min-h-[36px]"
                     >
                       Detail
                     </button>
                     <button
                       type="button"
                       onClick={() => onRepeatBooking(b)}
-                      className="px-2.5 py-1.5 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-[#FDF3CD] text-xs font-bold transition active:scale-95 cursor-pointer min-h-[36px]"
+                      className="px-2.5 py-1.5 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-senzu-cream text-xs font-bold transition active:scale-95 cursor-pointer min-h-[36px]"
                     >
                       Pesan Lagi
                     </button>
@@ -976,9 +947,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             <button
               type="button"
               onClick={() => onStartBooking()}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#082A4F] text-[#FDF3CD] text-xs font-bold shadow-xs hover:bg-[#0D3866] transition cursor-pointer min-h-[40px]"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-senzu-brand text-senzu-cream text-xs font-bold shadow-xs hover:bg-senzu-brand-hover transition cursor-pointer min-h-[40px]"
             >
-              <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <Sparkles className="w-3.5 h-3.5 text-senzu-gold" />
               <span>Pesan Treatment Pertama Anda</span>
             </button>
           </div>
@@ -987,14 +958,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
 
       {/* 11. WHY SENZU (Trust & Safety Section) */}
       <section id="why-senzu-section" className="space-y-3">
-        <h2 className="font-serif font-bold text-sm sm:text-base text-[#082A4F] px-1">
+        <h2 className="font-serif font-bold text-sm sm:text-base text-senzu-brand px-1">
           Kenyamanan & Standar Senzu Home
         </h2>
 
         <div className="grid grid-cols-2 gap-2.5 text-xs">
           <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
-            <div className="w-7 h-7 rounded-lg bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center">
-              <ShieldCheck className="w-4 h-4 text-[#082A4F]" />
+            <div className="w-7 h-7 rounded-lg bg-senzu-brand/10 text-senzu-brand flex items-center justify-center">
+              <ShieldCheck className="w-4 h-4 text-senzu-brand" />
             </div>
             <h3 className="font-bold text-slate-800 text-[11px] sm:text-xs">Terapis Terlatih</h3>
             <p className="text-[10px] text-slate-500 leading-normal">
@@ -1003,8 +974,8 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           </div>
 
           <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
-            <div className="w-7 h-7 rounded-lg bg-amber-50 text-[#B89628] flex items-center justify-center">
-              <Navigation className="w-4 h-4 text-[#B89628]" />
+            <div className="w-7 h-7 rounded-lg bg-amber-50 text-senzu-caramel flex items-center justify-center">
+              <Navigation className="w-4 h-4 text-senzu-caramel" />
             </div>
             <h3 className="font-bold text-slate-800 text-[11px] sm:text-xs">Tracking Pesanan</h3>
             <p className="text-[10px] text-slate-500 leading-normal">

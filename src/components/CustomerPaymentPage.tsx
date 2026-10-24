@@ -351,8 +351,8 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
     <div className="max-w-4xl mx-auto space-y-6 pb-16 px-2 sm:px-4">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#082A4F] text-white px-5 py-3 rounded-2xl shadow-2xl border border-[#D4AF37]/50 flex items-center gap-2.5 text-xs sm:text-sm font-semibold animate-in fade-in slide-in-from-bottom-5">
-          <CheckCircle2 className="w-5 h-5 text-[#D4AF37]" />
+        <div className="fixed bottom-6 right-6 z-50 bg-senzu-brand text-white px-5 py-3 rounded-2xl shadow-2xl border border-senzu-gold/50 flex items-center gap-2.5 text-xs sm:text-sm font-semibold animate-in fade-in slide-in-from-bottom-5">
+          <CheckCircle2 className="w-5 h-5 text-senzu-gold" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -363,7 +363,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
           <button
             type="button"
             onClick={onBackToBooking}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-[#082A4F] transition"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-senzu-brand transition"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Kembali ke Beranda</span>
@@ -373,7 +373,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
           <button
             type="button"
             onClick={() => onOpenTracking(booking.bookingCode)}
-            className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-[#082A4F] hover:underline"
+            className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-senzu-brand hover:underline"
           >
             <span>Lacak Reservasi</span>
             <ExternalLink className="w-3.5 h-3.5" />
@@ -382,13 +382,13 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
       </div>
 
       {/* Header Banner */}
-      <div className="rounded-3xl bg-gradient-to-br from-[#082A4F] via-[#0B3461] to-[#082A4F] text-white p-6 sm:p-8 shadow-xl border border-[#D4AF37]/30 relative overflow-hidden">
-        <div className="absolute -right-16 -bottom-16 w-60 h-60 rounded-full bg-[#D4AF37]/10 blur-2xl pointer-events-none" />
+      <div className="rounded-3xl bg-gradient-to-br from-senzu-brand via-senzu-brand-hover to-senzu-brand text-white p-6 sm:p-8 shadow-xl border border-senzu-gold/30 relative overflow-hidden">
+        <div className="absolute -right-16 -bottom-16 w-60 h-60 rounded-full bg-senzu-gold/10 blur-2xl pointer-events-none" />
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
           <div>
-            <div className="inline-flex items-center gap-2 bg-[#D4AF37]/20 border border-[#D4AF37]/40 px-3 py-1 rounded-full text-[11px] font-semibold text-[#FDF3CD] mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
+            <div className="inline-flex items-center gap-2 bg-senzu-gold/20 border border-senzu-gold/40 px-3 py-1 rounded-full text-[11px] font-semibold text-senzu-cream mb-2">
+              <Sparkles className="w-3.5 h-3.5 text-senzu-gold" />
               Pembayaran Senzu Home Palembang
             </div>
             <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-white">
@@ -431,7 +431,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
           className={`p-4 sm:p-5 rounded-3xl border-2 transition-all ${
             isWarningState
               ? 'bg-amber-500/10 border-amber-500/40 text-amber-950 shadow-sm'
-              : 'bg-[#FAF9F6] border-[#D4AF37]/40 text-[#082A4F] shadow-sm'
+              : 'bg-senzu-canvas border-senzu-gold/40 text-senzu-brand shadow-sm'
           }`}
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -439,7 +439,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
               <div className="flex items-center gap-2">
                 <Clock
                   className={`w-4 h-4 ${
-                    isWarningState ? 'text-amber-600 animate-pulse' : 'text-[#B89628]'
+                    isWarningState ? 'text-amber-600 animate-pulse' : 'text-senzu-caramel'
                   }`}
                 />
                 <span className="text-xs uppercase tracking-wider font-bold text-slate-600">
@@ -458,7 +458,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             <div className="sm:text-right shrink-0">
               <div
                 className={`font-mono font-extrabold text-2xl sm:text-3xl tracking-wider ${
-                  isWarningState ? 'text-amber-600' : 'text-[#082A4F]'
+                  isWarningState ? 'text-amber-600' : 'text-senzu-brand'
                 }`}
               >
                 {formatCountdown(timeLeftMs)}
@@ -536,8 +536,8 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
           {/* Card: Payment Methods Selection */}
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-serif font-bold text-base text-[#082A4F] flex items-center gap-2">
-                <CreditCard className="w-5 h-5 text-[#B89628]" />
+              <h3 className="font-serif font-bold text-base text-senzu-brand flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-senzu-caramel" />
                 Pilih Metode Pembayaran
               </h3>
               <span className="text-[11px] text-slate-500 font-medium">Resmi PT KSBONE</span>
@@ -550,16 +550,16 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                 onClick={() => handleSelectMethod('qris')}
                 className={`p-3.5 rounded-2xl border-2 transition flex flex-col items-center text-center gap-1.5 min-h-[90px] justify-center cursor-pointer ${
                   selectedMethod === 'qris'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-2 ring-[#082A4F]/20'
+                    ? 'border-senzu-brand bg-senzu-brand/5 ring-2 ring-senzu-brand/20'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <QrCode
                   className={`w-6 h-6 ${
-                    selectedMethod === 'qris' ? 'text-[#082A4F]' : 'text-slate-500'
+                    selectedMethod === 'qris' ? 'text-senzu-brand' : 'text-slate-500'
                   }`}
                 />
-                <span className="font-bold text-xs text-[#082A4F]">QRIS Senzu</span>
+                <span className="font-bold text-xs text-senzu-brand">QRIS Senzu</span>
                 <span className="text-[10px] text-slate-400">Scan Semua E-Wallet</span>
               </button>
 
@@ -569,14 +569,14 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                 onClick={() => handleSelectMethod('bni')}
                 className={`p-3.5 rounded-2xl border-2 transition flex flex-col items-center text-center gap-1.5 min-h-[90px] justify-center cursor-pointer ${
                   selectedMethod === 'bni'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-2 ring-[#082A4F]/20'
+                    ? 'border-senzu-brand bg-senzu-brand/5 ring-2 ring-senzu-brand/20'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <div className="w-6 h-6 rounded-full bg-emerald-700 text-white text-[10px] font-extrabold flex items-center justify-center">
                   BNI
                 </div>
-                <span className="font-bold text-xs text-[#082A4F]">Bank BNI</span>
+                <span className="font-bold text-xs text-senzu-brand">Bank BNI</span>
                 <span className="text-[10px] text-slate-400">Transfer Bank</span>
               </button>
 
@@ -586,14 +586,14 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                 onClick={() => handleSelectMethod('mandiri')}
                 className={`p-3.5 rounded-2xl border-2 transition flex flex-col items-center text-center gap-1.5 min-h-[90px] justify-center cursor-pointer ${
                   selectedMethod === 'mandiri'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-2 ring-[#082A4F]/20'
+                    ? 'border-senzu-brand bg-senzu-brand/5 ring-2 ring-senzu-brand/20'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <div className="w-6 h-6 rounded-full bg-blue-700 text-white text-[9px] font-extrabold flex items-center justify-center">
                   MDR
                 </div>
-                <span className="font-bold text-xs text-[#082A4F]">Bank Mandiri</span>
+                <span className="font-bold text-xs text-senzu-brand">Bank Mandiri</span>
                 <span className="text-[10px] text-slate-400">Transfer Bank</span>
               </button>
 
@@ -603,14 +603,14 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                 onClick={() => handleSelectMethod('bri')}
                 className={`p-3.5 rounded-2xl border-2 transition flex flex-col items-center text-center gap-1.5 min-h-[90px] justify-center cursor-pointer ${
                   selectedMethod === 'bri'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-2 ring-[#082A4F]/20'
+                    ? 'border-senzu-brand bg-senzu-brand/5 ring-2 ring-senzu-brand/20'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <div className="w-6 h-6 rounded-full bg-blue-900 text-white text-[9px] font-extrabold flex items-center justify-center">
                   BRI
                 </div>
-                <span className="font-bold text-xs text-[#082A4F]">Bank BRI</span>
+                <span className="font-bold text-xs text-senzu-brand">Bank BRI</span>
                 <span className="text-[10px] text-slate-400">Transfer Bank</span>
               </button>
             </div>
@@ -619,12 +619,12 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             {selectedMethod === 'qris' ? (
               /* QRIS CUSTOMER UI */
               <div className="mt-4 pt-4 border-t border-slate-100 space-y-4">
-                <div className="bg-[#FAF9F6] p-4 sm:p-5 rounded-2xl border border-slate-200 text-center space-y-4">
+                <div className="bg-senzu-canvas p-4 sm:p-5 rounded-2xl border border-slate-200 text-center space-y-4">
                   <div className="space-y-0.5">
-                    <span className="text-[11px] font-bold text-[#B89628] uppercase tracking-wider">
+                    <span className="text-[11px] font-bold text-senzu-caramel uppercase tracking-wider">
                       QRIS STATIS RESMI
                     </span>
-                    <h4 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+                    <h4 className="font-serif font-bold text-base sm:text-lg text-senzu-brand">
                       SENZU REFLEXOLOGY & FAMILY MASSAGE QR
                     </h4>
                     <p className="text-[11px] text-slate-500 font-mono">
@@ -662,9 +662,9 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                       type="button"
                       disabled={isQrisNotFound}
                       onClick={() => setIsFullscreenQrOpen(true)}
-                      className="px-4 py-2 min-h-[40px] rounded-xl bg-[#082A4F] text-white text-xs font-semibold hover:bg-[#0D3866] disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer"
+                      className="px-4 py-2 min-h-[40px] rounded-xl bg-senzu-brand text-white text-xs font-semibold hover:bg-senzu-brand-hover disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Eye className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <Eye className="w-3.5 h-3.5 text-senzu-gold" />
                       <span>Lihat QRIS Ukuran Penuh</span>
                     </button>
                     <button
@@ -682,7 +682,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                     <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-900 block">
                       TOTAL YANG HARUS DIBAYAR
                     </span>
-                    <div className="text-2xl sm:text-3xl font-extrabold text-[#082A4F] tracking-tight">
+                    <div className="text-2xl sm:text-3xl font-extrabold text-senzu-brand tracking-tight">
                       {formatRupiah(authoritativeTotal)}
                     </div>
                     <p className="text-xs text-amber-800 font-semibold pt-1">
@@ -702,7 +702,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
 
                   {/* PETUNJUK PEMBAYARAN QRIS */}
                   <div className="text-left bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 space-y-2.5 text-xs shadow-sm">
-                    <h5 className="font-bold text-sm text-[#082A4F]">Petunjuk Pembayaran QRIS</h5>
+                    <h5 className="font-bold text-sm text-senzu-brand">Petunjuk Pembayaran QRIS</h5>
                     <ol className="list-decimal list-inside space-y-1.5 text-slate-700 leading-relaxed text-xs">
                       <li>Buka aplikasi mobile banking atau e-wallet.</li>
                       <li>Pilih menu <strong>Scan QRIS</strong>.</li>
@@ -719,13 +719,13 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             ) : (
               /* BANK TRANSFER CUSTOMER UI */
               <div className="mt-4 pt-4 border-t border-slate-100 space-y-4">
-                <div className="bg-[#FAF9F6] p-5 rounded-2xl border border-slate-200 space-y-4">
+                <div className="bg-senzu-canvas p-5 rounded-2xl border border-slate-200 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                     <div>
                       <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                         Transfer Rekening Resmi
                       </span>
-                      <h4 className="font-serif font-bold text-lg text-[#082A4F]">
+                      <h4 className="font-serif font-bold text-lg text-senzu-brand">
                         {currentBankAccount?.bankName || 'Bank Transfer'}
                       </h4>
                     </div>
@@ -735,10 +735,10 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   </div>
 
                   {/* Account Number Box */}
-                  <div className="bg-white p-4 rounded-2xl border-2 border-[#082A4F]/20 space-y-1">
+                  <div className="bg-white p-4 rounded-2xl border-2 border-senzu-brand/20 space-y-1">
                     <span className="text-[11px] text-slate-500">Nomor Rekening Tujuan:</span>
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-lg sm:text-xl text-[#082A4F] tracking-wider">
+                      <span className="font-mono font-bold text-lg sm:text-xl text-senzu-brand tracking-wider">
                         {currentBankAccount?.accountNumber || '-'}
                       </span>
                       <button
@@ -759,7 +759,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
                     <div>
                       <span className="text-[11px] text-slate-500 block">Nominal yang Harus Ditransfer:</span>
-                      <span className="font-serif font-bold text-lg text-[#082A4F]">
+                      <span className="font-serif font-bold text-lg text-senzu-brand">
                         {formatRupiah(authoritativeTotal)}
                       </span>
                     </div>
@@ -780,8 +780,8 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
           {/* Card: Payment Proof Upload */}
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-serif font-bold text-base text-[#082A4F] flex items-center gap-2">
-                <Upload className="w-5 h-5 text-[#B89628]" />
+              <h3 className="font-serif font-bold text-base text-senzu-brand flex items-center gap-2">
+                <Upload className="w-5 h-5 text-senzu-caramel" />
                 Upload Bukti Pembayaran
               </h3>
               <span className="text-[11px] text-slate-400">JPG, PNG, PDF (Maks. 5 MB)</span>
@@ -850,8 +850,8 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                   className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition ${
                     selectedFile
-                      ? 'border-[#082A4F] bg-[#082A4F]/5'
-                      : 'border-slate-300 hover:border-[#082A4F] bg-[#FAF9F6]'
+                      ? 'border-senzu-brand bg-senzu-brand/5'
+                      : 'border-slate-300 hover:border-senzu-brand bg-senzu-canvas'
                   }`}
                 >
                   <input
@@ -861,8 +861,8 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                     onChange={handleFileChange}
                     className="hidden"
                   />
-                  <Upload className="w-8 h-8 text-[#082A4F] mx-auto mb-2" />
-                  <p className="text-xs font-bold text-[#082A4F]">
+                  <Upload className="w-8 h-8 text-senzu-brand mx-auto mb-2" />
+                  <p className="text-xs font-bold text-senzu-brand">
                     {selectedFile ? selectedFile.name : 'Klik atau Tarik File Bukti Pembayaran ke Sini'}
                   </p>
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -911,12 +911,12 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   className={`w-full py-3.5 min-h-[48px] rounded-2xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-95 shadow-md ${
                     !selectedFile || isUploading
                       ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] cursor-pointer'
+                      : 'bg-gradient-to-r from-senzu-gold to-senzu-caramel hover:from-senzu-cream hover:to-senzu-caramel text-senzu-brand cursor-pointer'
                   }`}
                 >
                   {isUploading ? (
                     <>
-                      <Clock className="w-4 h-4 animate-spin text-[#082A4F]" />
+                      <Clock className="w-4 h-4 animate-spin text-senzu-brand" />
                       <span>Mengirim bukti...</span>
                     </>
                   ) : (
@@ -949,7 +949,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
               <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                 Rincian Tagihan
               </span>
-              <h3 className="font-serif font-bold text-lg text-[#082A4F]">
+              <h3 className="font-serif font-bold text-lg text-senzu-brand">
                 Ringkasan Reservasi
               </h3>
             </div>
@@ -975,16 +975,16 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                 </div>
               ) : null}
 
-              <div className="pt-3 border-t-2 border-slate-100 flex justify-between items-center text-sm font-bold text-[#082A4F]">
+              <div className="pt-3 border-t-2 border-slate-100 flex justify-between items-center text-sm font-bold text-senzu-brand">
                 <span>Total Pembayaran</span>
-                <span className="font-serif text-lg text-[#082A4F]">
+                <span className="font-serif text-lg text-senzu-brand">
                   {formatRupiah(authoritativeTotal)}
                 </span>
               </div>
             </div>
 
             {/* Booking Details List */}
-            <div className="bg-[#FAF9F6] p-4 rounded-2xl border border-slate-200 space-y-3 text-xs">
+            <div className="bg-senzu-canvas p-4 rounded-2xl border border-slate-200 space-y-3 text-xs">
               <div className="flex items-start gap-2">
                 <User className="w-4 h-4 text-slate-500 mt-0.5 flex-shrink-0" />
                 <div>
@@ -1028,10 +1028,10 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
 
               {booking.therapistName && (
                 <div className="flex items-start gap-2 pt-1 border-t border-slate-200">
-                  <Sparkles className="w-4 h-4 text-[#B89628] mt-0.5 flex-shrink-0" />
+                  <Sparkles className="w-4 h-4 text-senzu-caramel mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="text-slate-400 text-[10px] block uppercase font-semibold">Terapis Ditugaskan</span>
-                    <span className="font-bold text-[#082A4F]">{booking.therapistName}</span>
+                    <span className="font-bold text-senzu-brand">{booking.therapistName}</span>
                   </div>
                 </div>
               )}
@@ -1039,13 +1039,13 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
 
             {/* Post-Booking Customer Registration Banner (Prompt 17B) */}
             {!isCustomerAuthenticated ? (
-              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#FAF7F2] to-[#F5EFEB] border border-[#D4AF37]/40 shadow-xs space-y-2">
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#FAF7F2] to-[#F5EFEB] border border-senzu-gold/40 shadow-xs space-y-2">
                 <div className="flex items-start gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-[#082A4F] text-[#D4AF37] flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-senzu-brand text-senzu-gold flex items-center justify-center shrink-0">
                     <Sparkles className="w-3.5 h-3.5" />
                   </div>
                   <div>
-                    <h4 className="font-serif font-bold text-xs text-[#082A4F]">
+                    <h4 className="font-serif font-bold text-xs text-senzu-brand">
                       Simpan Booking ke Akun Senzu
                     </h4>
                     <p className="text-[10px] text-slate-600 leading-snug">
@@ -1057,9 +1057,9 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   type="button"
                   id="btn-payment-create-account"
                   onClick={() => setIsRegisterModalOpen(true)}
-                  className="w-full py-2 px-3 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                  className="w-full py-2 px-3 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
                 >
-                  <User className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  <User className="w-3.5 h-3.5 text-senzu-gold" />
                   <span>Daftar Akun dengan Data Booking Ini</span>
                 </button>
               </div>
@@ -1132,10 +1132,10 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             </button>
 
             <div className="space-y-1 pt-2">
-              <span className="text-[11px] font-bold text-[#B89628] tracking-widest uppercase">
+              <span className="text-[11px] font-bold text-senzu-caramel tracking-widest uppercase">
                 QRIS STATIS RESMI
               </span>
-              <h3 className="font-serif font-bold text-lg text-[#082A4F]">
+              <h3 className="font-serif font-bold text-lg text-senzu-brand">
                 SENZU REFLEXOLOGY AND FAMILY MASSAGE QR
               </h3>
               <p className="text-xs text-slate-500 font-mono">
@@ -1164,7 +1164,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             <button
               type="button"
               onClick={() => setIsFullscreenQrOpen(false)}
-              className="w-full py-3 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition cursor-pointer"
+              className="w-full py-3 rounded-xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold transition cursor-pointer"
             >
               Tutup QRIS
             </button>
@@ -1185,7 +1185,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
             </button>
 
             <div className="border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-[#082A4F] text-base">
+              <h3 className="font-bold text-senzu-brand text-base">
                 Bukti Pembayaran yang Telah Diunggah
               </h3>
               <p className="text-xs text-slate-500">
@@ -1202,7 +1202,7 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
                   download={activePayment.paymentProofFileName || 'bukti-transfer.pdf'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#082A4F] text-white text-xs font-bold"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-senzu-brand text-white text-xs font-bold"
                 >
                   <Eye className="w-4 h-4" />
                   <span>Buka / Unduh File PDF</span>
