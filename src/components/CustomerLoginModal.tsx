@@ -119,11 +119,11 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-[#D4AF37]/35 overflow-hidden">
+      <div className="bg-white rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-senzu-gold/35 overflow-hidden">
         {/* Header */}
-        <div className="p-5 bg-gradient-to-r from-[#082A4F] via-[#0B3564] to-[#0D3866] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
+        <div className="p-5 bg-gradient-to-r from-senzu-brand via-[#0B3564] to-senzu-brand-hover text-white flex items-center justify-between border-b border-senzu-gold/30 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/10 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] shadow-xs">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 border border-senzu-gold/40 flex items-center justify-center text-senzu-gold shadow-xs">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -164,10 +164,10 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                       onClose();
                       onOpenStaffLogin();
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-[#082A4F] text-white text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-senzu-brand text-white text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <span>Buka Portal Staf</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-senzu-gold" />
                   </button>
                 )}
               </div>
@@ -178,7 +178,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               {/* Email */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-[#082A4F]">
+                <label className="text-xs font-bold text-senzu-brand">
                   Alamat Email
                 </label>
                 <div className="relative">
@@ -189,7 +189,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="nama@email.com"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
                   />
                 </div>
               </div>
@@ -197,7 +197,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
               {/* Password */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-[#082A4F]">
+                  <label className="text-xs font-bold text-senzu-brand">
                     Kata Sandi
                   </label>
                   <button
@@ -207,7 +207,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                       setMode('forgot_password');
                       setErrorMessage(null);
                     }}
-                    className="text-[11px] font-semibold text-[#082A4F] hover:text-[#D4AF37] underline transition cursor-pointer"
+                    className="text-[11px] font-semibold text-senzu-brand hover:text-senzu-gold underline transition cursor-pointer"
                   >
                     Lupa Kata Sandi?
                   </button>
@@ -220,7 +220,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Masukkan kata sandi Anda"
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
                   />
                   <button
                     type="button"
@@ -238,17 +238,17 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                   type="submit"
                   id="btn-submit-customer-login"
                   disabled={isSubmitting}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#082A4F] to-[#0D3866] hover:from-[#0B3564] hover:to-[#10447C] text-white text-xs sm:text-sm font-bold shadow-md transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-senzu-brand to-senzu-brand-hover hover:from-[#0B3564] hover:to-[#10447C] text-white text-xs sm:text-sm font-bold shadow-md transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                      <Loader2 className="w-4 h-4 animate-spin text-senzu-gold" />
                       <span>Sedang Masuk...</span>
                     </>
                   ) : (
                     <>
                       <span>Masuk ke Akun Senzu</span>
-                      <ChevronRight className="w-4 h-4 text-[#D4AF37]" />
+                      <ChevronRight className="w-4 h-4 text-senzu-gold" />
                     </>
                   )}
                 </button>
@@ -264,7 +264,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                       onClose();
                       onSwitchToRegister();
                     }}
-                    className="font-bold text-[#082A4F] hover:text-[#D4AF37] underline transition cursor-pointer ml-1"
+                    className="font-bold text-senzu-brand hover:text-senzu-gold underline transition cursor-pointer ml-1"
                   >
                     Daftar di sini
                   </button>
@@ -279,7 +279,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                         onClose();
                         onOpenStaffLogin();
                       }}
-                      className="font-semibold text-slate-600 hover:text-[#082A4F] underline transition cursor-pointer ml-0.5"
+                      className="font-semibold text-slate-600 hover:text-senzu-brand underline transition cursor-pointer ml-0.5"
                     >
                       Masuk Portal Staf
                     </button>
@@ -314,7 +314,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                   </p>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-[#082A4F]">
+                    <label className="text-xs font-bold text-senzu-brand">
                       Alamat Email Terdaftar
                     </label>
                     <div className="relative">
@@ -325,7 +325,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                         value={resetEmail}
                         onChange={(e) => setResetEmail(e.target.value)}
                         placeholder="nama@email.com"
-                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
                       />
                     </div>
                   </div>
@@ -333,16 +333,16 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3 rounded-2xl bg-[#082A4F] hover:bg-[#0B3564] text-white text-xs font-bold transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                    className="w-full py-3 rounded-2xl bg-senzu-brand hover:bg-[#0B3564] text-white text-xs font-bold transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                   >
                     {isSubmitting ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                        <Loader2 className="w-4 h-4 animate-spin text-senzu-gold" />
                         <span>Mengirim Tautan...</span>
                       </>
                     ) : (
                       <>
-                        <KeyRound className="w-4 h-4 text-[#D4AF37]" />
+                        <KeyRound className="w-4 h-4 text-senzu-gold" />
                         <span>Kirim Link Reset Kata Sandi</span>
                       </>
                     )}
