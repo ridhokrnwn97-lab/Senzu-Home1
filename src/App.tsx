@@ -570,7 +570,7 @@ function MainApp() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div className="senzu-shell min-h-screen bg-senzu-canvas flex flex-col font-sans">
       <PWAInstallBanner />
       <OfflineIndicator />
       {/* Navbar */}
@@ -664,7 +664,7 @@ function MainApp() {
                   <button
                     type="button"
                     onClick={() => setCustomerTab('home')}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#082A4F] hover:text-[#D4AF37] cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-senzu-brand hover:text-senzu-gold cursor-pointer"
                   >
                     <span>← Kembali ke Beranda</span>
                   </button>
@@ -746,14 +746,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Akses Dibatasi</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Akses Dibatasi</h3>
               <p className="text-xs text-slate-500">
                 Halaman ini khusus untuk tim Customer Service & Admin Senzu Home. Silakan login dengan akun yang memiliki akses.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>
@@ -768,14 +768,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Akses Rekonsiliasi Dibatasi</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Akses Rekonsiliasi Dibatasi</h3>
               <p className="text-xs text-slate-500">
                 Halaman rekonsiliasi dan verifikasi mutasi bank khusus untuk tim keuangan & admin Senzu Home.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>
@@ -790,14 +790,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Akses Dibatasi</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Akses Dibatasi</h3>
               <p className="text-xs text-slate-500">
                 Halaman ini khusus untuk Supervisor Operasional Senzu Home.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>
@@ -816,14 +816,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Portal Terapis Senzu</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Portal Terapis Senzu</h3>
               <p className="text-xs text-slate-500">
                 Silakan login menggunakan akun Terapis Anda untuk melihat daftar pesanan yang ditugaskan kepada Anda.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Terapis
               </button>
@@ -842,14 +842,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Akses Laporan Terbatas</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Akses Laporan Terbatas</h3>
               <p className="text-xs text-slate-500">
                 Hanya staf manajemen dan admin yang memiliki otoritas melihat dan mengekspor laporan keuangan.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>
@@ -873,14 +873,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-3xl border border-red-200 text-center space-y-4 max-w-md mx-auto my-12 shadow-sm">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Portal Manager &amp; Master Data</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Portal Manager &amp; Master Data</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
                 Sesuai <strong>Master Data Ownership Rule</strong>, seluruh Master Data bisnis dan Portal Manager hanya dapat diakses oleh <strong>Branch Manager</strong> dan <strong>Admin</strong>. Staf operasional (Supervisor, CSS, Terapis) beroperasi menggunakan data operasional yang telah ditetapkan.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-5 py-2.5 bg-[#082A4F] hover:bg-[#0a3563] text-white text-xs font-bold rounded-xl cursor-pointer transition shadow-xs"
+                className="px-5 py-2.5 bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs font-bold rounded-xl cursor-pointer transition shadow-xs"
               >
                 Login Akun Manager
               </button>
@@ -901,14 +901,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Database CRM Pelanggan</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Database CRM Pelanggan</h3>
               <p className="text-xs text-slate-500">
                 Akses database pelanggan memerlukan otorisasi tim admin atau CSS.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>
@@ -927,14 +927,14 @@ function MainApp() {
           ) : (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
               <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="font-bold text-[#082A4F] text-lg">Akses Program Loyalitas Dibatasi</h3>
+              <h3 className="font-bold text-senzu-brand text-lg">Akses Program Loyalitas Dibatasi</h3>
               <p className="text-xs text-slate-500">
                 Pengelolaan poin loyalitas, voucher, dan membership khusus untuk staf admin &amp; CSS Senzu Home.
               </p>
               <button
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
-                className="px-4 py-2 bg-[#082A4F] text-white text-xs font-bold rounded-xl cursor-pointer"
+                className="px-4 py-2 bg-senzu-brand text-white text-xs font-bold rounded-xl cursor-pointer"
               >
                 Login Staff
               </button>
@@ -944,7 +944,7 @@ function MainApp() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-[#082A4F] text-white border-t border-[#D4AF37]/30 mt-12 pb-28 sm:pb-12">
+      <footer className="bg-senzu-espresso text-white border-t border-senzu-gold/30 mt-12 pb-28 lg:pb-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-white/10 pb-6">
             <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-left">
@@ -953,7 +953,7 @@ function MainApp() {
                 onClick={handleGoHome}
                 aria-label="Kembali ke Beranda Senzu"
                 title="Kembali ke Beranda Senzu"
-                className="cursor-pointer hover:opacity-90 transition p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+                className="cursor-pointer hover:opacity-90 transition p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-senzu-gold rounded"
               >
                 <SenzuLogo
                   variant="light"
@@ -962,7 +962,7 @@ function MainApp() {
                 />
               </button>
               <span className="text-xs text-slate-400 font-medium hidden sm:inline">•</span>
-              <span className="text-xs text-[#D4AF37] font-medium tracking-wide">
+              <span className="text-xs text-senzu-gold font-medium tracking-wide">
                 Home Service Palembang
               </span>
             </div>
@@ -1000,7 +1000,7 @@ function MainApp() {
                   href={getCsWhatsAppUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[#D4AF37] font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                  className="text-senzu-gold font-semibold hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Phone className="w-3 h-3" />
                   <span>CS WhatsApp</span>
@@ -1204,9 +1204,9 @@ function MainApp() {
       {chatNoticeToast && (
         <div
           role="status"
-          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-[#082A4F] text-[#FDF3CD] border border-[#D4AF37]/40 px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-2 animate-bounce pointer-events-none"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-senzu-brand text-senzu-cream border border-senzu-gold/40 px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-2 animate-bounce pointer-events-none"
         >
-          <Info className="w-4 h-4 text-[#D4AF37]" />
+          <Info className="w-4 h-4 text-senzu-gold" />
           <span>{chatNoticeToast}</span>
         </div>
       )}
