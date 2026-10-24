@@ -177,14 +177,14 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
   return (
     <div className="space-y-4 pb-24 max-w-3xl mx-auto">
       {isStaffPreview && (
-        <div className="flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[#082A4F]">
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-senzu-brand">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
-            <span className="text-xs font-semibold text-[#082A4F]">
+            <ShieldCheck className="w-4 h-4 text-senzu-gold shrink-0" />
+            <span className="text-xs font-semibold text-senzu-brand">
               Mode Pratinjau Tampilan Akun Pelanggan
             </span>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#082A4F] text-[#FDF3CD]">
+          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-senzu-brand text-senzu-cream">
             Staf: {currentUser?.name || 'Aktif'}
           </span>
         </div>
@@ -193,24 +193,24 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
       {/* 1. MEMBERSHIP / GUEST HEADER CARD */}
       {isCustomerAuthenticated && currentCustomer ? (
         // Authenticated Customer Membership Card
-        <div className="bg-gradient-to-br from-[#FAF7F2] via-[#F5EFEB] to-[#EAE2D8] rounded-3xl p-5 sm:p-6 border border-[#D4AF37]/45 shadow-md space-y-4 relative overflow-hidden">
+        <div className="bg-gradient-to-br from-[#FAF7F2] via-[#F5EFEB] to-[#EAE2D8] rounded-3xl p-5 sm:p-6 border border-senzu-gold/45 shadow-md space-y-4 relative overflow-hidden">
           {/* Subtle Zen Watermark */}
-          <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full border-2 border-[#D4AF37]/20 pointer-events-none" />
+          <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full border-2 border-senzu-gold/20 pointer-events-none" />
           <div className="absolute right-6 top-5 opacity-20 pointer-events-none hidden sm:block">
             <SenzuLogo variant="dark" size="small" className="h-8 w-auto max-w-[160px]" />
           </div>
 
           <div className="flex items-center justify-between relative z-10">
             <div className="flex items-center gap-3.5">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#082A4F] to-[#0D3866] text-[#D4AF37] border-2 border-[#D4AF37]/60 flex items-center justify-center font-serif text-xl font-bold shadow-md">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-senzu-brand to-senzu-brand-hover text-senzu-gold border-2 border-senzu-gold/60 flex items-center justify-center font-serif text-xl font-bold shadow-md">
                 {displayName.charAt(0).toUpperCase()}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="font-serif font-bold text-lg text-[#082A4F]">
+                  <h1 className="font-serif font-bold text-lg text-senzu-brand">
                     {displayName}
                   </h1>
-                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-[#082A4F] text-[#FDF3CD] border border-[#D4AF37]/40 shadow-xs">
+                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-senzu-brand text-senzu-cream border border-senzu-gold/40 shadow-xs">
                     {currentCustomer.customerSegment === 'VIP' ? 'VIP Member' : 'Senzu Member'}
                   </span>
                 </div>
@@ -230,9 +230,9 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               type="button"
               id="btn-edit-customer-profile"
               onClick={() => setIsProfileModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-white/90 hover:bg-white text-[#082A4F] border border-[#D4AF37]/35 text-xs font-bold cursor-pointer transition shadow-xs flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-xl bg-white/90 hover:bg-white text-senzu-brand border border-senzu-gold/35 text-xs font-bold cursor-pointer transition shadow-xs flex items-center gap-1.5"
             >
-              <Edit3 className="w-3.5 h-3.5 text-[#B89628]" />
+              <Edit3 className="w-3.5 h-3.5 text-senzu-caramel" />
               <span>Ubah Profil</span>
             </button>
           </div>
@@ -265,16 +265,16 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
           )}
 
           {/* Quick Metrics Bar */}
-          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#D4AF37]/25 text-center">
+          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-senzu-gold/25 text-center">
             <div className="p-2 rounded-xl bg-white/50 border border-white/60">
               <p className="text-[10px] text-slate-500 uppercase font-semibold">Total Treatment</p>
-              <p className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
+              <p className="font-serif font-bold text-sm sm:text-base text-senzu-brand">
                 {currentCustomer.completedBookings || 0} Sesi
               </p>
             </div>
             <div className="p-2 rounded-xl bg-white/50 border border-white/60">
               <p className="text-[10px] text-slate-500 uppercase font-semibold">Alamat</p>
-              <p className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
+              <p className="font-serif font-bold text-sm sm:text-base text-senzu-brand">
                 {savedAddresses.length} Tersimpan
               </p>
             </div>
@@ -289,14 +289,14 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
         </div>
       ) : (
         // Unauthenticated / Guest Welcome Hero Card
-        <div className="bg-gradient-to-br from-[#FAF7F2] via-[#F5EFEB] to-[#EAE2D8] rounded-3xl p-5 sm:p-6 border border-[#D4AF37]/45 shadow-md space-y-4 relative overflow-hidden">
+        <div className="bg-gradient-to-br from-[#FAF7F2] via-[#F5EFEB] to-[#EAE2D8] rounded-3xl p-5 sm:p-6 border border-senzu-gold/45 shadow-md space-y-4 relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div className="space-y-1 max-w-lg">
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100/80 border border-amber-300 text-[#5C4A3C] text-[10px] font-bold">
-                <Sparkles className="w-3 h-3 text-[#B89628]" />
+                <Sparkles className="w-3 h-3 text-senzu-caramel" />
                 <span>Pendaftaran Akun Opsional (Guest-First)</span>
               </div>
-              <h2 className="font-serif font-bold text-lg sm:text-xl text-[#082A4F]">
+              <h2 className="font-serif font-bold text-lg sm:text-xl text-senzu-brand">
                 Akun Pelanggan Senzu Home
               </h2>
               <p className="text-xs text-slate-600 leading-relaxed">
@@ -305,14 +305,14 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-[#D4AF37]/25">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-senzu-gold/25">
             <button
               type="button"
               id="btn-open-customer-login"
               onClick={handleOpenLogin}
-              className="w-full py-3 px-4 rounded-2xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs sm:text-sm font-bold shadow-md transition cursor-pointer flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-2xl bg-senzu-brand hover:bg-senzu-brand-hover text-white text-xs sm:text-sm font-bold shadow-md transition cursor-pointer flex items-center justify-center gap-2"
             >
-              <User className="w-4 h-4 text-[#D4AF37]" />
+              <User className="w-4 h-4 text-senzu-gold" />
               <span>Masuk ke Akun Saya</span>
             </button>
 
@@ -320,9 +320,9 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               type="button"
               id="btn-open-customer-register"
               onClick={handleOpenRegister}
-              className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-amber-50/60 text-[#082A4F] border border-[#D4AF37]/60 text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-amber-50/60 text-senzu-brand border border-senzu-gold/60 text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-2"
             >
-              <Sparkles className="w-4 h-4 text-[#B89628]" />
+              <Sparkles className="w-4 h-4 text-senzu-caramel" />
               <span>Daftar Akun Baru</span>
             </button>
           </div>
@@ -361,7 +361,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">Pesanan Saya</h4>
+              <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">Pesanan Saya</h4>
               <p className="text-[11px] text-slate-500">Lihat riwayat dan status booking aktif</p>
             </div>
           </div>
@@ -376,12 +376,12 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
           className="w-full p-4 flex items-center justify-between hover:bg-slate-50/80 transition text-left cursor-pointer"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-50 text-[#B89628] flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-amber-50 text-senzu-caramel flex items-center justify-center">
               <MapPin className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">Alamat Saya</h4>
+                <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">Alamat Saya</h4>
                 {savedAddresses.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
                     {savedAddresses.length} Alamat
@@ -408,7 +408,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <Award className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">Rewards & Membership</h4>
+              <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">Rewards & Membership</h4>
               <p className="text-[11px] text-slate-500">Saldo poin loyalty, tier level, dan voucher diskon</p>
             </div>
           </div>
@@ -427,7 +427,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <MapPin className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">Lacak Status Booking</h4>
+              <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">Lacak Status Booking</h4>
               <p className="text-[11px] text-slate-500">Cek posisi terapis dan estimasi tiba realtime</p>
             </div>
           </div>
@@ -491,7 +491,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">
+              <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">
                 Syarat & Ketentuan Layanan
               </h4>
               <p className="text-[11px] text-slate-500">
@@ -517,7 +517,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-xs sm:text-sm text-[#082A4F]">
+              <h4 className="font-bold text-xs sm:text-sm text-senzu-brand">
                 Kebijakan Privasi
               </h4>
               <p className="text-[11px] text-slate-500">
@@ -563,7 +563,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
       {isCustomerAuthenticated && (
         <div className="p-4 bg-white rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
-            <h4 className="font-bold text-xs text-[#082A4F]">Sesi Akun Pelanggan</h4>
+            <h4 className="font-bold text-xs text-senzu-brand">Sesi Akun Pelanggan</h4>
             <p className="text-[11px] text-slate-500">
               Masuk sebagai {currentCustomer?.email}
             </p>
@@ -589,8 +589,8 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
                 <ShieldCheck className="w-4 h-4" />
               </div>
               <div>
-                <p className="font-bold text-xs text-[#082A4F]">Staff: {currentUser.name}</p>
-                <p className="text-[10px] text-[#D4AF37] uppercase font-bold tracking-wider">
+                <p className="font-bold text-xs text-senzu-brand">Staff: {currentUser.name}</p>
+                <p className="text-[10px] text-senzu-gold uppercase font-bold tracking-wider">
                   Role: {currentUser.role}
                 </p>
               </div>
@@ -611,7 +611,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
                 <Lock className="w-4 h-4" />
               </div>
               <div>
-                <h4 className="font-bold text-xs text-[#082A4F]">Portal Khusus Staff</h4>
+                <h4 className="font-bold text-xs text-senzu-brand">Portal Khusus Staff</h4>
                 <p className="text-[10px] text-slate-500">CSS, Supervisor, Terapis & Manajemen</p>
               </div>
             </div>
@@ -620,7 +620,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               type="button"
               id="btn-staff-login"
               onClick={onOpenLogin}
-              className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-[#082A4F] border border-slate-200 text-xs font-bold transition cursor-pointer shadow-2xs"
+              className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-senzu-brand border border-slate-200 text-xs font-bold transition cursor-pointer shadow-2xs"
             >
               Login Staff
             </button>
@@ -687,7 +687,7 @@ export const CustomerAccountView: React.FC<CustomerAccountViewProps> = ({
               <LogOut className="w-6 h-6" />
             </div>
             <div className="text-center space-y-1">
-              <h3 className="font-serif font-bold text-base text-[#082A4F]">
+              <h3 className="font-serif font-bold text-base text-senzu-brand">
                 Keluar dari Akun?
               </h3>
               <p className="text-xs text-slate-500">
