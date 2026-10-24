@@ -143,11 +143,11 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
-        <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-senzu-gold/35 overflow-hidden">
+        <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-[#D4AF37]/35 overflow-hidden">
           {/* Header */}
-          <div className="p-5 bg-gradient-to-r from-senzu-brand via-[#0B3564] to-senzu-brand-hover text-white flex items-center justify-between border-b border-senzu-gold/30 shrink-0">
+          <div className="p-5 bg-gradient-to-r from-[#082A4F] via-[#0B3564] to-[#0D3866] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-white/10 border border-senzu-gold/40 flex items-center justify-center text-senzu-gold shadow-xs">
+              <div className="w-10 h-10 rounded-2xl bg-white/10 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] shadow-xs">
                 <Sparkles className="w-5 h-5" />
               </div>
               <div>
@@ -188,7 +188,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                         onClose();
                         onSwitchToLogin();
                       }}
-                      className="text-xs font-bold text-senzu-brand underline cursor-pointer"
+                      className="text-xs font-bold text-[#082A4F] underline cursor-pointer"
                     >
                       Masuk sekarang →
                     </button>
@@ -199,8 +199,8 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
 
             {/* Context Notice for Post-Booking */}
             {currentBookingCode && (
-              <div className="p-3 rounded-2xl bg-amber-50/80 border border-senzu-gold/40 text-[#5C4A3C] text-xs flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-senzu-caramel shrink-0 mt-0.5" />
+              <div className="p-3 rounded-2xl bg-amber-50/80 border border-[#D4AF37]/40 text-[#5C4A3C] text-xs flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#B89628] shrink-0 mt-0.5" />
                 <p>
                   Nama dan nomor WhatsApp telah disesuaikan dengan data booking Anda. Cukup buat kata sandi untuk mengaktifkan akun.
                 </p>
@@ -209,7 +209,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
 
             {/* Nama Lengkap */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-senzu-brand flex items-center justify-between">
+              <label className="text-xs font-bold text-[#082A4F] flex items-center justify-between">
                 <span>Nama Lengkap <span className="text-rose-500">*</span></span>
               </label>
               <div className="relative">
@@ -220,7 +220,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Contoh: Rina Maharani"
-                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
                 />
               </div>
             </div>
@@ -235,13 +235,13 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 placeholder="Contoh: Rina"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
               />
             </div>
 
             {/* WhatsApp */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-senzu-brand flex items-center justify-between">
+              <label className="text-xs font-bold text-[#082A4F] flex items-center justify-between">
                 <span>Nomor WhatsApp <span className="text-rose-500">*</span></span>
               </label>
               <div className="relative">
@@ -252,7 +252,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   value={whatsapp}
                   onChange={(e) => setWhatsapp(e.target.value)}
                   placeholder="081272902321"
-                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition font-mono"
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition font-mono"
                 />
               </div>
               <p className="text-[10px] text-slate-400">
@@ -262,7 +262,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
 
             {/* Email */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-senzu-brand flex items-center justify-between">
+              <label className="text-xs font-bold text-[#082A4F] flex items-center justify-between">
                 <span>Alamat Email <span className="text-rose-500">*</span></span>
               </label>
               <div className="relative">
@@ -273,14 +273,14 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="nama@email.com"
-                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
                 />
               </div>
             </div>
 
             {/* Kata Sandi */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-senzu-brand flex items-center justify-between">
+              <label className="text-xs font-bold text-[#082A4F] flex items-center justify-between">
                 <span>Kata Sandi <span className="text-rose-500">*</span></span>
                 <span className="text-[10px] text-slate-400 font-normal">Minimal 8 karakter</span>
               </label>
@@ -292,7 +292,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Minimal 8 karakter"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
                 />
                 <button
                   type="button"
@@ -306,7 +306,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
 
             {/* Konfirmasi Kata Sandi */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-senzu-brand flex items-center justify-between">
+              <label className="text-xs font-bold text-[#082A4F] flex items-center justify-between">
                 <span>Konfirmasi Kata Sandi <span className="text-rose-500">*</span></span>
               </label>
               <div className="relative">
@@ -317,7 +317,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Ulangi kata sandi Anda"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-senzu-brand outline-none transition"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
                 />
                 <button
                   type="button"
@@ -337,7 +337,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   required
                   checked={termsAccepted}
                   onChange={(e) => setTermsAccepted(e.target.checked)}
-                  className="mt-1 w-4 h-4 rounded text-senzu-brand focus:ring-senzu-gold border-slate-300"
+                  className="mt-1 w-4 h-4 rounded text-[#082A4F] focus:ring-[#D4AF37] border-slate-300"
                 />
                 <span className="text-xs text-slate-600 leading-snug">
                   Saya menyetujui{' '}
@@ -347,7 +347,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                       e.preventDefault();
                       setIsTermsModalOpen(true);
                     }}
-                    className="text-senzu-brand font-bold underline hover:text-senzu-gold transition"
+                    className="text-[#082A4F] font-bold underline hover:text-[#D4AF37] transition"
                   >
                     Syarat & Ketentuan
                   </button>{' '}
@@ -358,7 +358,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                       e.preventDefault();
                       setIsTermsModalOpen(true);
                     }}
-                    className="text-senzu-brand font-bold underline hover:text-senzu-gold transition"
+                    className="text-[#082A4F] font-bold underline hover:text-[#D4AF37] transition"
                   >
                     Kebijakan Privasi
                   </button>{' '}
@@ -371,7 +371,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                   type="checkbox"
                   checked={marketingConsent}
                   onChange={(e) => setMarketingConsent(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-senzu-brand focus:ring-senzu-gold border-slate-300"
+                  className="mt-0.5 w-4 h-4 rounded text-[#082A4F] focus:ring-[#D4AF37] border-slate-300"
                 />
                 <span className="text-xs text-slate-500 leading-snug">
                   Saya bersedia menerima info promo diskon eksklusif dan voucher treatment Senzu Home.
@@ -385,17 +385,17 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                 type="submit"
                 id="btn-submit-customer-register"
                 disabled={isSubmitting}
-                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-senzu-brand to-senzu-brand-hover hover:from-[#0B3564] hover:to-[#10447C] text-white text-xs sm:text-sm font-bold shadow-md transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#082A4F] to-[#0D3866] hover:from-[#0B3564] hover:to-[#10447C] text-white text-xs sm:text-sm font-bold shadow-md transition active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin text-senzu-gold" />
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
                     <span>Mendaftarkan Akun Anda...</span>
                   </>
                 ) : (
                   <>
                     <span>Buat Akun Senzu Home</span>
-                    <ChevronRight className="w-4 h-4 text-senzu-gold" />
+                    <ChevronRight className="w-4 h-4 text-[#D4AF37]" />
                   </>
                 )}
               </button>
@@ -411,7 +411,7 @@ export const CustomerRegisterModal: React.FC<CustomerRegisterModalProps> = ({
                     onClose();
                     onSwitchToLogin();
                   }}
-                  className="font-bold text-senzu-brand hover:text-senzu-gold underline transition cursor-pointer ml-1"
+                  className="font-bold text-[#082A4F] hover:text-[#D4AF37] underline transition cursor-pointer ml-1"
                 >
                   Masuk di sini
                 </button>
