@@ -186,11 +186,11 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
       {/* Top Filter & Counter Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-[#8B5A36] text-[#D4AF37] flex items-center justify-center">
             <Compass className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-[#082A4F]">Peta Operasional Armada Palembang</h3>
+            <h3 className="text-sm font-bold text-[#4B2B18]">Peta Operasional Armada Palembang</h3>
             <p className="text-[11px] text-slate-500">
               Hub: {settings?.baseLocationName || 'Jl. Riau No.3, 26 Ilir D. I, Kec. Ilir Bar. I, Kota Palembang, Sumatera Selatan'}
             </p>
@@ -204,7 +204,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
             onClick={() => setFilter('ALL')}
             className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
               filter === 'ALL'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -273,7 +273,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
             <button
               type="button"
               onClick={handleCopy}
-              className="px-3 py-1 bg-[#082A4F] text-white hover:bg-[#0E3D73] rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              className="px-3 py-1 bg-[#8B5A36] text-white hover:bg-[#94603B] rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
             >
               {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{isCopied ? 'Tersalin!' : 'Salin Domain Referrer'}</span>
@@ -301,10 +301,10 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                 title={settings?.baseLocationName || 'Senzu Wellness Hub Palembang'}
               >
                 <div className="relative flex flex-col items-center justify-center -translate-y-8 select-none">
-                  <div className="w-9 h-9 rounded-full bg-[#082A4F] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-[#D4AF37]">
+                  <div className="w-9 h-9 rounded-full bg-[#8B5A36] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-[#D4AF37]">
                     <ShieldCheck className="w-5 h-5" />
                   </div>
-                  <div className="w-2.5 h-2.5 bg-[#082A4F] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1" />
+                  <div className="w-2.5 h-2.5 bg-[#8B5A36] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1" />
                 </div>
               </AdvancedMarker>
 
@@ -366,7 +366,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                   {selectedEntity.type === 'therapist' ? (
                     <div>
                       <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
-                        <span className="font-bold text-sm text-[#082A4F]">
+                        <span className="font-bold text-sm text-[#4B2B18]">
                           {selectedEntity.data.therapist.name}
                         </span>
                         <span
@@ -398,7 +398,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
 
                       {selectedEntity.data.currentBooking ? (
                         <div className="mt-2 p-2 bg-[#FAF9F6] rounded-xl border border-slate-200 text-[11px] space-y-1">
-                          <div className="font-bold text-[#082A4F]">
+                          <div className="font-bold text-[#4B2B18]">
                             Order: {selectedEntity.data.currentBooking.bookingCode}
                           </div>
                           <div className="text-slate-700 truncate">
@@ -428,7 +428,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                     </div>
                   ) : (
                     <div>
-                      <div className="font-bold text-sm text-[#082A4F]">
+                      <div className="font-bold text-sm text-[#4B2B18]">
                         {selectedEntity.data.customerName}
                       </div>
                       <div className="text-[11px] font-mono text-slate-500">
@@ -480,7 +480,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
-              <h4 className="text-sm font-bold text-[#082A4F]">Status Tracking Armada Realtime</h4>
+              <h4 className="text-sm font-bold text-[#4B2B18]">Status Tracking Armada Realtime</h4>
               <p className="text-[11px] text-slate-500">
                 Mode fallback operasional aktif (GPS coordinates update via Firestore)
               </p>
@@ -497,11 +497,11 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
               return (
                 <div
                   key={item.therapist.id}
-                  className="p-4 rounded-2xl border border-slate-200 bg-[#FAF9F6] space-y-3 hover:border-[#082A4F]/30 transition"
+                  className="p-4 rounded-2xl border border-slate-200 bg-[#FAF9F6] space-y-3 hover:border-[#8B5A36]/30 transition"
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <div className="font-bold text-sm text-[#082A4F] flex items-center gap-1.5">
+                      <div className="font-bold text-sm text-[#4B2B18] flex items-center gap-1.5">
                         <User className="w-4 h-4 text-[#B89628]" />
                         <span>{item.therapist.name}</span>
                       </div>
@@ -530,7 +530,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                   {/* Booking Information */}
                   {current ? (
                     <div className="bg-white p-3 rounded-xl border border-slate-200 text-xs space-y-1.5">
-                      <div className="flex items-center justify-between font-bold text-[#082A4F]">
+                      <div className="flex items-center justify-between font-bold text-[#4B2B18]">
                         <span>Kode: {current.bookingCode}</span>
                         <span className="text-amber-700 text-[11px]">{current.status}</span>
                       </div>
