@@ -124,7 +124,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
     <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
       <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-[#082A4F] text-white flex items-center justify-between">
+        <div className="p-4 sm:p-5 bg-[#8B5A36] text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-white/10 text-[#D4AF37]">
               <Copy className="w-5 h-5" />
@@ -154,7 +154,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
             onClick={() => setMode('date_range')}
             className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer text-center ${
               mode === 'date_range'
-                ? 'bg-white text-[#082A4F] shadow-2xs border border-slate-200'
+                ? 'bg-white text-[#4B2B18] shadow-2xs border border-slate-200'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -165,7 +165,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
             onClick={() => setMode('therapist_to_therapist')}
             className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer text-center ${
               mode === 'therapist_to_therapist'
-                ? 'bg-white text-[#082A4F] shadow-2xs border border-slate-200'
+                ? 'bg-white text-[#4B2B18] shadow-2xs border border-slate-200'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -252,7 +252,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
                         key={th.id}
                         className={`p-2 rounded-lg border text-xs font-semibold flex items-center gap-2 cursor-pointer transition ${
                           isChecked
-                            ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                            ? 'bg-[#8B5A36] text-white border-[#8B5A36]'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
@@ -284,7 +284,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
           <button
             type="button"
             onClick={() => setShowConfirm(true)}
-            className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm"
+            className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm"
           >
             <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
             <span>Salin Jadwal</span>
@@ -322,7 +322,7 @@ export const CopyScheduleModal: React.FC<CopyScheduleModalProps> = ({
                 type="button"
                 onClick={handleExecuteCopy}
                 disabled={isSubmitting}
-                className="px-5 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white font-bold flex items-center gap-2 shadow-xs disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-2 shadow-xs disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
                 <span>{isSubmitting ? 'Menyalin...' : 'Ya, Timpa & Salin'}</span>
