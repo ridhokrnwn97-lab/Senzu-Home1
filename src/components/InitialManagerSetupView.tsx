@@ -256,9 +256,9 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-between selection:bg-[#D4AF37] selection:text-[#082A4F]">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-between selection:bg-[#D4AF37] selection:text-[#4B2B18]">
       {/* Header Bar */}
-      <header className="border-b border-white/10 bg-[#082A4F]/80 backdrop-blur-md sticky top-0 z-20">
+      <header className="border-b border-white/10 bg-[#5B351F]/80 backdrop-blur-md sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <SenzuLogo variant="light" size="small" className="h-8 w-auto" />
@@ -334,7 +334,7 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
               <button
                 type="button"
                 onClick={() => onComplete(successData.email)}
-                className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#082A4F] font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#4B2B18] font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
                 <span>Lanjut ke Login Staff</span>
                 <ArrowRight className="w-4 h-4" />
@@ -380,7 +380,7 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
                 <button
                   type="button"
                   onClick={() => setIsReconcileMode(true)}
-                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#082A4F] font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#4B2B18] font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Wrench className="w-4 h-4" />
                   <span>Perbaiki Akun Login Manager</span>
@@ -569,11 +569,11 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
                 <button
                   type="submit"
                   disabled={isSubmitting || !isPasswordValid || !setupKey.trim()}
-                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#082A4F] font-bold text-xs tracking-wide uppercase transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#4B2B18] font-bold text-xs tracking-wide uppercase transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
                 >
                   {isSubmitting ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-[#082A4F] border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-[#5B351F] border-t-transparent rounded-full animate-spin" />
                       <span>Menghubungkan Akun...</span>
                     </>
                   ) : (
@@ -621,7 +621,7 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
                 <button
                   type="button"
                   onClick={onGoToLogin}
-                  className="w-full py-3.5 px-6 rounded-xl bg-[#082A4F] hover:bg-[#0a3563] text-white border border-[#D4AF37]/50 font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-6 rounded-xl bg-[#5B351F] hover:bg-[#70442A] text-white border border-[#D4AF37]/50 font-bold text-xs tracking-wide uppercase transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <span>Buka Halaman Login Staff</span>
                   <ArrowRight className="w-4 h-4 text-[#D4AF37]" />
@@ -633,7 +633,7 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
             <div className="bg-slate-800/90 border border-white/10 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur-xl">
               {/* Form Title & Notice */}
               <div className="text-center space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#082A4F] border border-[#D4AF37]/40 text-[#D4AF37] text-[11px] font-bold tracking-wider uppercase">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#5B351F] border border-[#D4AF37]/40 text-[#D4AF37] text-[11px] font-bold tracking-wider uppercase">
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>Satu Kali Inisialisasi</span>
                 </div>
@@ -860,11 +860,11 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
                 <button
                   type="submit"
                   disabled={isSubmitting || !isPasswordValid || !setupKey.trim()}
-                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#082A4F] font-bold text-xs tracking-wide uppercase transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  className="w-full py-3.5 px-6 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#4B2B18] font-bold text-xs tracking-wide uppercase transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
                 >
                   {isSubmitting ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-[#082A4F] border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-[#5B351F] border-t-transparent rounded-full animate-spin" />
                       <span>Memproses Inisialisasi...</span>
                     </>
                   ) : (
@@ -881,7 +881,7 @@ export const InitialManagerSetupView: React.FC<InitialManagerSetupViewProps> = (
       </main>
 
       {/* Footer Bar */}
-      <footer className="border-t border-white/10 py-4 bg-[#082A4F]/60 text-center text-slate-400 text-xs">
+      <footer className="border-t border-white/10 py-4 bg-[#5B351F]/60 text-center text-slate-400 text-xs">
         <p>© 2026 Senzu Home Palembang. Safe One-Time Production Manager Setup.</p>
       </footer>
     </div>
