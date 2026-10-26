@@ -67,7 +67,7 @@ export const MetricDefinitionsModal: React.FC<MetricDefinitionsModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
       <div className="relative w-full max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#082A4F] text-white border-b border-[#D4AF37]/30">
+        <div className="flex items-center justify-between px-6 py-4 bg-[#8B5A36] text-white border-b border-[#D4AF37]/30">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37]">
               <BookOpen className="w-5 h-5" />
@@ -106,13 +106,13 @@ export const MetricDefinitionsModal: React.FC<MetricDefinitionsModalProps> = ({
                 className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs hover:border-[#D4AF37]/50 transition"
               >
                 <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <h3 className="font-bold text-[#082A4F] text-sm flex items-center gap-2">
+                  <h3 className="font-bold text-[#4B2B18] text-sm flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-xs flex items-center justify-center font-semibold">
                       {idx + 1}
                     </span>
                     {d.term}
                   </h3>
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#082A4F]/10 text-[#082A4F] whitespace-nowrap">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#8B5A36]/10 text-[#4B2B18] whitespace-nowrap">
                     {d.badge}
                   </span>
                 </div>
@@ -133,7 +133,7 @@ export const MetricDefinitionsModal: React.FC<MetricDefinitionsModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-[#082A4F] hover:bg-[#082A4F]/90 text-white text-xs font-semibold rounded-xl transition shadow-xs"
+            className="px-4 py-2 bg-[#8B5A36] hover:bg-[#8B5A36]/90 text-white text-xs font-semibold rounded-xl transition shadow-xs"
           >
             Tutup Definisi
           </button>
