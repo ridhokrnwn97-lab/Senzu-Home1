@@ -89,7 +89,7 @@ export const TherapistTreatmentTimer: React.FC<TherapistTreatmentTimerProps> = (
   };
 
   return (
-    <div className="bg-gradient-to-b from-[#082A4F] to-[#0A335E] rounded-3xl p-6 text-white shadow-xl border border-[#D4AF37]/40 space-y-5 animate-fade-in">
+    <div className="bg-gradient-to-b from-[#8B5A36] to-[#94603B] rounded-3xl p-6 text-white shadow-xl border border-[#D4AF37]/40 space-y-5 animate-fade-in">
       {/* Timer Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -181,7 +181,7 @@ export const TherapistTreatmentTimer: React.FC<TherapistTreatmentTimerProps> = (
               <AlertTriangle className="w-7 h-7" />
             </div>
             <div>
-              <h4 className="text-base font-bold text-[#082A4F]">Layanan Belum Selesai Penuh?</h4>
+              <h4 className="text-base font-bold text-[#4B2B18]">Layanan Belum Selesai Penuh?</h4>
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                 Treatment baru berjalan <strong>{Math.floor(elapsedSeconds / 60)} menit</strong> dari durasi <strong>{durationMinutes} menit</strong>.
               </p>
@@ -217,7 +217,7 @@ export const TherapistTreatmentTimer: React.FC<TherapistTreatmentTimerProps> = (
               <CheckCircle2 className="w-7 h-7" />
             </div>
             <div>
-              <h4 className="text-base font-bold text-[#082A4F]">Konfirmasi Selesai Treatment</h4>
+              <h4 className="text-base font-bold text-[#4B2B18]">Konfirmasi Selesai Treatment</h4>
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                 Pastikan sesi pijat & refleksi telah selesai, perlengkapan telah dirapikan, dan customer merasa puas.
               </p>
