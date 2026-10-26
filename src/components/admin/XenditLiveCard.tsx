@@ -39,7 +39,7 @@ export function XenditLiveCard({ currentUser }: { currentUser: StaffUser }) {
     finally { if (gen.current === version) { inFlight.current = false; setBusy(false); } }
   };
   return <section aria-label="Xendit — Pembayaran Pelanggan" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-    <h3 className="text-lg font-bold text-[#082A4F]">Xendit — Pembayaran Pelanggan</h3>
+    <h3 className="text-lg font-bold text-[#4B2B18]">Xendit — Pembayaran Pelanggan</h3>
     <p className="text-sm text-slate-600">Pembayaran Live menagih uang nyata. Checkout dibuat dari pesanan pelanggan, dengan total penuh yang diverifikasi server.</p>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {result && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{result}</p>}
@@ -50,7 +50,7 @@ export function XenditLiveCard({ currentUser }: { currentUser: StaffUser }) {
       <p className="text-xs text-slate-500">Status konfigurasi belum membuktikan pembayaran Live berhasil. Simpan secret hanya di Secrets server.</p>
       <label className="block space-y-1 text-xs">URL webhook Live<input readOnly value={`${window.location.origin}${configuration.webhookPath}`} className="w-full rounded-lg border p-2" /></label>
     </div>}
-    <button type="button" disabled={busy} onClick={() => act('configuration')} className="min-h-[44px] rounded-lg border px-4 py-2 font-semibold text-[#082A4F] disabled:opacity-50">Muat Ulang Konfigurasi</button>
+    <button type="button" disabled={busy} onClick={() => act('configuration')} className="min-h-[44px] rounded-lg border px-4 py-2 font-semibold text-[#4B2B18] disabled:opacity-50">Muat Ulang Konfigurasi</button>
     <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
       <label className="block">ID Booking<input disabled={busy} value={bookingId} onChange={e => { setBookingId(e.target.value); setInspected(null); setResult(''); }} placeholder="bk_SH-..." className="mt-1 w-full rounded-lg border p-2" /></label>
       <button type="button" disabled={busy || !/^[A-Za-z0-9_-]{1,128}$/.test(bookingId.trim())} onClick={() => act('inspect')}
