@@ -132,11 +132,11 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
         </button>
 
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#082A4F] text-xs font-bold mb-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#4B2B18] text-xs font-bold mb-1">
             <CreditCard className="w-3.5 h-3.5 text-[#B89628]" />
             Pengaturan Master Pembayaran
           </div>
-          <h3 className="font-serif font-bold text-xl text-[#082A4F]">
+          <h3 className="font-serif font-bold text-xl text-[#4B2B18]">
             Konfigurasi Rekening Bank & QRIS Senzu
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -165,7 +165,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
             {/* QRIS Settings */}
             <div className="p-5 rounded-2xl bg-[#FAF9F6] border border-slate-200 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                <h4 className="font-serif font-bold text-sm text-[#082A4F] flex items-center gap-2">
+                <h4 className="font-serif font-bold text-sm text-[#4B2B18] flex items-center gap-2">
                   <QrCode className="w-4 h-4 text-[#B89628]" />
                   Konfigurasi QRIS Senzu (Statis)
                 </h4>
@@ -174,7 +174,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                     type="checkbox"
                     checked={Boolean(settings.qris?.enabled)}
                     onChange={(e) => handleQrisChange('enabled', e.target.checked)}
-                    className="rounded text-[#082A4F] focus:ring-[#082A4F]"
+                    className="rounded text-[#4B2B18] focus:ring-[#8B5A36]"
                   />
                   <span>Aktif</span>
                 </label>
@@ -188,7 +188,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                     value={settings.qris?.merchantName ?? ''}
                     onChange={(e) => handleQrisChange('merchantName', e.target.value)}
                     required
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#8B5A36] focus:outline-none"
                   />
                 </div>
                 <div>
@@ -198,7 +198,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                     value={settings.qris?.nmid ?? ''}
                     onChange={(e) => handleQrisChange('nmid', e.target.value)}
                     required
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-mono font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-mono font-medium text-slate-800 focus:ring-2 focus:ring-[#8B5A36] focus:outline-none"
                   />
                 </div>
                 <div>
@@ -208,7 +208,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                     value={settings.qris?.accountHolder ?? ''}
                     onChange={(e) => handleQrisChange('accountHolder', e.target.value)}
                     required
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#8B5A36] focus:outline-none"
                   />
                 </div>
                 <div>
@@ -218,7 +218,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                     value={settings.qris?.acquirer ?? ''}
                     onChange={(e) => handleQrisChange('acquirer', e.target.value)}
                     required
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium text-slate-800 focus:ring-2 focus:ring-[#8B5A36] focus:outline-none"
                   />
                 </div>
               </div>
@@ -263,7 +263,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
 
             {/* Bank Accounts Settings */}
             <div className="space-y-3">
-              <h4 className="font-serif font-bold text-sm text-[#082A4F] flex items-center gap-2">
+              <h4 className="font-serif font-bold text-sm text-[#4B2B18] flex items-center gap-2">
                 <Building className="w-4 h-4 text-[#B89628]" />
                 Rekening Bank Resmi Senzu Home
               </h4>
@@ -274,7 +274,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                   className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-[#082A4F]">
+                    <span className="font-bold text-xs text-[#4B2B18]">
                       Bank {bank.bankName || bank.bankCode || 'Bank'} ({bank.bankCode || 'BANK'})
                     </span>
                     <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer font-medium">
@@ -282,7 +282,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
                         type="checkbox"
                         checked={bank.enabled !== false}
                         onChange={(e) => handleBankChange(idx, 'enabled', e.target.checked)}
-                        className="rounded text-[#082A4F]"
+                        className="rounded text-[#4B2B18]"
                       />
                       <span>Tampilkan</span>
                     </label>
@@ -324,7 +324,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
               <button
                 type="submit"
                 disabled={isSaving}
-                className="px-6 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold flex items-center gap-2 shadow-md transition cursor-pointer active:scale-95 disabled:opacity-50"
+                className="px-6 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center gap-2 shadow-md transition cursor-pointer active:scale-95 disabled:opacity-50"
               >
                 <Save className="w-4 h-4 text-[#D4AF37]" />
                 <span>{isSaving ? 'Menyimpan...' : 'Simpan Pengaturan'}</span>

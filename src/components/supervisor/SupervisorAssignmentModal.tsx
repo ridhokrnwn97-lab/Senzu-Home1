@@ -229,7 +229,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
           isIneligible
             ? 'opacity-60 bg-slate-50 border-slate-200 cursor-not-allowed'
             : isSelected
-            ? 'border-[#082A4F] bg-[#082A4F]/5 ring-2 ring-[#082A4F] cursor-pointer'
+            ? 'border-[#8B5A36] bg-[#8B5A36]/5 ring-2 ring-[#8B5A36] cursor-pointer'
             : isCurrent
             ? 'border-indigo-300 bg-indigo-50/50 cursor-pointer'
             : 'border-slate-200 hover:border-slate-300 bg-white cursor-pointer'
@@ -249,7 +249,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
                   setOverrideWarningConfirmed(false);
                 }
               }}
-              className="mt-1 accent-[#082A4F] cursor-pointer"
+              className="mt-1 accent-[#8B5A36] cursor-pointer"
             />
 
             <div className="space-y-1">
@@ -372,7 +372,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-2xl rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
         {/* Modal Header */}
-        <div className="px-5 py-4 bg-[#082A4F] text-white flex items-center justify-between">
+        <div className="px-5 py-4 bg-[#8B5A36] text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-[#D4AF37]">
               <UserCheck className="w-5 h-5" />
@@ -429,7 +429,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 block font-medium">Waktu Sesi</span>
-                <strong className="text-[#082A4F] font-mono">{booking.scheduleTime} WIB</strong>
+                <strong className="text-[#4B2B18] font-mono">{booking.scheduleTime} WIB</strong>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 block font-medium">Durasi Layanan</span>
@@ -521,7 +521,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-[#D4AF37]" />
-                  <h4 className="text-xs font-bold text-[#082A4F] uppercase tracking-wider">
+                  <h4 className="text-xs font-bold text-[#4B2B18] uppercase tracking-wider">
                     Rekomendasi Terbaik (Optimal Match)
                   </h4>
                 </div>
@@ -597,7 +597,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
                   type="checkbox"
                   checked={overrideWarningConfirmed}
                   onChange={(e) => setOverrideWarningConfirmed(e.target.checked)}
-                  className="w-4 h-4 rounded text-[#082A4F] accent-[#082A4F]"
+                  className="w-4 h-4 rounded text-[#4B2B18] accent-[#8B5A36]"
                 />
                 <span>Saya menyetujui override penugasan ini dan bertanggung jawab atas kelancaran jadwal.</span>
               </label>
@@ -625,7 +625,7 @@ export const SupervisorAssignmentModal: React.FC<SupervisorAssignmentModalProps>
               (selectedEvaluation?.status === 'WARNING' && !overrideWarningConfirmed) ||
               isSubmitting
             }
-            className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <UserCheck className="w-4 h-4 text-[#D4AF37]" />
             <span>

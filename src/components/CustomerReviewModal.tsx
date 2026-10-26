@@ -108,7 +108,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#082A4F] to-[#0A3663] text-white p-5 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center">
               <Star className="w-5 h-5 text-[#D4AF37] fill-[#D4AF37]" />
@@ -135,7 +135,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto animate-bounce">
               <CheckCircle2 className="w-10 h-10" />
             </div>
-            <h4 className="text-lg font-bold text-[#082A4F] font-serif">
+            <h4 className="text-lg font-bold text-[#4B2B18] font-serif">
               Terima Kasih Atas Ulasan Anda!
             </h4>
             <p className="text-xs text-slate-600 max-w-sm mx-auto leading-relaxed">
@@ -195,7 +195,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
                   );
                 })}
               </div>
-              <div className="text-xs font-semibold text-[#082A4F]">
+              <div className="text-xs font-semibold text-[#4B2B18]">
                 {overallRating === 5 && '⭐️⭐️⭐️⭐️⭐️ Luar Biasa & Sangat Memuaskan'}
                 {overallRating === 4 && '⭐️⭐️⭐️⭐️ Sangat Bagus & Nyaman'}
                 {overallRating === 3 && '⭐️⭐️⭐️ Cukup Baik'}
@@ -233,7 +233,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
                       onClick={() => toggleTag(tag)}
                       className={`px-3 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
                         isSelected
-                          ? 'bg-[#082A4F] text-white shadow-sm'
+                          ? 'bg-[#8B5A36] text-white shadow-sm'
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                       }`}
                     >
@@ -258,7 +258,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
                 onChange={(e) => setComment(e.target.value.slice(0, 500))}
                 rows={3}
                 placeholder="Ceritakan pengalaman Anda, tekanan pijatan, atau kesan selama treatment..."
-                className="w-full p-3 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#082A4F] focus:border-transparent"
+                className="w-full p-3 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent"
               />
             </div>
 
@@ -267,7 +267,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowDetailedRatings(!showDetailedRatings)}
-                className="text-xs text-[#082A4F] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                className="text-xs text-[#4B2B18] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
               >
                 <span>{showDetailedRatings ? '− Sembunyikan' : '+ Berikan Nilai Rinci Tiap Aspek'}</span>
               </button>
@@ -356,7 +356,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
                 type="checkbox"
                 checked={isAnonymous}
                 onChange={(e) => setIsAnonymous(e.target.checked)}
-                className="w-4 h-4 rounded text-[#082A4F] focus:ring-[#082A4F] border-slate-300"
+                className="w-4 h-4 rounded text-[#4B2B18] focus:ring-[#8B5A36] border-slate-300"
               />
               <label htmlFor="check-anon" className="text-xs text-slate-600 cursor-pointer select-none">
                 Sembunyikan nama lengkap saya (Tampilkan sebagai anonim)
@@ -376,7 +376,7 @@ export const CustomerReviewModal: React.FC<CustomerReviewModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] text-xs font-bold shadow-md transition disabled:opacity-50 flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18] text-xs font-bold shadow-md transition disabled:opacity-50 flex items-center gap-2"
               >
                 {isSubmitting ? (
                   <span>Menyimpan Ulasan...</span>

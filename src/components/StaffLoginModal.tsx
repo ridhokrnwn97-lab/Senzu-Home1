@@ -143,7 +143,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
       <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Official Corporate Header */}
-        <div className="bg-[#082A4F] text-white p-6 border-b border-[#D4AF37]/30 relative">
+        <div className="bg-[#5B351F] text-white p-6 border-b border-[#D4AF37]/30 relative">
           <button
             type="button"
             onClick={onClose}
@@ -209,7 +209,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                     placeholder="nama@domain.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#5B351F]"
                   />
                 </div>
               </div>
@@ -228,7 +228,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="px-4 py-2 rounded-xl bg-[#082A4F] text-white text-xs font-bold hover:bg-[#0A335F] cursor-pointer disabled:opacity-50 shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-[#5B351F] text-white text-xs font-bold hover:bg-[#70442A] cursor-pointer disabled:opacity-50 shadow-xs"
                 >
                   {isLoading ? 'Mengirim...' : 'Kirim Tautan Reset'}
                 </button>
@@ -248,7 +248,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                       placeholder="nama@domain.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#5B351F]"
                     />
                   </div>
                 </div>
@@ -263,7 +263,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                         setErrorMsg('');
                         setSuccessMsg('');
                       }}
-                      className="text-[11px] text-[#082A4F] hover:underline font-semibold cursor-pointer"
+                      className="text-[11px] text-[#4B2B18] hover:underline font-semibold cursor-pointer"
                     >
                       Lupa Kata Sandi?
                     </button>
@@ -276,7 +276,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                       placeholder="••••••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#5B351F]"
                     />
                   </div>
                 </div>
@@ -284,7 +284,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer shadow-sm"
+                  className="w-full py-2.5 rounded-xl bg-[#5B351F] hover:bg-[#70442A] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer shadow-sm"
                 >
                   <UserCheck className="w-4 h-4" />
                   <span>{isLoading ? 'Memverifikasi akses staf...' : 'Masuk ke Portal Operasional'}</span>
@@ -308,25 +308,25 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                         key={staff.uid}
                         type="button"
                         onClick={() => handleQuickLogin(staff)}
-                        className="w-full p-2 rounded-xl border border-slate-200 hover:border-[#082A4F] hover:bg-[#082A4F]/5 transition text-left flex items-center justify-between group cursor-pointer"
+                        className="w-full p-2 rounded-xl border border-slate-200 hover:border-[#5B351F] hover:bg-[#5B351F]/5 transition text-left flex items-center justify-between group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-slate-100 group-hover:bg-[#082A4F] group-hover:text-white text-slate-700 flex items-center justify-center text-xs font-bold transition">
+                          <div className="w-7 h-7 rounded-lg bg-slate-100 group-hover:bg-[#5B351F] group-hover:text-white text-slate-700 flex items-center justify-center text-xs font-bold transition">
                             {staff.name.charAt(0)}
                           </div>
                           <div>
-                            <div className="text-xs font-bold text-slate-800 group-hover:text-[#082A4F]">
+                            <div className="text-xs font-bold text-slate-800 group-hover:text-[#4B2B18]">
                               {staff.name}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">
                               {staff.employeeCode || staff.email} •{' '}
-                              <span className="font-semibold uppercase text-[#082A4F]">
+                              <span className="font-semibold uppercase text-[#4B2B18]">
                                 {staff.role}
                               </span>
                             </div>
                           </div>
                         </div>
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#082A4F] transition" />
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#4B2B18] transition" />
                       </button>
                     ))}
                   </div>
@@ -341,7 +341,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
                       onClose();
                       onOpenInitialSetup();
                     }}
-                    className="text-[11px] text-slate-500 hover:text-[#082A4F] hover:underline font-medium transition cursor-pointer flex items-center justify-center gap-1 mx-auto"
+                    className="text-[11px] text-slate-500 hover:text-[#4B2B18] hover:underline font-medium transition cursor-pointer flex items-center justify-center gap-1 mx-auto"
                   >
                     <KeyRound className="w-3 h-3 text-[#D4AF37]" />
                     <span>Inisialisasi Pertama? Setup Manager Produksi</span>

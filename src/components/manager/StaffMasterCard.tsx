@@ -985,7 +985,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleOpenProvision(st)}
-                                className="text-[10px] text-[#082A4F] hover:underline font-bold cursor-pointer"
+                                className="text-[10px] text-[#4B2B18] hover:underline font-bold cursor-pointer"
                               >
                                 Buat
                               </button>
@@ -1034,7 +1034,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                                 type="button"
                                 onClick={() => handleOpenProvision(st)}
                                 title="Buat Akun Login Staf"
-                                className="p-1.5 rounded-lg border border-[#082A4F]/30 text-[#082A4F] bg-[#082A4F]/5 hover:bg-[#082A4F]/15 transition cursor-pointer"
+                                className="p-1.5 rounded-lg border border-[#8B5A36]/30 text-[#4B2B18] bg-[#8B5A36]/5 hover:bg-[#8B5A36]/15 transition cursor-pointer"
                               >
                                 <KeyRound className="w-3.5 h-3.5" />
                               </button>
@@ -1533,7 +1533,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                           setDetailStaff(null);
                           handleOpenProvision(target);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-[#082A4F] text-white hover:bg-[#0A335F] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+                        className="px-3 py-1.5 rounded-xl bg-[#8B5A36] text-white hover:bg-[#94603B] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
                       >
                         <KeyRound className="w-3.5 h-3.5" />
                         <span>Buat Akun Login Staf</span>

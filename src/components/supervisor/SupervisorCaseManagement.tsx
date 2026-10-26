@@ -197,7 +197,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <h3 className="text-base font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h3 className="text-base font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <ShieldAlert className="w-5 h-5 text-amber-500" />
             Penanganan Insiden & Eskalasi Lapangan (Supervisor)
           </h3>
@@ -229,7 +229,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                   activeTab === tab.id
-                    ? 'bg-[#082A4F] text-white'
+                    ? 'bg-[#8B5A36] text-white'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
                 }`}
               >
@@ -245,7 +245,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari insiden..."
-              className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-[#082A4F]"
+              className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-[#8B5A36]"
             />
           </div>
         </div>
@@ -271,12 +271,12 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
                 key={c.id}
                 onClick={() => setSelectedCase(c)}
                 className={`p-3.5 rounded-xl bg-white border transition shadow-xs hover:shadow-md cursor-pointer space-y-2.5 ${
-                  selectedCase?.id === c.id ? 'border-[#082A4F] ring-1 ring-[#082A4F]' : 'border-slate-200 hover:border-slate-300'
+                  selectedCase?.id === c.id ? 'border-[#8B5A36] ring-1 ring-[#8B5A36]' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-[#082A4F] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                    <span className="font-mono text-xs font-bold text-[#4B2B18] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                       {c.caseCode}
                     </span>
                     <strong className="text-xs text-slate-800">{c.category}</strong>
@@ -307,7 +307,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
                       <span>Terapis: <strong className="text-slate-700">{c.therapistName}</strong></span>
                     )}
                   </div>
-                  <span className="text-[#082A4F] font-semibold flex items-center gap-1">
+                  <span className="text-[#4B2B18] font-semibold flex items-center gap-1">
                     Detail Investigasi <ChevronRight className="w-3 h-3" />
                   </span>
                 </div>
@@ -322,7 +322,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
         <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-xl h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200 text-xs">
             {/* Header */}
-            <div className="p-4 bg-[#082A4F] text-white flex items-center justify-between shrink-0">
+            <div className="p-4 bg-[#8B5A36] text-white flex items-center justify-between shrink-0">
               <div>
                 <span className="font-mono text-xs font-bold bg-white/20 px-2 py-0.5 rounded">
                   {selectedCase.caseCode}
@@ -427,7 +427,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
       {showNoteModal && selectedCase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3 text-xs">
-            <h4 className="font-bold text-[#082A4F] text-sm">Catatan Investigasi Supervisor</h4>
+            <h4 className="font-bold text-[#4B2B18] text-sm">Catatan Investigasi Supervisor</h4>
             <textarea
               rows={4}
               value={noteContent}
@@ -447,7 +447,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
               <button
                 type="button"
                 onClick={handleAddNote}
-                className="px-3 py-1.5 rounded-lg bg-[#082A4F] text-white font-bold cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-[#8B5A36] text-white font-bold cursor-pointer"
               >
                 Simpan Catatan
               </button>
@@ -460,7 +460,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
       {showResolveModal && selectedCase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3 text-xs">
-            <h4 className="font-bold text-[#082A4F] text-sm">Selesaikan Insiden Operasional</h4>
+            <h4 className="font-bold text-[#4B2B18] text-sm">Selesaikan Insiden Operasional</h4>
             <div>
               <label className="block text-slate-700 font-semibold mb-1">Akar Masalah:</label>
               <select
@@ -520,7 +520,7 @@ export const SupervisorCaseManagement: React.FC<SupervisorCaseManagementProps> =
       {showRecoveryModal && selectedCase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3 text-xs">
-            <h4 className="font-bold text-[#082A4F] text-sm">Usulkan Service Recovery</h4>
+            <h4 className="font-bold text-[#4B2B18] text-sm">Usulkan Service Recovery</h4>
             <div>
               <label className="block text-slate-700 font-semibold mb-1">Tipe Pemulihan:</label>
               <select

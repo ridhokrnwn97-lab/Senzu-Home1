@@ -335,7 +335,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
             <Sparkles className="w-6 h-6 text-[#D4AF37]" />
@@ -359,7 +359,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
           <button
             type="button"
             onClick={handleOpenNew}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#E5C158] text-[#082A4F] text-xs font-bold transition active:scale-95 cursor-pointer shadow-sm"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#E5C158] text-[#4B2B18] text-xs font-bold transition active:scale-95 cursor-pointer shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Layanan</span>
@@ -369,7 +369,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
 
       {/* Historical Price Protection Notice */}
       <div className="bg-blue-50/80 border-b border-blue-200 px-5 sm:px-6 py-3 flex items-start sm:items-center gap-2.5 text-xs text-blue-900">
-        <ShieldCheck className="w-4 h-4 text-[#082A4F] shrink-0 mt-0.5 sm:mt-0" />
+        <ShieldCheck className="w-4 h-4 text-[#4B2B18] shrink-0 mt-0.5 sm:mt-0" />
         <span className="leading-relaxed">
           <strong>Perlindungan Riwayat Booking:</strong> Setiap pemesanan pelanggan menyimpan snapshot tarif, nama, dan durasi saat transaksi dibuat. Perubahan harga atau durasi master data di sini <strong>tidak akan</strong> mengubah riwayat booking yang sudah tersimpan sebelumnya.
         </span>
@@ -408,7 +408,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Cari layanan berdasarkan nama, kategori, atau ID..."
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs"
           />
         </div>
 
@@ -456,7 +456,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
               <button
                 type="button"
                 onClick={handleOpenNew}
-                className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-bold inline-flex items-center gap-2 transition active:scale-95 shadow-sm"
+                className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold inline-flex items-center gap-2 transition active:scale-95 shadow-sm"
               >
                 <Plus className="w-4 h-4 text-[#D4AF37]" />
                 <span>Tambah Layanan</span>
@@ -474,7 +474,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                 key={srv.id}
                 className={`rounded-2xl border transition-all p-4 flex flex-col justify-between ${
                   srv.isActive
-                    ? 'border-slate-200 bg-white hover:border-[#082A4F]/40 shadow-sm'
+                    ? 'border-slate-200 bg-white hover:border-[#8B5A36]/40 shadow-sm'
                     : 'border-slate-200/60 bg-slate-50 opacity-70'
                 }`}
               >
@@ -486,7 +486,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     </span>
                     <div className="flex items-center gap-1.5">
                       {srv.isPopular && (
-                        <span className="text-[10px] font-bold bg-[#D4AF37]/20 text-[#082A4F] border border-[#D4AF37]/40 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-bold bg-[#D4AF37]/20 text-[#4B2B18] border border-[#D4AF37]/40 px-2 py-0.5 rounded-full">
                           Favorit
                         </span>
                       )}
@@ -502,7 +502,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     </div>
                   </div>
 
-                  <h4 className="text-sm font-bold text-[#082A4F] leading-snug">{srv.name}</h4>
+                  <h4 className="text-sm font-bold text-[#4B2B18] leading-snug">{srv.name}</h4>
 
                   <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2 leading-relaxed">
                     {srv.description || 'Layanan massage & reflexology resmi Senzu.'}
@@ -515,7 +515,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     </div>
                     <div className="flex items-center gap-1 text-slate-600">
                       <Tag className="w-3.5 h-3.5 text-[#D4AF37]" />
-                      <span className="font-bold text-[#082A4F]">{formatRupiah(srv.price)}</span>
+                      <span className="font-bold text-[#4B2B18]">{formatRupiah(srv.price)}</span>
                     </div>
                   </div>
 
@@ -548,7 +548,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                       className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition ${
                         isReadOnly
                           ? 'text-slate-300 cursor-not-allowed'
-                          : 'text-[#082A4F] hover:bg-slate-100 cursor-pointer active:scale-95'
+                          : 'text-[#4B2B18] hover:bg-slate-100 cursor-pointer active:scale-95'
                       }`}
                       title="Edit Layanan"
                     >
@@ -585,7 +585,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white max-w-lg w-full rounded-2xl p-6 shadow-2xl space-y-4 my-8">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h4 className="text-base font-bold text-[#082A4F]">
+              <h4 className="text-base font-bold text-[#4B2B18]">
                 {isEditing ? 'Edit Layanan Master' : 'Tambah Layanan Master Baru'}
               </h4>
               <button
@@ -616,7 +616,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     onChange={(e) => setCurrentServiceId(e.target.value.toUpperCase())}
                     required
                     disabled={isEditing}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#082A4F] uppercase disabled:bg-slate-100"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#4B2B18] uppercase disabled:bg-slate-100"
                   />
                 </div>
 
@@ -682,7 +682,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                   onChange={(e) => setName(e.target.value)}
                   required
                   placeholder="Contoh: Signature Reflexology & Relaksasi"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#082A4F] focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#4B2B18] focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -698,7 +698,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
                     required
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#082A4F]"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#4B2B18]"
                   />
                 </div>
 
@@ -713,7 +713,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     value={price}
                     onChange={(e) => setPrice(Number(e.target.value))}
                     required
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#082A4F]"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#4B2B18]"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
                     Format: {formatRupiah(price || 0)}
@@ -835,7 +835,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     type="checkbox"
                     checked={isPopular}
                     onChange={(e) => setIsPopular(e.target.checked)}
-                    className="w-4 h-4 text-[#082A4F] rounded border-slate-300"
+                    className="w-4 h-4 text-[#4B2B18] rounded border-slate-300"
                   />
                   <span className="font-semibold text-slate-700">Tandai sebagai Favorit</span>
                 </label>
@@ -845,7 +845,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                     type="checkbox"
                     checked={isActive}
                     onChange={(e) => setIsActive(e.target.checked)}
-                    className="w-4 h-4 text-[#082A4F] rounded border-slate-300"
+                    className="w-4 h-4 text-[#4B2B18] rounded border-slate-300"
                   />
                   <span className="font-semibold text-slate-700">Layanan Aktif</span>
                 </label>
@@ -863,7 +863,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white font-bold flex items-center gap-2 transition disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-2 transition disabled:opacity-50"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
                   <span>{saving ? 'Menyimpan...' : 'Simpan Layanan'}</span>
@@ -878,7 +878,7 @@ export const ServiceMasterCard: React.FC<ServiceMasterCardProps> = ({
       {toggleConfirmItem && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4 text-xs">
-            <h4 className="text-sm font-bold text-[#082A4F]">
+            <h4 className="text-sm font-bold text-[#4B2B18]">
               Konfirmasi {toggleConfirmItem.isActive ? 'Penonaktifan' : 'Pengaktifan'} Layanan
             </h4>
             <p className="text-slate-600 leading-relaxed">

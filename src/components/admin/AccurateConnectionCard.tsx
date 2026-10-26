@@ -43,7 +43,7 @@ export function AccurateConnectionCard({ currentUser }: { currentUser: StaffUser
     finally { if (generation.current === version) { inFlight.current = false; setBusy(false); } }
   };
   return <section aria-label="Accurate Online — Koneksi" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-    <h3 className="text-lg font-bold text-[#082A4F]">Accurate Online — Koneksi</h3>
+    <h3 className="text-lg font-bold text-[#4B2B18]">Accurate Online — Koneksi</h3>
     <p className="text-sm text-slate-600">Periksa koneksi ke PT KSBONE UNTUK KITA serta akun dan layanan Senzu Home.</p>
     <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><strong>Panel ini hanya memeriksa koneksi.</strong> Pemeriksaan ini membaca data; tidak membuat faktur, penerimaan penjualan, atau jurnal. Status pengiriman ada pada panel Pencatatan Transaksi.</p>
     {configuration && <div className="space-y-1 text-sm text-slate-700">
@@ -52,8 +52,8 @@ export function AccurateConnectionCard({ currentUser }: { currentUser: StaffUser
       <p>Kelengkapan Secrets: <strong>{configuration.configured ? 'siap diperiksa' : 'perlu dilengkapi'}</strong>.</p>
     </div>}
     <div className="flex flex-wrap gap-3">
-      <button type="button" disabled={busy} onClick={() => act('configuration')} className="min-h-[44px] rounded-lg border px-4 py-2 text-sm font-semibold text-[#082A4F] disabled:opacity-50">Muat Ulang Konfigurasi Accurate</button>
-      <button type="button" disabled={busy || !configuration?.configured} onClick={() => act('check')} className="min-h-[44px] rounded-lg bg-[#082A4F] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Periksa Koneksi dan Master</button>
+      <button type="button" disabled={busy} onClick={() => act('configuration')} className="min-h-[44px] rounded-lg border px-4 py-2 text-sm font-semibold text-[#4B2B18] disabled:opacity-50">Muat Ulang Konfigurasi Accurate</button>
+      <button type="button" disabled={busy || !configuration?.configured} onClick={() => act('check')} className="min-h-[44px] rounded-lg bg-[#8B5A36] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Periksa Koneksi dan Master</button>
     </div>
     {busy && <p role="status" className="text-sm text-slate-600">Sedang memeriksa Accurate…</p>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}

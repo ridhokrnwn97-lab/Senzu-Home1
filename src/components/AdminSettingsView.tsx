@@ -84,7 +84,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 space-y-6 pb-24">
       {/* Top Header & Context Banner */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] rounded-2xl p-5 sm:p-7 text-white shadow-md border border-[#D4AF37]/30 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] rounded-2xl p-5 sm:p-7 text-white shadow-md border border-[#D4AF37]/30 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-[10px] font-extrabold uppercase tracking-widest bg-[#D4AF37]/20 text-[#FDF3CD] border border-[#D4AF37]/40 px-2.5 py-0.5 rounded-full">
@@ -138,8 +138,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           onClick={() => setActiveTab('company')}
           className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
             activeTab === 'company'
-              ? 'bg-[#082A4F] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
-              : 'text-slate-700 hover:text-[#082A4F] hover:bg-white/60'
+              ? 'bg-[#8B5A36] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
+              : 'text-slate-700 hover:text-[#4B2B18] hover:bg-white/60'
           }`}
         >
           <Building2 className={`w-4 h-4 ${activeTab === 'company' ? 'text-[#D4AF37]' : 'text-slate-500'}`} />
@@ -151,8 +151,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           onClick={() => setActiveTab('branch')}
           className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
             activeTab === 'branch'
-              ? 'bg-[#082A4F] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
-              : 'text-slate-700 hover:text-[#082A4F] hover:bg-white/60'
+              ? 'bg-[#8B5A36] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
+              : 'text-slate-700 hover:text-[#4B2B18] hover:bg-white/60'
           }`}
         >
           <MapPin className={`w-4 h-4 ${activeTab === 'branch' ? 'text-[#D4AF37]' : 'text-slate-500'}`} />
@@ -167,8 +167,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           onClick={() => setActiveTab('service')}
           className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
             activeTab === 'service'
-              ? 'bg-[#082A4F] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
-              : 'text-slate-700 hover:text-[#082A4F] hover:bg-white/60'
+              ? 'bg-[#8B5A36] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
+              : 'text-slate-700 hover:text-[#4B2B18] hover:bg-white/60'
           }`}
         >
           <Sparkles className={`w-4 h-4 ${activeTab === 'service' ? 'text-[#D4AF37]' : 'text-slate-500'}`} />
@@ -183,8 +183,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           onClick={() => setActiveTab('business')}
           className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
             activeTab === 'business'
-              ? 'bg-[#082A4F] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
-              : 'text-slate-700 hover:text-[#082A4F] hover:bg-white/60'
+              ? 'bg-[#8B5A36] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
+              : 'text-slate-700 hover:text-[#4B2B18] hover:bg-white/60'
           }`}
         >
           <Sliders className={`w-4 h-4 ${activeTab === 'business' ? 'text-[#D4AF37]' : 'text-slate-500'}`} />
@@ -196,8 +196,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           onClick={() => setActiveTab('audit')}
           className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
             activeTab === 'audit'
-              ? 'bg-[#082A4F] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
-              : 'text-slate-700 hover:text-[#082A4F] hover:bg-white/60'
+              ? 'bg-[#8B5A36] text-white shadow-sm ring-1 ring-[#D4AF37]/50'
+              : 'text-slate-700 hover:text-[#4B2B18] hover:bg-white/60'
           }`}
         >
           <History className={`w-4 h-4 ${activeTab === 'audit' ? 'text-[#D4AF37]' : 'text-slate-500'}`} />

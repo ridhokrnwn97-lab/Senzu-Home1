@@ -323,15 +323,15 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
       {/* Top Header */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center shadow-md">
+          <div className="w-12 h-12 rounded-2xl bg-[#8B5A36] text-[#D4AF37] flex items-center justify-center shadow-md">
             <Award className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="font-serif font-bold text-xl text-[#082A4F]">
+              <h2 className="font-serif font-bold text-xl text-[#4B2B18]">
                 Loyalty, Membership & Rewards
               </h2>
-              <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#082A4F] text-[10px] font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#4B2B18] text-[10px] font-bold">
                 PROMPT 8
               </span>
             </div>
@@ -349,7 +349,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
             className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
             title="Sinkronkan data spend & bookings pelanggan dari database reservasi"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#082A4F]' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#4B2B18]' : ''}`} />
             <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Akun CRM'}</span>
           </button>
         </div>
@@ -367,9 +367,9 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-slate-500 text-xs">
             <span>Total Member Aktif</span>
-            <Users className="w-4 h-4 text-[#082A4F]" />
+            <Users className="w-4 h-4 text-[#4B2B18]" />
           </div>
-          <div className="font-serif font-bold text-2xl text-[#082A4F]">{totalMembers}</div>
+          <div className="font-serif font-bold text-2xl text-[#4B2B18]">{totalMembers}</div>
           <div className="text-[11px] text-slate-500">
             {accounts.filter((a) => a.currentTierId !== 'member').length} Tier Premium (Silver+)
           </div>
@@ -412,7 +412,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
             <span>Voucher & Referral</span>
             <Ticket className="w-4 h-4 text-indigo-600" />
           </div>
-          <div className="font-serif font-bold text-2xl text-[#082A4F]">
+          <div className="font-serif font-bold text-2xl text-[#4B2B18]">
             {activeVouchersCount}{' '}
             <span className="text-xs font-sans text-slate-400">Aktif</span>
           </div>
@@ -429,7 +429,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           onClick={() => setActiveTab('members')}
           className={`pb-3 border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'members'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -442,7 +442,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           onClick={() => setActiveTab('vouchers')}
           className={`pb-3 border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'vouchers'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -455,7 +455,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           onClick={() => setActiveTab('tiers')}
           className={`pb-3 border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'tiers'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -468,7 +468,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           onClick={() => setActiveTab('referrals')}
           className={`pb-3 border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'referrals'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -481,7 +481,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           onClick={() => setActiveTab('settings')}
           className={`pb-3 border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'settings'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -502,7 +502,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
                 placeholder="Cari nama, WhatsApp, No. Member, Referral..."
-                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#082A4F] bg-white"
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#8B5A36] bg-white"
               />
             </div>
 
@@ -551,10 +551,10 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                       return (
                         <tr key={acc.id} className="hover:bg-slate-50/80 transition">
                           <td className="p-3.5">
-                            <div className="font-bold text-[#082A4F]">{acc.customerName}</div>
+                            <div className="font-bold text-[#4B2B18]">{acc.customerName}</div>
                             <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
                               <span>{acc.customerPhone}</span>
-                              <span className="px-1.5 py-0.2 rounded bg-slate-100 text-[#082A4F] font-bold">
+                              <span className="px-1.5 py-0.2 rounded bg-slate-100 text-[#4B2B18] font-bold">
                                 {acc.memberNumber}
                               </span>
                             </div>
@@ -605,7 +605,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                                 className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
                                 title="Lihat Mutasi Ledger Poin"
                               >
-                                <FileText className="w-3.5 h-3.5 text-[#082A4F]" />
+                                <FileText className="w-3.5 h-3.5 text-[#4B2B18]" />
                                 <span>Ledger</span>
                               </button>
 
@@ -647,7 +647,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
             <button
               type="button"
               onClick={() => setIsCreateVoucherOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-[#082A4F] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-[#0D3866] transition cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-[#8B5A36] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-[#94603B] transition cursor-pointer"
             >
               <Plus className="w-4 h-4 text-[#D4AF37]" />
               <span>Buat Voucher Baru</span>
@@ -746,32 +746,32 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <div className="flex items-center justify-between">
                   <div
                     className="w-10 h-10 rounded-xl flex items-center justify-center font-bold"
-                    style={{ backgroundColor: `${tier.badgeColor || '#082A4F'}15`, color: tier.badgeColor || '#082A4F' }}
+                    style={{ backgroundColor: `${tier.badgeColor || '#8B5A36'}15`, color: tier.badgeColor || '#8B5A36' }}
                   >
                     <Award className="w-5 h-5" />
                   </div>
                   <button
                     type="button"
                     onClick={() => setEditingTier(tier)}
-                    className="text-[11px] text-[#082A4F] font-bold hover:underline cursor-pointer"
+                    className="text-[11px] text-[#4B2B18] font-bold hover:underline cursor-pointer"
                   >
                     Edit Aturan
                   </button>
                 </div>
 
                 <div>
-                  <h4 className="font-serif font-bold text-base text-[#082A4F]">Tier {tier.name}</h4>
+                  <h4 className="font-serif font-bold text-base text-[#4B2B18]">Tier {tier.name}</h4>
                   <p className="text-[11px] text-slate-500">{tier.description}</p>
                 </div>
 
                 <div className="space-y-2 border-t border-slate-100 pt-3 text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>Syarat Belanja:</span>
-                    <strong className="font-mono text-[#082A4F]">{formatRupiah(tier.minimumSpend)}</strong>
+                    <strong className="font-mono text-[#4B2B18]">{formatRupiah(tier.minimumSpend)}</strong>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>Syarat Booking:</span>
-                    <strong className="font-mono text-[#082A4F]">{tier.minimumBookings} sesi</strong>
+                    <strong className="font-mono text-[#4B2B18]">{tier.minimumBookings} sesi</strong>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>Diskon Treatment:</span>
@@ -812,7 +812,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           <div className="bg-white p-4 rounded-2xl border border-slate-200">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h4 className="font-serif font-bold text-sm text-[#082A4F]">
+                <h4 className="font-serif font-bold text-sm text-[#4B2B18]">
                   Daftar Konversi Referral Teman
                 </h4>
                 <p className="text-xs text-slate-500">
@@ -846,7 +846,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   ) : (
                     (referrals || []).map((ref) => (
                       <tr key={ref.id} className="hover:bg-slate-50">
-                        <td className="p-3 font-semibold text-[#082A4F]">
+                        <td className="p-3 font-semibold text-[#4B2B18]">
                           {ref.referrerName}
                           <span className="block text-[10px] text-slate-400 font-mono">
                             {ref.referrerPhone}
@@ -894,7 +894,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
       {activeTab === 'settings' && (
         <form onSubmit={handleSaveSettings} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 max-w-2xl">
           <div>
-            <h4 className="font-serif font-bold text-base text-[#082A4F]">Konfigurasi Nilai & Aturan Poin</h4>
+            <h4 className="font-serif font-bold text-base text-[#4B2B18]">Konfigurasi Nilai & Aturan Poin</h4>
             <p className="text-xs text-slate-500">
               Ubah rasio perolehan poin per pembelanjaan, konversi nilai Rupiah, dan batas penukaran.
             </p>
@@ -1005,7 +1005,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
             <button
               type="submit"
               disabled={isSavingSettings}
-              className="px-6 py-2.5 bg-[#082A4F] text-white text-xs font-bold rounded-xl hover:bg-[#0D3866] transition disabled:opacity-50 cursor-pointer"
+              className="px-6 py-2.5 bg-[#8B5A36] text-white text-xs font-bold rounded-xl hover:bg-[#94603B] transition disabled:opacity-50 cursor-pointer"
             >
               {isSavingSettings ? 'Menyimpan...' : 'Simpan Perubahan Aturan'}
             </button>
@@ -1018,7 +1018,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h4 className="font-bold text-sm text-[#082A4F] flex items-center gap-2">
+              <h4 className="font-bold text-sm text-[#4B2B18] flex items-center gap-2">
                 <Coins className="w-4 h-4 text-amber-500" />
                 <span>Penyesuaian Poin Manual (Audit Log)</span>
               </h4>
@@ -1032,7 +1032,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
             </div>
 
             <div className="bg-slate-50 p-3 rounded-xl space-y-1 text-xs">
-              <div className="font-bold text-[#082A4F]">{adjustingAccount.customerName}</div>
+              <div className="font-bold text-[#4B2B18]">{adjustingAccount.customerName}</div>
               <div className="text-slate-500 font-mono">{adjustingAccount.customerPhone} • {adjustingAccount.memberNumber}</div>
               <div className="text-slate-700">
                 Saldo Poin Saat Ini:{' '}
@@ -1085,7 +1085,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                   min="1"
                   value={adjustmentDelta}
                   onChange={(e) => setAdjustmentDelta(Number(e.target.value))}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 font-mono font-bold text-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 font-mono font-bold text-[#4B2B18]"
                   required
                 />
               </div>
@@ -1115,7 +1115,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 <button
                   type="submit"
                   disabled={isAdjusting}
-                  className="px-5 py-2 rounded-xl bg-[#082A4F] text-white font-bold hover:bg-[#0D3866] transition disabled:opacity-50 cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#8B5A36] text-white font-bold hover:bg-[#94603B] transition disabled:opacity-50 cursor-pointer"
                 >
                   {isAdjusting ? 'Menyimpan...' : 'Simpan Penyesuaian'}
                 </button>
@@ -1131,7 +1131,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 max-h-[85vh] flex flex-col animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
               <div>
-                <h4 className="font-bold text-sm text-[#082A4F] flex items-center gap-2">
+                <h4 className="font-bold text-sm text-[#4B2B18] flex items-center gap-2">
                   <FileText className="w-4 h-4 text-[#D4AF37]" />
                   <span>Buku Mutasi Poin (Ledger)</span>
                 </h4>
@@ -1205,7 +1205,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h4 className="font-bold text-sm text-[#082A4F] flex items-center gap-2">
+              <h4 className="font-bold text-sm text-[#4B2B18] flex items-center gap-2">
                 <Ticket className="w-4 h-4 text-emerald-600" />
                 <span>Buat Voucher / Kode Promo Baru</span>
               </h4>
@@ -1322,7 +1322,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#082A4F] text-white font-bold hover:bg-[#0D3866] transition cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#8B5A36] text-white font-bold hover:bg-[#94603B] transition cursor-pointer"
                 >
                   Simpan & Rilis Voucher
                 </button>
@@ -1337,7 +1337,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h4 className="font-bold text-sm text-[#082A4F]">
+              <h4 className="font-bold text-sm text-[#4B2B18]">
                 Edit Parameter Tier: {editingTier.name}
               </h4>
               <button
@@ -1423,7 +1423,7 @@ export const LoyaltyAdminView: React.FC<LoyaltyAdminViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#082A4F] text-white font-bold hover:bg-[#0D3866] transition cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#8B5A36] text-white font-bold hover:bg-[#94603B] transition cursor-pointer"
                 >
                   Simpan Tier
                 </button>

@@ -251,10 +251,10 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-[#082A4F] text-[#D4AF37] flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-lg bg-[#8B5A36] text-[#D4AF37] flex items-center justify-center font-bold">
               <FileSpreadsheet className="w-4 h-4" />
             </div>
-            <h2 className="text-lg font-bold text-[#082A4F] tracking-tight">
+            <h2 className="text-lg font-bold text-[#4B2B18] tracking-tight">
               Pusat Laporan &amp; Audit Operasional (Report Center)
             </h2>
           </div>
@@ -267,7 +267,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
           <button
             type="button"
             onClick={() => setShowDefinitions(true)}
-            className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-[#082A4F] transition flex items-center gap-1.5"
+            className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-[#4B2B18] transition flex items-center gap-1.5"
           >
             <HelpCircle className="w-3.5 h-3.5 text-[#B89628]" />
             <span>Kamus Metrik</span>
@@ -277,7 +277,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
             type="button"
             onClick={handleExport}
             disabled={isExporting}
-            className="px-4 py-2 text-xs font-bold rounded-xl bg-[#082A4F] hover:bg-[#082A4F]/90 text-white shadow-xs transition flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 text-xs font-bold rounded-xl bg-[#8B5A36] hover:bg-[#8B5A36]/90 text-white shadow-xs transition flex items-center gap-2 disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>{isExporting ? 'Memproses...' : 'Ekspor Laporan (.xlsx)'}</span>
@@ -320,8 +320,8 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               }}
               className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
                 isActive
-                  ? 'bg-[#082A4F] text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-[#082A4F]'
+                  ? 'bg-[#8B5A36] text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-[#4B2B18]'
               }`}
             >
               <span>{c.label}</span>
@@ -346,7 +346,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                   setSearchQuery(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:border-[#082A4F]"
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:border-[#8B5A36]"
               />
             </div>
 
@@ -382,7 +382,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                   <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                     <th className="py-2.5 px-3">Kode Booking</th>
                     <th
-                      className="py-2.5 px-3 cursor-pointer hover:text-[#082A4F]"
+                      className="py-2.5 px-3 cursor-pointer hover:text-[#4B2B18]"
                       onClick={() => handleSort('date')}
                     >
                       <div className="flex items-center gap-1">
@@ -391,7 +391,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                       </div>
                     </th>
                     <th
-                      className="py-2.5 px-3 cursor-pointer hover:text-[#082A4F]"
+                      className="py-2.5 px-3 cursor-pointer hover:text-[#4B2B18]"
                       onClick={() => handleSort('customer')}
                     >
                       <div className="flex items-center gap-1">
@@ -404,7 +404,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                     <th className="py-2.5 px-3 text-center">Status</th>
                     <th className="py-2.5 px-3 text-center">Pembayaran</th>
                     <th
-                      className="py-2.5 px-3 text-right cursor-pointer hover:text-[#082A4F]"
+                      className="py-2.5 px-3 text-right cursor-pointer hover:text-[#4B2B18]"
                       onClick={() => handleSort('amount')}
                     >
                       <div className="flex items-center justify-end gap-1">
@@ -422,7 +422,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                       className="hover:bg-slate-50/80 transition cursor-pointer"
                       title="Klik untuk membuka detail snapshot reservasi"
                     >
-                      <td className="py-2.5 px-3 font-mono font-bold text-[#082A4F]">
+                      <td className="py-2.5 px-3 font-mono font-bold text-[#4B2B18]">
                         {b.bookingCode || b.id}
                       </td>
                       <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
@@ -471,7 +471,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
                           {b.paymentStatus || 'PENDING'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#082A4F] whitespace-nowrap">
+                      <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18] whitespace-nowrap">
                         {formatRupiah(b.totalAmount || 0)}
                       </td>
                     </tr>
@@ -514,7 +514,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'service' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Analisis Performa Layanan &amp; Treatment
             </h3>
             <p className="text-xs text-slate-500">
@@ -540,11 +540,11 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(serviceRows || []).map((s, idx) => (
                   <tr key={`${s.serviceName}_${s.duration}_${idx}`} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{s.serviceName}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{s.serviceName}</td>
                     <td className="py-2.5 px-3 text-center font-mono">{s.duration} mnt</td>
                     <td className="py-2.5 px-3 text-right">{s.bookingCount}</td>
                     <td className="py-2.5 px-3 text-right text-emerald-700 font-semibold">{s.completedCount}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">{formatRupiah(s.realizedRevenue)}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">{formatRupiah(s.realizedRevenue)}</td>
                     <td className="py-2.5 px-3 text-right text-slate-600">{formatRupiah(s.averageTicket)}</td>
                     <td className="py-2.5 px-3 text-center font-bold">{s.sharePct}%</td>
                     <td className="py-2.5 px-3 text-center">
@@ -567,7 +567,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'customer' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Pelanggan &amp; Customer Relationship Management (CRM)
             </h3>
             <p className="text-xs text-slate-500">
@@ -591,15 +591,15 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(customers || []).map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{c.name}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{c.name}</td>
                     <td className="py-2.5 px-3 text-slate-600">{c.phone}</td>
                     <td className="py-2.5 px-3 text-center">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#082A4F]/10 text-[#082A4F]">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#8B5A36]/10 text-[#4B2B18]">
                         {c.customerSegment || 'NEW'}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-right">{c.totalBookings || 0}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">{formatRupiah(c.totalSpend || (c as any).totalSpent || 0)}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">{formatRupiah(c.totalSpend || (c as any).totalSpent || 0)}</td>
                     <td className="py-2.5 px-3 text-right font-mono text-[#B89628] font-bold">{(c as any).loyaltyPoints || 0} pts</td>
                     <td className="py-2.5 px-3 text-slate-500">{c.lastBookingAt || (c as any).lastBookingDate || '—'}</td>
                   </tr>
@@ -614,7 +614,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'therapist' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Kapasitas &amp; Utilisasi Terapis
             </h3>
             <p className="text-xs text-slate-500">
@@ -640,16 +640,16 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(therapistRows || []).map((t) => (
                   <tr key={t.therapistId} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{t.therapistName}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{t.therapistName}</td>
                     <td className="py-2.5 px-3 text-center">{t.gender === 'F' ? 'Wanita' : 'Pria'}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">{t.jobsCompleted}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">{t.jobsCompleted}</td>
                     <td className="py-2.5 px-3 text-right font-mono">{t.plannedTreatmentMinutes} mnt</td>
                     <td className="py-2.5 px-3 text-right font-mono">
                       {t.rosterDataComplete ? `${t.scheduledShiftMinutes} mnt` : '—'}
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       {t.rosterDataComplete && t.utilizationPct !== null ? (
-                        <span className="font-bold text-[#082A4F]">{t.utilizationPct}%</span>
+                        <span className="font-bold text-[#4B2B18]">{t.utilizationPct}%</span>
                       ) : (
                         <span className="text-[10px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
                           Roster Belum Lengkap
@@ -681,7 +681,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'funnel' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Funnel Operasional &amp; Durasi Antar Tahap
             </h3>
             <p className="text-xs text-slate-500">
@@ -703,7 +703,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(funnelStages || []).map((st) => (
                   <tr key={st.key} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{st.label}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{st.label}</td>
                     <td className="py-2.5 px-3 text-right font-bold">{st.count}</td>
                     <td className="py-2.5 px-3 text-center">{st.pctOfTotal}%</td>
                     <td className="py-2.5 px-3 text-right font-mono">
@@ -724,7 +724,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'css' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan SLA Verifikasi Pembayaran Customer Service (CSS)
             </h3>
             <p className="text-xs text-slate-500">
@@ -735,7 +735,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
             <div>
               <span className="text-[11px] text-slate-500 block">Bukti Masuk:</span>
-              <span className="text-lg font-bold text-[#082A4F]">{cssSla.proofUploadedCount}</span>
+              <span className="text-lg font-bold text-[#4B2B18]">{cssSla.proofUploadedCount}</span>
             </div>
             <div>
               <span className="text-[11px] text-slate-500 block">Terverifikasi:</span>
@@ -747,7 +747,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
             </div>
             <div>
               <span className="text-[11px] text-slate-500 block">Pencapaian SLA:</span>
-              <span className="text-lg font-bold text-[#082A4F]">{cssSla.slaAchievementRate}%</span>
+              <span className="text-lg font-bold text-[#4B2B18]">{cssSla.slaAchievementRate}%</span>
             </div>
           </div>
         </div>
@@ -757,7 +757,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'payment' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Rekapitulasi Metode &amp; Kanal Pembayaran
             </h3>
             <p className="text-xs text-slate-500">
@@ -779,9 +779,9 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(paymentRows || []).map((pm) => (
                   <tr key={pm.methodKey} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{pm.methodLabel}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{pm.methodLabel}</td>
                     <td className="py-2.5 px-3 text-right">{pm.transactionCount}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">{formatRupiah(pm.paidAmount)}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">{formatRupiah(pm.paidAmount)}</td>
                     <td className="py-2.5 px-3 text-center font-bold text-[#B89628]">{pm.sharePct}%</td>
                     <td className="py-2.5 px-3 text-center text-rose-600 font-semibold">{pm.rejectedProofCount}</td>
                   </tr>
@@ -796,7 +796,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'area' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Sebaran Wilayah &amp; Kecamatan Palembang
             </h3>
             <p className="text-xs text-slate-500">
@@ -819,10 +819,10 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(areaRows || []).map((a) => (
                   <tr key={a.areaName} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{a.areaName}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{a.areaName}</td>
                     <td className="py-2.5 px-3 text-right">{a.bookingCount}</td>
                     <td className="py-2.5 px-3 text-right text-emerald-700 font-semibold">{a.completedCount}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">{formatRupiah(a.realizedRevenue)}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">{formatRupiah(a.realizedRevenue)}</td>
                     <td className="py-2.5 px-3 text-right text-slate-600">{formatRupiah(a.avgHomeServiceFee)}</td>
                     <td className="py-2.5 px-3 text-center">
                       <span className="font-semibold text-rose-600">{a.cancellationRate}%</span>
@@ -839,7 +839,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'rating' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Kepuasan Pelanggan &amp; Rating Layanan
             </h3>
             <p className="text-xs text-slate-500">
@@ -861,7 +861,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium">
                 {(reviews || []).map((r) => (
                   <tr key={r.id} className="hover:bg-slate-50/80">
-                    <td className="py-2.5 px-3 font-bold text-[#082A4F]">{r.customerName}</td>
+                    <td className="py-2.5 px-3 font-bold text-[#4B2B18]">{r.customerName}</td>
                     <td className="py-2.5 px-3 font-mono text-slate-600">{r.bookingCode}</td>
                     <td className="py-2.5 px-3 text-center font-bold text-[#B89628]">{r.overallRating}★</td>
                     <td className="py-2.5 px-3 text-slate-700 italic">"{r.comment}"</td>
@@ -886,7 +886,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
       {activeCategory === 'loyalty' && (
         <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
           <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Laporan Program Retensi, Poin &amp; Voucher
             </h3>
             <p className="text-xs text-slate-500">
@@ -897,7 +897,7 @@ export const ReportCenterView: React.FC<ReportCenterViewProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
             <div>
               <span className="text-[11px] text-slate-500 block">Total Pelanggan Terdaftar:</span>
-              <span className="text-lg font-bold text-[#082A4F]">{customers.length}</span>
+              <span className="text-lg font-bold text-[#4B2B18]">{customers.length}</span>
             </div>
             <div>
               <span className="text-[11px] text-slate-500 block">Total Poin Beredar:</span>

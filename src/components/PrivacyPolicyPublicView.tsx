@@ -59,7 +59,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between selection:bg-[#D4AF37]/20 selection:text-[#082A4F]">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between selection:bg-[#D4AF37]/20 selection:text-[#4B2B18]">
       {/* 1. Header Bar */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -67,7 +67,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             <button
               type="button"
               onClick={handleReturnHome}
-              className="p-2 -ml-2 rounded-xl text-slate-600 hover:text-[#082A4F] hover:bg-slate-100 transition cursor-pointer"
+              className="p-2 -ml-2 rounded-xl text-slate-600 hover:text-[#4B2B18] hover:bg-slate-100 transition cursor-pointer"
               title="Kembali ke Beranda"
               aria-label="Kembali"
             >
@@ -76,7 +76,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             <div className="flex items-center gap-2.5">
               <SenzuLogo className="w-8 h-8" />
               <div>
-                <span className="font-serif font-bold text-base sm:text-lg text-[#082A4F] tracking-tight block leading-tight">
+                <span className="font-serif font-bold text-base sm:text-lg text-[#4B2B18] tracking-tight block leading-tight">
                   Senzu Home
                 </span>
                 <span className="text-[10px] text-[#D4AF37] font-semibold tracking-wider uppercase block">
@@ -110,11 +110,11 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8">
         {/* Title Section */}
         <div className="space-y-2.5">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#082A4F]/10 text-[#082A4F] text-xs font-bold">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#8B5A36]/10 text-[#4B2B18] text-xs font-bold">
             <ShieldCheck className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>Google Play Privacy Policy & Data Safety</span>
           </div>
-          <h1 className="font-serif font-bold text-2xl sm:text-3xl text-[#082A4F] tracking-tight">
+          <h1 className="font-serif font-bold text-2xl sm:text-3xl text-[#4B2B18] tracking-tight">
             Kebijakan Privasi Senzu Home
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-3xl">
@@ -125,12 +125,12 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             <span>•</span>
             <span>Terakhir diperbarui: September 2026</span>
             <span>•</span>
-            <span className="text-[#082A4F] font-medium">PT KSBONE UNTUK KITA</span>
+            <span className="text-[#4B2B18] font-medium">PT KSBONE UNTUK KITA</span>
           </div>
         </div>
 
         {/* Company Identity Banner */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-[#082A4F] to-[#0D3866] text-white rounded-3xl shadow-sm border border-[#D4AF37]/30 space-y-2">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white rounded-3xl shadow-sm border border-[#D4AF37]/30 space-y-2">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
               <Building2 className="w-5 h-5 text-[#D4AF37]" />
@@ -156,7 +156,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <FileText className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 1. Kategori Data Pribadi yang Kami Kumpulkan
               </h2>
               <p className="text-xs text-slate-500">
@@ -168,7 +168,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed">
             {/* A. Data Akun & Otentikasi */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-              <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+              <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                 <Lock className="w-4 h-4 text-[#D4AF37]" />
                 <span>A. Data Akun & Otentikasi</span>
               </div>
@@ -179,7 +179,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             {/* B. Data Kontak & Komunikasi */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-              <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+              <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                 <Phone className="w-4 h-4 text-[#D4AF37]" />
                 <span>B. Data Kontak & Komunikasi</span>
               </div>
@@ -190,7 +190,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             {/* C. Data Alamat & Geolokasi */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-              <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+              <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                 <MapPin className="w-4 h-4 text-[#D4AF37]" />
                 <span>C. Data Alamat & Geolokasi</span>
               </div>
@@ -201,7 +201,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             {/* D. Data Reservasi & Transaksi */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-              <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+              <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                 <Clock className="w-4 h-4 text-[#D4AF37]" />
                 <span>D. Data Reservasi & Transaksi</span>
               </div>
@@ -212,7 +212,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             {/* E. Bukti Pembayaran Non-Tunai */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 md:col-span-2">
-              <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+              <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                 <CreditCard className="w-4 h-4 text-[#D4AF37]" />
                 <span>E. Bukti Pembayaran (Transfer Bank & QRIS)</span>
               </div>
@@ -230,7 +230,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <CheckCircle2 className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 2. Mengapa Data Dikumpulkan dan Digunakan
               </h2>
               <p className="text-xs text-slate-500">
@@ -294,7 +294,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <MapPin className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 3. Kebijakan Alamat & Penggunaan Geolokasi
               </h2>
               <p className="text-xs text-slate-500">
@@ -309,13 +309,13 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
-                <span className="font-bold text-[#082A4F] block">Verifikasi Jangkauan Area</span>
+                <span className="font-bold text-[#4B2B18] block">Verifikasi Jangkauan Area</span>
                 <p className="text-slate-600">
                   Memastikan alamat pemesanan berada dalam radius operasional cabang Senzu Home Palembang (Kecamatan Ilir Barat, Ilir Timur, Sukarami, Alang-Alang Lebar, Sako, Kemuning, Plaju, dll).
                 </p>
               </div>
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
-                <span className="font-bold text-[#082A4F] block">Navigasi Kedatangan Terapis</span>
+                <span className="font-bold text-[#4B2B18] block">Navigasi Kedatangan Terapis</span>
                 <p className="text-slate-600">
                   Memberikan rute navigasi akurat bagi terapis berlisensi resmi Senzu agar dapat tiba tepat waktu sesuai jadwal yang telah Anda tentukan.
                 </p>
@@ -334,7 +334,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <Lock className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 4. Keamanan, Transmisi & Perlindungan Sandi
               </h2>
               <p className="text-xs text-slate-500">
@@ -371,7 +371,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <Server className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 5. Layanan Pihak Ketiga & Komitmen Perlindungan
               </h2>
               <p className="text-xs text-slate-500">
@@ -387,14 +387,14 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             <div className="space-y-2.5">
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-                <span className="font-bold text-[#082A4F] block">Google Firebase (Google LLC)</span>
+                <span className="font-bold text-[#4B2B18] block">Google Firebase (Google LLC)</span>
                 <p className="text-slate-600">
                   Digunakan untuk otentikasi akun aman (Firebase Authentication), penyimpanan basis data terenkripsi untuk pesanan dan profil (Cloud Firestore), serta penyimpanan dokumen bukti transfer (Firebase Storage).
                 </p>
               </div>
 
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-                <span className="font-bold text-[#082A4F] block">Google Maps Platform (Google LLC)</span>
+                <span className="font-bold text-[#4B2B18] block">Google Maps Platform (Google LLC)</span>
                 <p className="text-slate-600">
                   Digunakan untuk layanan geocoding alamat hunian, penentuan radius jangkauan layanan Palembang, dan navigasi terapis.
                 </p>
@@ -421,7 +421,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <Clock className="w-4 h-4 text-[#D4AF37]" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 6. Praktik & Kebijakan Retensi Data
               </h2>
               <p className="text-xs text-slate-500">
@@ -454,7 +454,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <Trash2 className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 7. Hak Pelanggan & Penghapusan Akun (Google Play Compliance)
               </h2>
               <p className="text-xs text-slate-500">
@@ -476,7 +476,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
                 <a
                   href="/hapus-akun"
                   onClick={handleNavigateHapusAkun}
-                  className="text-[#082A4F] font-bold text-xs sm:text-sm underline hover:text-rose-600 break-all"
+                  className="text-[#4B2B18] font-bold text-xs sm:text-sm underline hover:text-rose-600 break-all"
                 >
                   https://senzuhome.com/hapus-akun
                 </a>
@@ -524,7 +524,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               <Phone className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F]">
+              <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18]">
                 8. Saluran Kontak & Layanan Pelanggan
               </h2>
               <p className="text-xs text-slate-500">
@@ -540,7 +540,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
-                <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+                <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                   <Building2 className="w-4 h-4 text-[#D4AF37]" />
                   <span>Pengelola Resmi</span>
                 </div>
@@ -552,13 +552,13 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
               </div>
 
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+                <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                   <Mail className="w-4 h-4 text-[#D4AF37]" />
                   <span>Kontak Komunikasi</span>
                 </div>
                 <div className="space-y-1">
                   <p className="text-slate-700">
-                    Email: <a href="mailto:senzureflexology@gmail.com" className="text-[#082A4F] font-semibold hover:underline">senzureflexology@gmail.com</a>
+                    Email: <a href="mailto:senzureflexology@gmail.com" className="text-[#4B2B18] font-semibold hover:underline">senzureflexology@gmail.com</a>
                   </p>
                   {isAvailable && (
                     <p className="text-slate-700">
@@ -602,7 +602,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             <button
               type="button"
               onClick={handleReturnHome}
-              className="hover:text-[#082A4F] hover:underline cursor-pointer"
+              className="hover:text-[#4B2B18] hover:underline cursor-pointer"
             >
               Beranda Senzu Home
             </button>
@@ -617,7 +617,7 @@ export const PrivacyPolicyPublicView: React.FC<PrivacyPolicyPublicViewProps> = (
             <span>•</span>
             <a
               href="/kebijakan-privasi"
-              className="text-[#082A4F] font-bold"
+              className="text-[#4B2B18] font-bold"
             >
               Kebijakan Privasi
             </a>

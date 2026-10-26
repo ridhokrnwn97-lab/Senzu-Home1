@@ -265,7 +265,7 @@ export const CssDrawerPaymentVerification: React.FC<CssDrawerPaymentVerification
       {/* Main Verification Card */}
       <div className="bg-white rounded-2xl border-2 border-teal-600/30 shadow-sm overflow-hidden">
         {/* Card Header */}
-        <div className="bg-gradient-to-r from-[#082A4F] to-[#0d3f74] text-white p-4 flex items-center justify-between gap-3">
+        <div className="bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300">
               <ShieldCheck className="w-5 h-5" />

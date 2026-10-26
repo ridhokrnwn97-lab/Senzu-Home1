@@ -92,7 +92,7 @@ export const SupervisorAlertBar: React.FC<SupervisorAlertBarProps> = ({
             ? 'bg-rose-600 text-white'
             : highCount > 0
             ? 'bg-amber-600 text-white'
-            : 'bg-[#082A4F] text-white'
+            : 'bg-[#8B5A36] text-white'
         }`}
         onClick={() => setIsExpanded(!isExpanded)}
       >
@@ -138,7 +138,7 @@ export const SupervisorAlertBar: React.FC<SupervisorAlertBarProps> = ({
               onClick={() => setSelectedPriority('ALL')}
               className={`px-3 py-1 rounded-lg transition cursor-pointer ${
                 selectedPriority === 'ALL'
-                  ? 'bg-[#082A4F] text-white'
+                  ? 'bg-[#8B5A36] text-white'
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >

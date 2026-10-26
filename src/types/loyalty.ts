@@ -402,7 +402,7 @@ export const DEFAULT_MEMBERSHIP_TIERS: MembershipTier[] = [
     priorityBooking: true,
     specialVoucherEnabled: true,
     badgeLabel: 'Platinum',
-    cardGradient: 'from-slate-900 via-indigo-950 to-[#082A4F]',
+    cardGradient: 'from-slate-900 via-indigo-950 to-[#8B5A36]',
     enabled: true,
     sortOrder: 4,
     createdAt: '2026-01-01T00:00:00.000Z',

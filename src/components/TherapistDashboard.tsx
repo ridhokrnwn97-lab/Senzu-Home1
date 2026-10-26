@@ -866,10 +866,10 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
       )}
 
       {/* Therapist App Header */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0E3D73] to-[#082A4F] text-white p-5 rounded-3xl shadow-xl border border-[#D4AF37]/40 mb-4">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 rounded-3xl shadow-xl border border-[#D4AF37]/40 mb-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-[#D4AF37] text-[#082A4F] font-serif font-bold text-xl flex items-center justify-center shadow-md shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-[#D4AF37] text-[#4B2B18] font-serif font-bold text-xl flex items-center justify-center shadow-md shrink-0">
               {therapistInfo ? therapistInfo.name.charAt(0) : 'T'}
             </div>
             <div>
@@ -1118,14 +1118,14 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                 {/* Treatment Header */}
                 <div className="flex items-start justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <h3 className="font-bold text-[#082A4F] text-base leading-tight">
+                    <h3 className="font-bold text-[#4B2B18] text-base leading-tight">
                       {currentJob.serviceName}
                     </h3>
                     <div className="flex items-center gap-2 mt-1 text-slate-500 text-xs font-medium">
                       <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
                       <span>{currentJob.serviceDuration} Menit Durasi</span>
                       <span>•</span>
-                      <Calendar className="w-3.5 h-3.5 text-[#082A4F]" />
+                      <Calendar className="w-3.5 h-3.5 text-[#4B2B18]" />
                       <span>{currentJob.scheduleDate}, {currentJob.scheduleTime} WIB</span>
                     </div>
                   </div>
@@ -1134,7 +1134,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                     id="btn-open-full-detail"
                     type="button"
                     onClick={() => handleOpenBookingDetail(currentJob)}
-                    className="text-xs font-bold text-[#082A4F] bg-slate-100 hover:bg-slate-200 active:scale-95 px-3 py-1.5 rounded-xl flex items-center gap-1 transition cursor-pointer shrink-0"
+                    className="text-xs font-bold text-[#4B2B18] bg-slate-100 hover:bg-slate-200 active:scale-95 px-3 py-1.5 rounded-xl flex items-center gap-1 transition cursor-pointer shrink-0"
                     title="Buka Lembar Detail Tugas"
                   >
                     <span>Detail Lengkap</span>
@@ -1146,7 +1146,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                 <div className="bg-[#FAF9F6] p-3.5 rounded-2xl border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-[#082A4F]/10 flex items-center justify-center text-[#082A4F] font-bold text-xs">
+                      <div className="w-8 h-8 rounded-full bg-[#8B5A36]/10 flex items-center justify-center text-[#4B2B18] font-bold text-xs">
                         {(currentJob.customerName || 'P').charAt(0)}
                       </div>
                       <div>
@@ -1217,7 +1217,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                       href={getMapsUrl(currentJob)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 text-xs font-bold text-[#082A4F] bg-white border-2 border-[#082A4F]/20 hover:border-[#082A4F] px-3.5 py-2 rounded-xl transition shadow-xs active:scale-95"
+                      className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 text-xs font-bold text-[#4B2B18] bg-white border-2 border-[#8B5A36]/20 hover:border-[#8B5A36] px-3.5 py-2 rounded-xl transition shadow-xs active:scale-95"
                     >
                       <Navigation className="w-4 h-4 text-[#D4AF37]" />
                       <span>Buka Google Maps</span>
@@ -1274,7 +1274,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                       )}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[#082A4F] hover:text-[#0E3D73] font-bold min-h-[36px] px-2 cursor-pointer"
+                      className="inline-flex items-center gap-1 text-[#4B2B18] hover:text-[#633C24] font-bold min-h-[36px] px-2 cursor-pointer"
                     >
                       <HelpCircle className="w-3.5 h-3.5 text-[#D4AF37]" />
                       <span>Hubungi CS / SPV</span>
@@ -1345,7 +1345,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                       type="button"
                       disabled={updatingId === currentJob.id}
                       onClick={() => setConfirmStartTreatmentBooking(currentJob)}
-                      className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#082A4F] hover:bg-[#0E3D73] text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition active:scale-98 shadow-lg shadow-[#082A4F]/30 cursor-pointer disabled:opacity-50"
+                      className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition active:scale-98 shadow-lg shadow-[#8B5A36]/30 cursor-pointer disabled:opacity-50"
                     >
                       <Clock className="w-5 h-5 text-[#D4AF37]" />
                       <span>MULAI TREATMENT</span>
@@ -1359,8 +1359,8 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
           ) : (
             /* Empty State when no active job */
             <div className="bg-white rounded-3xl p-8 text-center border border-slate-200 shadow-sm space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center mx-auto">
-                <Sparkles className="w-7 h-7 text-[#082A4F]" />
+              <div className="w-14 h-14 rounded-2xl bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center mx-auto">
+                <Sparkles className="w-7 h-7 text-[#4B2B18]" />
               </div>
               <h3 className="font-bold text-slate-800 text-base">Tidak Ada Tugas Aktif</h3>
               <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
@@ -1374,7 +1374,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
             <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <span className="text-xs font-bold text-slate-800">Booking Berikutnya</span>
-                <span className="text-[11px] font-bold text-[#082A4F] bg-slate-100 px-2 py-0.5 rounded-full">
+                <span className="text-[11px] font-bold text-[#4B2B18] bg-slate-100 px-2 py-0.5 rounded-full">
                   {upcomingJobs.length} Menunggu
                 </span>
               </div>
@@ -1389,7 +1389,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                     title="Ketuk untuk melihat detail tugas"
                   >
                     <div>
-                      <span className="font-bold text-slate-900 block group-hover:text-[#082A4F]">{uj.serviceName} ({uj.serviceDuration}m)</span>
+                      <span className="font-bold text-slate-900 block group-hover:text-[#4B2B18]">{uj.serviceName} ({uj.serviceDuration}m)</span>
                       <span className="text-[11px] text-slate-500">
                         {uj.scheduleDate} • {uj.scheduleTime} WIB ({uj.area})
                       </span>
@@ -1398,7 +1398,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                       <span className="px-2.5 py-1 rounded-xl font-bold text-[10px] bg-purple-100 text-purple-800">
                         {uj.status}
                       </span>
-                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#082A4F]" />
+                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#4B2B18]" />
                     </div>
                   </div>
                 ))}
@@ -1418,7 +1418,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setJobsSubFilter('all')}
               className={`flex-1 py-2 rounded-xl transition ${
-                jobsSubFilter === 'all' ? 'bg-white text-[#082A4F] shadow-xs' : 'text-slate-600'
+                jobsSubFilter === 'all' ? 'bg-white text-[#4B2B18] shadow-xs' : 'text-slate-600'
               }`}
             >
               Semua ({activeOrders.length})
@@ -1427,7 +1427,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setJobsSubFilter('assigned')}
               className={`flex-1 py-2 rounded-xl transition ${
-                jobsSubFilter === 'assigned' ? 'bg-white text-[#082A4F] shadow-xs' : 'text-slate-600'
+                jobsSubFilter === 'assigned' ? 'bg-white text-[#4B2B18] shadow-xs' : 'text-slate-600'
               }`}
             >
               Perlu Diterima ({activeOrders.filter((b) => isAssignedStatus(b.status)).length})
@@ -1436,7 +1436,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setJobsSubFilter('in_progress')}
               className={`flex-1 py-2 rounded-xl transition ${
-                jobsSubFilter === 'in_progress' ? 'bg-white text-[#082A4F] shadow-xs' : 'text-slate-600'
+                jobsSubFilter === 'in_progress' ? 'bg-white text-[#4B2B18] shadow-xs' : 'text-slate-600'
               }`}
             >
               Berjalan ({activeOrders.filter((b) => ['Accepted', 'On The Way', 'Arrived', 'Treatment'].includes(b.status)).length})
@@ -1464,7 +1464,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                     className="bg-white hover:bg-slate-50/80 transition rounded-3xl border border-slate-200 p-4 shadow-sm space-y-3 cursor-pointer"
                   >
                     <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <span className="font-mono font-bold text-[#082A4F] text-xs">
+                      <span className="font-mono font-bold text-[#4B2B18] text-xs">
                         {b.bookingCode}
                       </span>
                       <span
@@ -1507,7 +1507,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                           e.stopPropagation();
                           handleOpenBookingDetail(b);
                         }}
-                        className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#082A4F] text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#4B2B18] text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <FileText className="w-3.5 h-3.5" />
                         <span>Buka Detail</span>
@@ -1520,7 +1520,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                           handleOpenBookingDetail(b);
                           setMobileTab('beranda');
                         }}
-                        className="flex-1 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>Kerjakan di Beranda</span>
                         <ChevronRight className="w-3.5 h-3.5" />
@@ -1544,7 +1544,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setHistoryFilter('all')}
               className={`px-3 py-1.5 rounded-xl font-bold shrink-0 transition ${
-                historyFilter === 'all' ? 'bg-[#082A4F] text-white' : 'bg-white border border-slate-200 text-slate-600'
+                historyFilter === 'all' ? 'bg-[#8B5A36] text-white' : 'bg-white border border-slate-200 text-slate-600'
               }`}
             >
               Semua ({completedOrders.length})
@@ -1553,7 +1553,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setHistoryFilter('today')}
               className={`px-3 py-1.5 rounded-xl font-bold shrink-0 transition ${
-                historyFilter === 'today' ? 'bg-[#082A4F] text-white' : 'bg-white border border-slate-200 text-slate-600'
+                historyFilter === 'today' ? 'bg-[#8B5A36] text-white' : 'bg-white border border-slate-200 text-slate-600'
               }`}
             >
               Hari Ini
@@ -1562,7 +1562,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setHistoryFilter('7days')}
               className={`px-3 py-1.5 rounded-xl font-bold shrink-0 transition ${
-                historyFilter === '7days' ? 'bg-[#082A4F] text-white' : 'bg-white border border-slate-200 text-slate-600'
+                historyFilter === '7days' ? 'bg-[#8B5A36] text-white' : 'bg-white border border-slate-200 text-slate-600'
               }`}
             >
               7 Hari Terakhir
@@ -1571,7 +1571,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               type="button"
               onClick={() => setHistoryFilter('30days')}
               className={`px-3 py-1.5 rounded-xl font-bold shrink-0 transition ${
-                historyFilter === '30days' ? 'bg-[#082A4F] text-white' : 'bg-white border border-slate-200 text-slate-600'
+                historyFilter === '30days' ? 'bg-[#8B5A36] text-white' : 'bg-white border border-slate-200 text-slate-600'
               }`}
             >
               30 Hari
@@ -1590,7 +1590,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                   className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm text-xs space-y-2"
                 >
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                    <span className="font-mono font-bold text-[#082A4F]">
+                    <span className="font-mono font-bold text-[#4B2B18]">
                       {b.bookingCode}
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
@@ -1624,12 +1624,12 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
       {mobileTab === 'akun' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm text-center space-y-4">
-            <div className="w-20 h-20 rounded-3xl bg-[#082A4F] text-[#D4AF37] font-serif font-bold text-3xl flex items-center justify-center mx-auto shadow-md border-2 border-[#D4AF37]">
+            <div className="w-20 h-20 rounded-3xl bg-[#8B5A36] text-[#D4AF37] font-serif font-bold text-3xl flex items-center justify-center mx-auto shadow-md border-2 border-[#D4AF37]">
               {therapistInfo ? therapistInfo.name.charAt(0) : 'T'}
             </div>
 
             <div>
-              <h3 className="font-serif font-bold text-lg text-[#082A4F]">
+              <h3 className="font-serif font-bold text-lg text-[#4B2B18]">
                 {therapistInfo?.name || currentUser?.name}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1643,7 +1643,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                 <span className="text-[10px] text-slate-400 uppercase font-semibold block">
                   Total Treatment Selesai
                 </span>
-                <span className="font-bold text-base text-[#082A4F]">
+                <span className="font-bold text-base text-[#4B2B18]">
                   {therapistInfo?.totalCompleted || completedOrders.length} Sesi
                 </span>
               </div>
@@ -1733,7 +1733,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
             type="button"
             onClick={() => setMobileTab('beranda')}
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition cursor-pointer ${
-              mobileTab === 'beranda' ? 'text-[#082A4F] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
+              mobileTab === 'beranda' ? 'text-[#4B2B18] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
             }`}
           >
             <Sparkles className={`w-5 h-5 ${mobileTab === 'beranda' ? 'text-[#D4AF37]' : ''}`} />
@@ -1744,10 +1744,10 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
             type="button"
             onClick={() => setMobileTab('pekerjaan')}
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition cursor-pointer relative ${
-              mobileTab === 'pekerjaan' ? 'text-[#082A4F] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
+              mobileTab === 'pekerjaan' ? 'text-[#4B2B18] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
             }`}
           >
-            <Briefcase className={`w-5 h-5 ${mobileTab === 'pekerjaan' ? 'text-[#082A4F]' : ''}`} />
+            <Briefcase className={`w-5 h-5 ${mobileTab === 'pekerjaan' ? 'text-[#4B2B18]' : ''}`} />
             <span className="text-[10px]">Pekerjaan</span>
             {activeOrders.length > 0 && (
               <span className="absolute top-0 right-2 w-2 h-2 rounded-full bg-amber-500"></span>
@@ -1758,10 +1758,10 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
             type="button"
             onClick={() => setMobileTab('riwayat')}
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition cursor-pointer ${
-              mobileTab === 'riwayat' ? 'text-[#082A4F] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
+              mobileTab === 'riwayat' ? 'text-[#4B2B18] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
             }`}
           >
-            <History className={`w-5 h-5 ${mobileTab === 'riwayat' ? 'text-[#082A4F]' : ''}`} />
+            <History className={`w-5 h-5 ${mobileTab === 'riwayat' ? 'text-[#4B2B18]' : ''}`} />
             <span className="text-[10px]">Riwayat</span>
           </button>
 
@@ -1769,10 +1769,10 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
             type="button"
             onClick={() => setMobileTab('akun')}
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition cursor-pointer ${
-              mobileTab === 'akun' ? 'text-[#082A4F] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
+              mobileTab === 'akun' ? 'text-[#4B2B18] font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
             }`}
           >
-            <User className={`w-5 h-5 ${mobileTab === 'akun' ? 'text-[#082A4F]' : ''}`} />
+            <User className={`w-5 h-5 ${mobileTab === 'akun' ? 'text-[#4B2B18]' : ''}`} />
             <span className="text-[10px]">Akun</span>
           </button>
         </div>
@@ -1784,11 +1784,11 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
       {confirmStartTreatmentBooking && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-slate-900 shadow-2xl border border-slate-200 text-center space-y-4 animate-scale-in">
-            <div className="w-12 h-12 rounded-2xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center mx-auto">
+            <div className="w-12 h-12 rounded-2xl bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center mx-auto">
               <Clock className="w-7 h-7 text-[#D4AF37]" />
             </div>
             <div>
-              <h4 className="text-base font-bold text-[#082A4F]">Mulai Treatment Sekarang?</h4>
+              <h4 className="text-base font-bold text-[#4B2B18]">Mulai Treatment Sekarang?</h4>
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                 Timer layanan {confirmStartTreatmentBooking.serviceDuration} menit akan segera dimulai. Pastikan customer telah siap dan rileks.
               </p>
@@ -1802,7 +1802,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                   setConfirmStartTreatmentBooking(null);
                   handleNextStatus(b, 'Treatment');
                 }}
-                className="w-full min-h-[48px] py-3 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#082A4F]/20"
+                className="w-full min-h-[48px] py-3 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#8B5A36]/20"
               >
                 Mulai Treatment
               </button>
@@ -1832,7 +1832,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
               <span className="text-[10px] uppercase tracking-wider font-bold text-amber-800 bg-amber-100 px-3 py-1 rounded-full">
                 Validasi Kedatangan
               </span>
-              <h3 className="text-base font-serif font-bold text-[#082A4F] mt-2">
+              <h3 className="text-base font-serif font-bold text-[#4B2B18] mt-2">
                 Anda Belum Berada di Lokasi Customer
               </h3>
             </div>
@@ -1913,7 +1913,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                   <AlertTriangle className="w-7 h-7 text-amber-600" />
                 </div>
                 <div>
-                  <h4 className="text-base font-bold text-[#082A4F]">
+                  <h4 className="text-base font-bold text-[#4B2B18]">
                     Anda masih memiliki pekerjaan aktif.
                   </h4>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
@@ -1939,7 +1939,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                   <LogOut className="w-7 h-7 text-rose-600" />
                 </div>
                 <div>
-                  <h4 className="text-base font-bold text-[#082A4F]">
+                  <h4 className="text-base font-bold text-[#4B2B18]">
                     Keluar dari akun Senzu Home?
                   </h4>
                   <p className="text-xs text-slate-500 mt-1">

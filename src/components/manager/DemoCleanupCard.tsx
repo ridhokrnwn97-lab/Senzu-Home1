@@ -217,7 +217,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner & Context */}
-      <div className="bg-gradient-to-br from-[#082A4F] to-[#0A3A6B] text-white p-6 rounded-3xl shadow-md border border-[#D4AF37]/30">
+      <div className="bg-gradient-to-br from-[#8B5A36] to-[#94603B] text-white p-6 rounded-3xl shadow-md border border-[#D4AF37]/30">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-semibold">
@@ -237,7 +237,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
               <button
                 type="button"
                 onClick={handleOpenStaffClick}
-                className="px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#082A4F] text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-xs"
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#c49f2e] text-[#4B2B18] text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-xs"
               >
                 <Users className="w-4 h-4" />
                 <span>Buka Master Data Staff</span>
@@ -324,7 +324,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
           <div className="p-3.5 rounded-2xl border bg-slate-50 border-slate-200">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-700">Terapis Resmi</span>
-              <span className="text-[11px] font-mono font-bold text-[#082A4F]">
+              <span className="text-[11px] font-mono font-bold text-[#4B2B18]">
                 {metrics.activeTherapistsReadyCount} / {metrics.totalTherapistsCount}
               </span>
             </div>
@@ -351,7 +351,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
       {/* Loading indicator if fetching staff list */}
       {loadingStaff && (
         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs text-slate-600 flex items-center justify-center gap-2">
-          <RefreshCw className="w-4 h-4 animate-spin text-[#082A4F]" />
+          <RefreshCw className="w-4 h-4 animate-spin text-[#4B2B18]" />
           <span>Memuat data audit akun &amp; kesiapan migrasi...</span>
         </div>
       )}
@@ -403,7 +403,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Cari nama, email, role..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
           </div>
@@ -415,7 +415,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="text-xs py-1.5 px-3 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+              className="text-xs py-1.5 px-3 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#8B5A36]"
             >
               <option value="ALL">Semua Kategori ({(report.items || []).length})</option>
               <option value="SAFE_TO_DISABLE">Aman Dinonaktifkan</option>
@@ -480,7 +480,7 @@ export const DemoCleanupCard: React.FC<DemoCleanupCardProps> = ({
 
                     {/* Role */}
                     <td className="py-3.5 px-4">
-                      <span className="font-semibold uppercase text-[#082A4F]">
+                      <span className="font-semibold uppercase text-[#4B2B18]">
                         {staff.role}
                       </span>
                     </td>

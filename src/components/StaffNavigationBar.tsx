@@ -162,7 +162,7 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
   return (
     <nav
       aria-label="Navigasi Portal Staf"
-      className="relative w-full border-t border-white/10 bg-[#061d36]/70 backdrop-blur-xs select-none"
+      className="relative w-full border-t border-white/10 bg-[#3D2315]/70 backdrop-blur-xs select-none"
     >
       <div className="relative flex items-center w-full">
         {/* Left Scroll Button (visible on scrollable viewports) */}
@@ -172,7 +172,7 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
             onClick={() => handleScroll('left')}
             aria-label="Scroll tab navigasi ke kiri"
             title="Scroll ke kiri"
-            className="absolute left-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-r from-[#082A4F] via-[#082A4F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+            className="absolute left-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-r from-[#5B351F] via-[#5B351F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
           >
             <ChevronLeft className="w-5 h-5 drop-shadow-sm" />
           </button>
@@ -204,14 +204,14 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
                 aria-current={isActive ? 'page' : undefined}
                 className={`group relative flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition active:scale-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] ${
                   isActive
-                    ? 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#082A4F] font-bold shadow-md shadow-amber-950/20 ring-1 ring-[#FDF3CD]/50'
+                    ? 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] text-[#4B2B18] font-bold shadow-md shadow-amber-950/20 ring-1 ring-[#FDF3CD]/50'
                     : 'bg-white/5 text-slate-200 hover:text-white hover:bg-white/15 border border-white/5'
                 }`}
               >
                 <Icon
                   className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-transform ${
                     isActive
-                      ? 'text-[#082A4F]'
+                      ? 'text-[#4B2B18]'
                       : 'text-amber-300/80 group-hover:text-[#D4AF37]'
                   }`}
                 />
@@ -235,7 +235,7 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
             onClick={() => handleScroll('right')}
             aria-label="Scroll tab navigasi ke kanan"
             title="Scroll ke kanan"
-            className="absolute right-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-l from-[#082A4F] via-[#082A4F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+            className="absolute right-0 z-20 flex items-center justify-center w-8 h-full bg-gradient-to-l from-[#5B351F] via-[#5B351F]/90 to-transparent text-[#D4AF37] hover:text-white transition cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
           >
             <ChevronRight className="w-5 h-5 drop-shadow-sm" />
           </button>

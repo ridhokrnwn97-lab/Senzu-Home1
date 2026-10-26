@@ -50,7 +50,7 @@ export const ChatNotificationBanner: React.FC<ChatNotificationBannerProps> = ({
         isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-4 scale-95 pointer-events-none'
       }`}
     >
-      <div className="bg-[#082A4F] text-white rounded-2xl p-3.5 shadow-xl border border-[#D4AF37]/30 flex items-center justify-between gap-3">
+      <div className="bg-[#8B5A36] text-white rounded-2xl p-3.5 shadow-xl border border-[#D4AF37]/30 flex items-center justify-between gap-3">
         {/* Clickable Area to Open Chat */}
         <button
           type="button"
@@ -63,7 +63,7 @@ export const ChatNotificationBanner: React.FC<ChatNotificationBannerProps> = ({
         >
           <div className="relative w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0 text-[#D4AF37] group-hover:scale-105 transition">
             <MessageCircle className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-[#082A4F]" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-[#8B5A36]" />
           </div>
 
           <div className="flex-1 min-w-0">

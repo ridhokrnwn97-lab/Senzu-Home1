@@ -21,7 +21,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-[#D4AF37]/30 overflow-hidden">
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-[#082A4F] to-[#0D3866] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
               <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
@@ -53,7 +53,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
             onClick={() => setActiveTab('terms')}
             className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'terms'
-                ? 'bg-white text-[#082A4F] shadow-xs border border-slate-200'
+                ? 'bg-white text-[#4B2B18] shadow-xs border border-slate-200'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -65,7 +65,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
             onClick={() => setActiveTab('privacy')}
             className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'privacy'
-                ? 'bg-white text-[#082A4F] shadow-xs border border-slate-200'
+                ? 'bg-white text-[#4B2B18] shadow-xs border border-slate-200'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -79,35 +79,35 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
           {activeTab === 'terms' ? (
             <div className="space-y-4">
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">1. Ruang Lingkup Layanan Home Service</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">1. Ruang Lingkup Layanan Home Service</h4>
                 <p className="text-slate-600">
                   Senzu Home menyediakan layanan pijat keluarga dan refleksi profesional berstandar kenyamanan hotel langsung ke rumah, apartemen, atau lokasi hunian pelanggan di seluruh wilayah Kota Palembang. Layanan ini adalah murni layanan kesehatan keluarga (health, wellness, & family massage).
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">2. Ketertiban & Keamanan Terapis</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">2. Ketertiban & Keamanan Terapis</h4>
                 <p className="text-slate-600">
                   Senzu Home menerapkan standar <strong>Zero Tolerance</strong> terhadap segala bentuk pelecehan seksual, kekerasan fisik, perkataan tidak sopan, atau permintaan di luar cakupan treatment resmi Senzu. Pelanggan wajib menyediakan lingkungan yang aman dan layak selama sesi treatment.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">3. Kebijakan Pembayaran</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">3. Kebijakan Pembayaran</h4>
                 <p className="text-slate-600">
                   Pembayaran resmi dilakukan non-tunai melalui QRIS Statis Senzu atau Transfer ke rekening resmi Bank Senzu Home (BNI, Mandiri, BRI). Terapis tidak diperkenankan menerima pembayaran cash di luar ketentuan yang tercatat pada sistem. Bukti pembayaran harus diunggah untuk verifikasi.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">4. Pembatalan & Penjadwalan Ulang (Reschedule)</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">4. Pembatalan & Penjadwalan Ulang (Reschedule)</h4>
                 <p className="text-slate-600">
                   Permohonan perubahan jadwal (reschedule) atau pembatalan wajib disampaikan paling lambat 2 jam sebelum jadwal keberangkatan terapis melalui Customer Service resmi Senzu Home WhatsApp.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">5. Higienitas & Alat Peraga</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">5. Higienitas & Alat Peraga</h4>
                 <p className="text-slate-600">
                   Terapis Senzu Home selalu dilengkapi dengan peralatan sanitasi, alas bersih sekali pakai / higienis, minyak aroma terapi food-grade berkualitas, dan seragam resmi Senzu.
                 </p>
@@ -116,14 +116,14 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
           ) : (
             <div className="space-y-4">
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">1. Pengumpulan Data Pribadi</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">1. Pengumpulan Data Pribadi</h4>
                 <p className="text-slate-600">
                   Kami mengumpulkan data pribadi yang Anda berikan secara sukarela saat melakukan reservasi atau pendaftaran akun, meliputi: Nama Lengkap, Nomor WhatsApp, Alamat Lengkap Hunian, Patokan Lokasi, dan Alamat Email.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">2. Penggunaan Informasi</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">2. Penggunaan Informasi</h4>
                 <p className="text-slate-600">
                   Informasi Anda digunakan semata-mata untuk:
                 </p>
@@ -136,21 +136,21 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">3. Perlindungan & Kerahasiaan Kata Sandi</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">3. Perlindungan & Kerahasiaan Kata Sandi</h4>
                 <p className="text-slate-600">
                   Kata sandi akun pelanggan dienkripsi secara aman melalui Firebase Authentication. Kami tidak pernah meminta, melihat, atau menyimpan kata sandi Anda dalam format teks terbuka (plain text).
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">4. Tidak Menjual Data ke Pihak Ketiga</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">4. Tidak Menjual Data ke Pihak Ketiga</h4>
                 <p className="text-slate-600">
                   Senzu Home menjamin bahwa data pribadi Anda tidak akan pernah dijual, disewakan, atau dibagikan kepada pihak ketiga untuk kepentingan komersial yang tidak terkait dengan operasional layanan Senzu.
                 </p>
               </div>
 
               <div>
-                <h4 className="font-bold text-[#082A4F] text-sm mb-1">5. Hak Pelanggan & Penghapusan Akun</h4>
+                <h4 className="font-bold text-[#4B2B18] text-sm mb-1">5. Hak Pelanggan & Penghapusan Akun</h4>
                 <p className="text-slate-600 leading-relaxed">
                   Pelanggan berhak memperbarui data profil, mengubah kata sandi, atau mengajukan permohonan penutupan akun dan penghapusan data pribadi kapan saja. Pengajuan dapat dilakukan langsung melalui menu Akun di aplikasi atau melalui halaman web resmi:{' '}
                   <a
@@ -161,7 +161,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
                       window.history.pushState({}, '', '/hapus-akun');
                       window.dispatchEvent(new PopStateEvent('popstate'));
                     }}
-                    className="text-[#082A4F] font-bold underline hover:text-rose-600"
+                    className="text-[#4B2B18] font-bold underline hover:text-rose-600"
                   >
                     https://senzuhome.com/hapus-akun
                   </a>.
@@ -187,7 +187,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
                       window.history.pushState({}, '', '/kebijakan-privasi');
                       window.dispatchEvent(new PopStateEvent('popstate'));
                     }}
-                    className="text-[#082A4F] font-bold underline hover:text-blue-700"
+                    className="text-[#4B2B18] font-bold underline hover:text-blue-700"
                   >
                     https://senzuhome.com/kebijakan-privasi
                   </a>.
@@ -202,7 +202,7 @@ export const TermsAndPrivacyModal: React.FC<TermsAndPrivacyModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition cursor-pointer"
           >
             Saya Mengerti
           </button>

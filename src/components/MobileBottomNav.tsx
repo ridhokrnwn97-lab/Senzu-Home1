@@ -16,7 +16,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 }) => {
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-40 bg-[#082A4F]/98 border-t border-[#D4AF37]/35 backdrop-blur-xl shadow-[0_-8px_24px_rgba(0,0,0,0.35)] text-white select-none md:hidden"
+      className="fixed bottom-0 left-0 right-0 z-40 bg-[#5B351F]/98 border-t border-[#D4AF37]/35 backdrop-blur-xl shadow-[0_-8px_24px_rgba(0,0,0,0.35)] text-white select-none md:hidden"
       style={{
         paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)',
       }}
@@ -67,7 +67,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               }`}
             />
             {activeOrdersCount > 0 && (
-              <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-red-600 text-[9px] font-black text-white shadow-md border-2 border-[#082A4F] animate-pulse">
+              <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-red-600 text-[9px] font-black text-white shadow-md border-2 border-[#5B351F] animate-pulse">
                 {activeOrdersCount}
               </span>
             )}
@@ -95,8 +95,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             <div
               className={`w-full h-full rounded-full flex flex-col items-center justify-center transition ${
                 activeTab === 'booking'
-                  ? 'bg-[#0B3461] text-[#FDF3CD]'
-                  : 'bg-[#082A4F] text-[#FDF3CD] group-hover:bg-[#0B3461]'
+                  ? 'bg-[#70442A] text-[#FDF3CD]'
+                  : 'bg-[#5B351F] text-[#FDF3CD] group-hover:bg-[#70442A]'
               }`}
             >
               <Sparkles className="w-5 h-5 text-[#D4AF37] animate-pulse" />

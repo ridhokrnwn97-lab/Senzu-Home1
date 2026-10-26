@@ -125,7 +125,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-[#D4AF37]/35 overflow-hidden">
         {/* Header */}
-        <div className="p-5 bg-gradient-to-r from-[#082A4F] via-[#0B3564] to-[#0D3866] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
+        <div className="p-5 bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#94603B] text-white flex items-center justify-between border-b border-[#D4AF37]/30 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-white/10 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] shadow-xs">
               <User className="w-5 h-5" />
@@ -185,7 +185,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
 
           {/* Nama Lengkap */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">Nama Lengkap</label>
+            <label className="text-xs font-bold text-[#4B2B18]">Nama Lengkap</label>
             <div className="relative">
               <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -194,26 +194,26 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Nama lengkap Anda"
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#8B5A36] outline-none transition"
               />
             </div>
           </div>
 
           {/* Nama Panggilan */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">Nama Panggilan / Nickname</label>
+            <label className="text-xs font-bold text-[#4B2B18]">Nama Panggilan / Nickname</label>
             <input
               type="text"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               placeholder="Contoh: Rina"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#8B5A36] outline-none transition"
             />
           </div>
 
           {/* WhatsApp */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">Nomor WhatsApp</label>
+            <label className="text-xs font-bold text-[#4B2B18]">Nomor WhatsApp</label>
             <div className="relative">
               <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -222,14 +222,14 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="081272902321"
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition font-mono"
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#8B5A36] outline-none transition font-mono"
               />
             </div>
           </div>
 
           {/* Preferensi Gender Terapis */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">Preferensi Terapis Favorit</label>
+            <label className="text-xs font-bold text-[#4B2B18]">Preferensi Terapis Favorit</label>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { id: undefined, label: 'Bebas' },
@@ -242,7 +242,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                   onClick={() => setGenderPreference(opt.id)}
                   className={`py-2 text-xs font-bold rounded-xl border text-center transition cursor-pointer ${
                     genderPreference === opt.id
-                      ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                      ? 'bg-[#8B5A36] text-white border-[#8B5A36]'
                       : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'
                   }`}
                 >
@@ -254,7 +254,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
 
           {/* Gender Pelanggan (dasar penugasan terapis) */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">Gender Anda</label>
+            <label className="text-xs font-bold text-[#4B2B18]">Gender Anda</label>
             <div className="grid grid-cols-2 gap-2">
               {(['Laki-laki', 'Perempuan'] as const).map((g) => (
                 <button
@@ -263,7 +263,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                   onClick={() => setGender(g)}
                   className={`py-2 text-xs font-bold rounded-xl border text-center transition cursor-pointer ${
                     gender === g
-                      ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                      ? 'bg-[#8B5A36] text-white border-[#8B5A36]'
                       : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'
                   }`}
                 >
@@ -278,7 +278,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
 
           {/* Tanggal Lahir */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-[#082A4F]">
+            <label className="text-xs font-bold text-[#4B2B18]">
               Tanggal Lahir <span className="text-[10px] text-slate-400 font-normal">(Untuk hadiah promo ulang tahun)</span>
             </label>
             <div className="relative">
@@ -287,7 +287,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                 type="date"
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#082A4F] outline-none transition"
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:border-[#8B5A36] outline-none transition"
               />
             </div>
           </div>
@@ -306,7 +306,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
             ) : (
               <div className="space-y-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#082A4F]">Ganti Kata Sandi Baru</span>
+                  <span className="text-xs font-bold text-[#4B2B18]">Ganti Kata Sandi Baru</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -327,7 +327,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Minimal 8 karakter"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:border-[#082A4F] outline-none transition"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:border-[#8B5A36] outline-none transition"
                   />
                 </div>
 
@@ -338,7 +338,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Ulangi kata sandi baru"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:border-[#082A4F] outline-none transition"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:border-[#8B5A36] outline-none transition"
                   />
                 </div>
               </div>
@@ -357,7 +357,7 @@ export const CustomerProfileEditModal: React.FC<CustomerProfileEditModalProps> =
             <button
               type="submit"
               disabled={isSaving}
-              className="flex-1 py-3 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold transition shadow-sm cursor-pointer flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition shadow-sm cursor-pointer flex items-center justify-center gap-2"
             >
               {isSaving ? (
                 <>

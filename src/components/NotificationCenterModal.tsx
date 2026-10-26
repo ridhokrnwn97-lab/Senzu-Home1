@@ -194,7 +194,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
       <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-[#082A4F] text-white px-4 py-3.5 sm:px-6 sm:py-4 flex items-center justify-between border-b border-[#D4AF37]/30">
+        <div className="bg-[#8B5A36] text-white px-4 py-3.5 sm:px-6 sm:py-4 flex items-center justify-between border-b border-[#D4AF37]/30">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-white/10 text-[#D4AF37] border border-white/10">
               <Bell className="w-5 h-5" />
@@ -205,7 +205,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                   Pusat Notifikasi
                 </h2>
                 {unreadCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#D4AF37] text-[#082A4F]">
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#D4AF37] text-[#4B2B18]">
                     {unreadCount} baru
                   </span>
                 )}
@@ -248,7 +248,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               type="button"
               onClick={handleEnablePush}
               disabled={isRequestingPush}
-              className="px-3 py-1.5 rounded-lg bg-[#082A4F] hover:bg-[#0d3866] text-[#FDF3CD] font-bold text-[11px] whitespace-nowrap shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-[#FDF3CD] font-bold text-[11px] whitespace-nowrap shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-50"
             >
               {isRequestingPush ? 'Memproses...' : 'Aktifkan'}
             </button>
@@ -263,7 +263,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               onClick={() => setActiveTab('all')}
               className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
                 activeTab === 'all'
-                  ? 'bg-[#082A4F] text-white shadow-sm'
+                  ? 'bg-[#8B5A36] text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -274,7 +274,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               onClick={() => setActiveTab('unread')}
               className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
                 activeTab === 'unread'
-                  ? 'bg-[#082A4F] text-white shadow-sm'
+                  ? 'bg-[#8B5A36] text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -285,7 +285,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               onClick={() => setActiveTab('booking')}
               className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
                 activeTab === 'booking'
-                  ? 'bg-[#082A4F] text-white shadow-sm'
+                  ? 'bg-[#8B5A36] text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -296,7 +296,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               onClick={() => setActiveTab('payment')}
               className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
                 activeTab === 'payment'
-                  ? 'bg-[#082A4F] text-white shadow-sm'
+                  ? 'bg-[#8B5A36] text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -307,7 +307,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               onClick={() => setActiveTab('therapist')}
               className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
                 activeTab === 'therapist'
-                  ? 'bg-[#082A4F] text-white shadow-sm'
+                  ? 'bg-[#8B5A36] text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -362,7 +362,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-xs sm:text-sm font-bold text-[#082A4F] leading-tight">
+                          <h4 className="text-xs sm:text-sm font-bold text-[#4B2B18] leading-tight">
                             {notif.title}
                           </h4>
                           {isCritical && (
@@ -400,7 +400,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                         <button
                           type="button"
                           onClick={() => handleActionClick(notif)}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#082A4F] hover:bg-[#0d3866] text-white shadow-2xs transition cursor-pointer active:scale-95"
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#8B5A36] hover:bg-[#94603B] text-white shadow-2xs transition cursor-pointer active:scale-95"
                         >
                           <span>Buka</span>
                           <ChevronRight className="w-3 h-3" />

@@ -70,7 +70,7 @@ export const TherapistScheduleMasterTable: React.FC<TherapistScheduleMasterTable
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Konfigurasi jadwal kerja, jam istirahat, dan status operasional armada untuk tanggal{' '}
-            <strong className="text-[#082A4F]">{selectedDate}</strong>.
+            <strong className="text-[#4B2B18]">{selectedDate}</strong>.
           </p>
         </div>
 
@@ -152,7 +152,7 @@ export const TherapistScheduleMasterTable: React.FC<TherapistScheduleMasterTable
                   {/* Therapist Col */}
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-[#082A4F] shrink-0">
+                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-[#4B2B18] shrink-0">
                         {therapist.name.charAt(0)}
                       </div>
                       <div>
@@ -234,7 +234,7 @@ export const TherapistScheduleMasterTable: React.FC<TherapistScheduleMasterTable
                         onClick={() => onSelectBooking?.(nextBooking)}
                         className="cursor-pointer hover:underline text-[11px] space-y-0.5"
                       >
-                        <div className="font-mono font-bold text-[#082A4F] flex items-center gap-1">
+                        <div className="font-mono font-bold text-[#4B2B18] flex items-center gap-1">
                           <span>{nextBooking.bookingCode}</span>
                           <span className="text-slate-500 font-normal">({nextBooking.scheduleTime} WIB)</span>
                         </div>
@@ -253,7 +253,7 @@ export const TherapistScheduleMasterTable: React.FC<TherapistScheduleMasterTable
                       <button
                         type="button"
                         onClick={() => triggerEditShift?.(therapist)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-[#082A4F] hover:text-white text-slate-700 font-bold text-[11px] transition cursor-pointer"
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-[#8B5A36] hover:text-white text-slate-700 font-bold text-[11px] transition cursor-pointer"
                         title="Atur Shift & Break Khusus Tanggal Ini"
                       >
                         Atur Shift
@@ -262,7 +262,7 @@ export const TherapistScheduleMasterTable: React.FC<TherapistScheduleMasterTable
                       <button
                         type="button"
                         onClick={() => triggerWeeklySchedule?.(therapist)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-[#082A4F] hover:bg-slate-100 transition cursor-pointer"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-[#4B2B18] hover:bg-slate-100 transition cursor-pointer"
                         title="Atur Pola Jadwal Mingguan (7 Hari)"
                       >
                         <Calendar className="w-4 h-4" />

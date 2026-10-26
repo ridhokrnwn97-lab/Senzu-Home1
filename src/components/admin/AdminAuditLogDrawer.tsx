@@ -63,7 +63,7 @@ export const AdminAuditLogDrawer: React.FC<AdminAuditLogDrawerProps> = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
             <History className="w-6 h-6 text-[#D4AF37]" />
@@ -135,7 +135,7 @@ export const AdminAuditLogDrawer: React.FC<AdminAuditLogDrawerProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-[#082A4F]" />
+                      <User className="w-3.5 h-3.5 text-[#4B2B18]" />
                       {log.actorName}
                     </span>
                     <span className="font-mono text-[10px] uppercase bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-bold">
@@ -166,7 +166,7 @@ export const AdminAuditLogDrawer: React.FC<AdminAuditLogDrawerProps> = ({
                     <button
                       type="button"
                       onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                      className="text-[11px] text-[#082A4F] font-semibold hover:underline flex items-center gap-1"
+                      className="text-[11px] text-[#4B2B18] font-semibold hover:underline flex items-center gap-1"
                     >
                       <span>{isExpanded ? 'Sembunyikan Nilai Teknis' : 'Lihat Detail Perubahan'}</span>
                       {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}

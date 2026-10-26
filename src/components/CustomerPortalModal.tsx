@@ -219,7 +219,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#082A4F] to-[#0D3B6C] text-white p-5 flex items-center justify-between shrink-0">
+        <div className="bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white p-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37]">
               <User className="w-5 h-5" />
@@ -256,13 +256,13 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                 placeholder="Masukkan Nomor WhatsApp Anda (contoh: 081272902321)"
                 value={phoneInput}
                 onChange={(e) => setPhoneInput(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#082A4F] focus:border-transparent bg-white"
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent bg-white"
               />
             </div>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 bg-[#082A4F] text-white rounded-xl text-xs font-semibold hover:bg-[#0C3866] transition disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 bg-[#8B5A36] text-white rounded-xl text-xs font-semibold hover:bg-[#94603B] transition disabled:opacity-50 cursor-pointer"
             >
               {isLoading ? 'Mencari...' : 'Buka Akun'}
             </button>
@@ -273,7 +273,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
         <div className="overflow-y-auto p-4 sm:p-6 space-y-5 flex-1">
           {isLoading ? (
             <div className="py-12 text-center text-slate-400 text-xs">
-              <div className="w-8 h-8 border-2 border-[#082A4F] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <div className="w-8 h-8 border-2 border-[#8B5A36] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
               <span>Memuat data riwayat pelanggan...</span>
             </div>
           ) : !isSearched ? (
@@ -300,7 +300,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
           ) : (
             <>
               {/* Profile Card Summary */}
-              <div className="bg-gradient-to-br from-[#082A4F] via-[#0D3866] to-[#124273] rounded-2xl p-4 sm:p-5 text-white shadow-md relative overflow-hidden">
+              <div className="bg-gradient-to-br from-[#8B5A36] via-[#94603B] to-[#94603B] rounded-2xl p-4 sm:p-5 text-white shadow-md relative overflow-hidden">
                 <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 w-32 h-32 rounded-full bg-white/5 pointer-events-none" />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
                   <div className="space-y-1.5">
@@ -313,7 +313,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                           customerLoyalty.currentTierId === 'platinum'
                             ? 'bg-gradient-to-r from-purple-400 to-indigo-300 text-slate-900 shadow-sm'
                             : customerLoyalty.currentTierId === 'gold'
-                            ? 'bg-[#D4AF37] text-[#082A4F] shadow-sm font-black'
+                            ? 'bg-[#D4AF37] text-[#4B2B18] shadow-sm font-black'
                             : customerLoyalty.currentTierId === 'silver'
                             ? 'bg-slate-200 text-slate-800'
                             : 'bg-amber-800/60 text-amber-200 border border-amber-500/30'
@@ -364,7 +364,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   onClick={() => setActiveTab('bookings')}
                   className={`pb-2.5 transition border-b-2 whitespace-nowrap cursor-pointer ${
                     activeTab === 'bookings'
-                      ? 'border-[#082A4F] text-[#082A4F]'
+                      ? 'border-[#8B5A36] text-[#4B2B18]'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
                   }`}
                 >
@@ -375,7 +375,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   onClick={() => setActiveTab('wallet')}
                   className={`pb-2.5 transition border-b-2 whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                     activeTab === 'wallet'
-                      ? 'border-[#082A4F] text-[#082A4F]'
+                      ? 'border-[#8B5A36] text-[#4B2B18]'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
                   }`}
                 >
@@ -392,7 +392,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   onClick={() => setActiveTab('addresses')}
                   className={`pb-2.5 transition border-b-2 whitespace-nowrap cursor-pointer ${
                     activeTab === 'addresses'
-                      ? 'border-[#082A4F] text-[#082A4F]'
+                      ? 'border-[#8B5A36] text-[#4B2B18]'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
                   }`}
                 >
@@ -403,7 +403,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   onClick={() => setActiveTab('reviews')}
                   className={`pb-2.5 transition border-b-2 whitespace-nowrap cursor-pointer ${
                     activeTab === 'reviews'
-                      ? 'border-[#082A4F] text-[#082A4F]'
+                      ? 'border-[#8B5A36] text-[#4B2B18]'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
                   }`}
                 >
@@ -426,7 +426,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs font-bold text-[#082A4F]">
+                              <span className="font-mono text-xs font-bold text-[#4B2B18]">
                                 {b.bookingCode}
                               </span>
                               <span
@@ -447,7 +447,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                           </div>
 
                           <div className="text-right">
-                            <span className="font-serif font-bold text-sm text-[#082A4F]">
+                            <span className="font-serif font-bold text-sm text-[#4B2B18]">
                               {formatRupiah(b.totalAmount)}
                             </span>
                             <span className="block text-[10px] text-slate-400">
@@ -480,7 +480,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                               onOpenTracking(b.bookingCode);
                               onClose();
                             }}
-                            className="text-xs text-[#082A4F] font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                            className="text-xs text-[#4B2B18] font-semibold hover:underline flex items-center gap-1 cursor-pointer"
                           >
                             <span>Lihat Detail & Tracking</span>
                             <ChevronRight className="w-3 h-3" />
@@ -539,7 +539,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                                   onRepeatBooking(b);
                                   onClose();
                                 }}
-                                className="px-3.5 py-1.5 rounded-lg bg-[#082A4F] hover:bg-[#0C3866] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                                className="px-3.5 py-1.5 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
                               >
                                 <Repeat className="w-3.5 h-3.5 text-[#D4AF37]" />
                                 <span>Pesan Lagi</span>
@@ -577,14 +577,14 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                       <div className="p-4 rounded-2xl border border-[#D4AF37]/30 bg-gradient-to-r from-amber-50/70 to-orange-50/50 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center font-bold">
+                            <div className="w-8 h-8 rounded-xl bg-[#8B5A36] text-[#D4AF37] flex items-center justify-center font-bold">
                               <Award className="w-4 h-4" />
                             </div>
                             <div>
-                              <div className="font-bold text-[#082A4F] text-sm flex items-center gap-1.5">
+                              <div className="font-bold text-[#4B2B18] text-sm flex items-center gap-1.5">
                                 <span>Level Keanggotaan: {currentTier?.name || 'Member'}</span>
                                 {currentTier?.discountPercentage ? (
-                                  <span className="px-1.5 py-0.2 rounded bg-[#082A4F] text-white text-[10px] font-mono">
+                                  <span className="px-1.5 py-0.2 rounded bg-[#8B5A36] text-white text-[10px] font-mono">
                                     Diskon {currentTier.discountPercentage}%
                                   </span>
                                 ) : null}
@@ -611,9 +611,9 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                           <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 space-y-1.5">
                             <div className="flex justify-between items-center text-[11px]">
                               <span className="text-slate-600 font-medium">
-                                Progres ke Tier <strong className="text-[#082A4F]">{nextTier.name}</strong>
+                                Progres ke Tier <strong className="text-[#4B2B18]">{nextTier.name}</strong>
                               </span>
-                              <span className="font-bold text-[#082A4F]">{progressPercent}%</span>
+                              <span className="font-bold text-[#4B2B18]">{progressPercent}%</span>
                             </div>
                             <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
                               <div
@@ -647,7 +647,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                         <span className="text-slate-500 text-[11px] font-medium">Saldo Poin Anda</span>
                         <Coins className="w-4 h-4 text-[#D4AF37]" />
                       </div>
-                      <div className="font-serif font-black text-2xl text-[#082A4F]">
+                      <div className="font-serif font-black text-2xl text-[#4B2B18]">
                         {customerLoyalty?.pointsBalance || 0}{' '}
                         <span className="text-xs font-sans font-bold text-amber-600">Poin</span>
                       </div>
@@ -677,7 +677,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   {/* VOUCHER REWARDS */}
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <h5 className="font-bold text-[#082A4F] flex items-center gap-1.5 text-xs">
+                      <h5 className="font-bold text-[#4B2B18] flex items-center gap-1.5 text-xs">
                         <Ticket className="w-4 h-4 text-emerald-600" />
                         Voucher Reward Saya ({customerVouchers.length})
                       </h5>
@@ -868,7 +868,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
 
                   {/* TRANSACTION LEDGER */}
                   <div className="space-y-2">
-                    <h5 className="font-bold text-[#082A4F] text-xs flex items-center justify-between">
+                    <h5 className="font-bold text-[#4B2B18] text-xs flex items-center justify-between">
                       <span>Buku Mutasi Poin (Ledger)</span>
                       <span className="text-[10px] text-slate-400 font-normal">
                         {loyaltyTransactions.length} transaksi tercatat
@@ -926,7 +926,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowAddAddress(!showAddAddress)}
-                      className="px-3 py-1.5 rounded-lg bg-[#082A4F] text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-[#8B5A36] text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Tambah Alamat</span>
@@ -934,8 +934,8 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                   </div>
 
                   {showAddAddress && (
-                    <form onSubmit={handleSaveNewAddress} className="p-4 rounded-xl border border-[#082A4F]/20 bg-slate-50 space-y-3">
-                      <h5 className="text-xs font-bold text-[#082A4F]">Form Tambah Alamat Baru</h5>
+                    <form onSubmit={handleSaveNewAddress} className="p-4 rounded-xl border border-[#8B5A36]/20 bg-slate-50 space-y-3">
+                      <h5 className="text-xs font-bold text-[#4B2B18]">Form Tambah Alamat Baru</h5>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
                           <label className="block text-slate-600 mb-1">Label Alamat:</label>
@@ -996,7 +996,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 rounded-lg bg-[#082A4F] text-white text-xs font-bold"
+                          className="px-4 py-1.5 rounded-lg bg-[#8B5A36] text-white text-xs font-bold"
                         >
                           Simpan Alamat
                         </button>
@@ -1015,7 +1015,7 @@ export const CustomerPortalModal: React.FC<CustomerPortalModalProps> = ({
                         className="p-3.5 rounded-xl border border-slate-200 bg-white space-y-1.5 text-xs"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                          <span className="font-bold text-[#4B2B18] flex items-center gap-1.5">
                             <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
                             {addr.label}
                             {addr.isDefault && (

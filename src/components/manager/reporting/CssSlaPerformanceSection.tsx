@@ -14,7 +14,7 @@ export const CssSlaPerformanceSection: React.FC<CssSlaPerformanceSectionProps> =
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div>
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-[#B89628]" />
             Kinerja Layanan Pelanggan (CSS) &amp; SLA Pembayaran
           </h3>
@@ -44,7 +44,7 @@ export const CssSlaPerformanceSection: React.FC<CssSlaPerformanceSectionProps> =
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Bukti Bayar Masuk
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {metrics.proofUploadedCount}
           </div>
           <span className="text-[10px] text-slate-400">Total berkas diunggah</span>
@@ -77,7 +77,7 @@ export const CssSlaPerformanceSection: React.FC<CssSlaPerformanceSectionProps> =
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Rata-rata Verifikasi
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {metrics.avgVerificationMinutes} mnt
           </div>
           <span className="text-[10px] text-slate-400">

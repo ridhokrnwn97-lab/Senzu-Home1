@@ -188,7 +188,7 @@ export const SupervisorControlRoom: React.FC<SupervisorControlRoomProps> = ({
       {activeView === 'MAP' && (
         <div className="space-y-4">
           <div className="p-3 bg-white rounded-2xl border border-slate-200 flex items-center justify-between text-xs text-slate-600">
-            <span className="font-semibold text-[#082A4F]">
+            <span className="font-semibold text-[#4B2B18]">
               Live GPS Tracking Armada Terapis Kota Palembang (Radius 15 KM)
             </span>
             <span className="text-[11px] text-slate-400">

@@ -203,7 +203,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
     <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
       <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-[#082A4F] text-white flex items-center justify-between">
+        <div className="p-4 sm:p-5 bg-[#8B5A36] text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-white/10 text-[#D4AF37]">
               <Calendar className="w-5 h-5" />
@@ -234,7 +234,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
               onClick={handleCopyMondayToWeekdays}
               className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
             >
-              <Copy className="w-3.5 h-3.5 text-[#082A4F]" />
+              <Copy className="w-3.5 h-3.5 text-[#4B2B18]" />
               <span>Salin Senin ke Sel–Jum</span>
             </button>
             <button
@@ -242,7 +242,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
               onClick={handleCopyMondayToAllDays}
               className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
             >
-              <Copy className="w-3.5 h-3.5 text-[#082A4F]" />
+              <Copy className="w-3.5 h-3.5 text-[#4B2B18]" />
               <span>Salin Senin ke Semua Hari</span>
             </button>
           </div>
@@ -297,7 +297,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
                   <div
                     className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
                       isWorking
-                        ? 'bg-[#082A4F] text-white'
+                        ? 'bg-[#8B5A36] text-white'
                         : 'bg-slate-200 text-slate-600'
                     }`}
                   >
@@ -312,7 +312,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
                         onChange={(e) =>
                           handleUpdateDay(day, { isWorking: e.target.checked })
                         }
-                        className="w-3.5 h-3.5 rounded text-[#082A4F] accent-[#082A4F]"
+                        className="w-3.5 h-3.5 rounded text-[#4B2B18] accent-[#8B5A36]"
                       />
                       <span
                         className={`text-[11px] font-bold ${
@@ -413,7 +413,7 @@ export const WeeklyScheduleModal: React.FC<WeeklyScheduleModalProps> = ({
             type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
           >
             <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
             <span>{isSaving ? 'Menyimpan Jadwal...' : 'Simpan Jadwal Mingguan'}</span>

@@ -100,7 +100,7 @@ function LiveRoutePolyline({
             path,
             map,
             geodesic: true,
-            strokeColor: '#082A4F',
+            strokeColor: '#8B5A36',
             strokeWeight: 4,
             strokeOpacity: 0.85,
           });
@@ -272,7 +272,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
     <div className="space-y-3">
       {/* Dynamic Status Header */}
       {isOnTheWay ? (
-        <div className="bg-gradient-to-r from-[#082A4F] to-[#0E3D73] text-white p-4 rounded-2xl border border-[#D4AF37]/50 shadow-md space-y-3">
+        <div className="bg-gradient-to-r from-[#8B5A36] to-[#94603B] text-white p-4 rounded-2xl border border-[#D4AF37]/50 shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="relative flex h-3 w-3">
@@ -300,7 +300,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               <h4 className="text-base font-bold text-white flex items-center gap-2">
                 <span>Terapis Sedang Menuju Lokasi</span>
                 {isNearby && (
-                  <span className="bg-[#D4AF37] text-[#082A4F] text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full">
+                  <span className="bg-[#D4AF37] text-[#4B2B18] text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full">
                     Hampir Tiba
                   </span>
                 )}
@@ -328,8 +328,8 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
 
           {/* Nearby Warning Box */}
           {isNearby && (
-            <div className="bg-[#D4AF37] text-[#082A4F] p-2.5 rounded-xl flex items-center gap-2 text-xs font-bold shadow-sm">
-              <Sparkles className="w-4 h-4 text-[#082A4F] flex-shrink-0 animate-spin" />
+            <div className="bg-[#D4AF37] text-[#4B2B18] p-2.5 rounded-xl flex items-center gap-2 text-xs font-bold shadow-sm">
+              <Sparkles className="w-4 h-4 text-[#4B2B18] flex-shrink-0 animate-spin" />
               <span>Terapis Senzu sudah sangat dekat (±1 km). Silakan bersiap menyambut terapis di depan rumah/lobi.</span>
             </div>
           )}
@@ -352,7 +352,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
         </div>
       ) : (
         <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-center gap-3 text-slate-700">
-          <Clock className="w-5 h-5 text-[#082A4F] flex-shrink-0" />
+          <Clock className="w-5 h-5 text-[#4B2B18] flex-shrink-0" />
           <div className="text-xs">
             <span className="font-bold text-slate-900 block">Terapis Belum Berangkat</span>
             <span className="text-slate-500 text-[11px]">
@@ -417,10 +417,10 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                   title={`Posisi Terapis (${booking.therapistName || 'Terapis'})`}
                 >
                   <div className="relative flex flex-col items-center justify-center -translate-y-8 select-none animate-bounce">
-                    <div className="w-9 h-9 rounded-full bg-[#082A4F] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-[#D4AF37]">
+                    <div className="w-9 h-9 rounded-full bg-[#8B5A36] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-[#D4AF37]">
                       <Car className="w-5 h-5" />
                     </div>
-                    <div className="w-2.5 h-2.5 bg-[#082A4F] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1" />
+                    <div className="w-2.5 h-2.5 bg-[#8B5A36] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1" />
                   </div>
                 </AdvancedMarker>
               )}
@@ -442,8 +442,8 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                 Alamat Customer
               </span>
               {isOnTheWay && (
-                <span className="flex items-center gap-1 font-semibold text-[#082A4F]">
-                  <Navigation className="w-3 h-3 text-[#082A4F]" />
+                <span className="flex items-center gap-1 font-semibold text-[#4B2B18]">
+                  <Navigation className="w-3 h-3 text-[#4B2B18]" />
                   Terapis (Live)
                 </span>
               )}
@@ -454,7 +454,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
         /* Fallback Visual Route Tracking Card when maps is restricted */
         <div className="w-full rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-5 shadow-inner space-y-4">
           <div className="flex items-center justify-between text-xs border-b border-slate-200 pb-3">
-            <span className="font-bold text-[#082A4F] flex items-center gap-1.5">
+            <span className="font-bold text-[#4B2B18] flex items-center gap-1.5">
               <Navigation className="w-4 h-4 text-[#B89628]" />
               Navigasi Perjalanan Terapis
             </span>
@@ -466,7 +466,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
           <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-300">
             {/* Origin Step */}
             <div className="relative flex items-start gap-2">
-              <span className="absolute -left-6 top-0.5 w-4 h-4 rounded-full bg-[#082A4F] text-white flex items-center justify-center text-[9px] font-bold ring-4 ring-white">
+              <span className="absolute -left-6 top-0.5 w-4 h-4 rounded-full bg-[#8B5A36] text-white flex items-center justify-center text-[9px] font-bold ring-4 ring-white">
                 T
               </span>
               <div>
@@ -501,7 +501,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               href={externalMapsUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#082A4F] text-white hover:bg-[#0E3D73] text-xs font-semibold shadow-xs transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#8B5A36] text-white hover:bg-[#94603B] text-xs font-semibold shadow-xs transition"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               <span>Buka Rute di Google Maps App</span>

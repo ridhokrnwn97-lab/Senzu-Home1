@@ -231,7 +231,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
             <MapPin className="w-6 h-6 text-[#D4AF37]" />
@@ -255,7 +255,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
           <button
             type="button"
             onClick={handleOpenNew}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#E5C158] text-[#082A4F] text-xs font-bold transition active:scale-95 cursor-pointer shadow-sm"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#E5C158] text-[#4B2B18] text-xs font-bold transition active:scale-95 cursor-pointer shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Cabang</span>
@@ -305,10 +305,10 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                   {/* Branch Main Identity */}
                   <div className="space-y-3 flex-grow">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-[#082A4F] bg-[#082A4F]/10 px-2.5 py-1 rounded-lg border border-[#082A4F]/20">
+                      <span className="font-mono text-xs font-bold text-[#4B2B18] bg-[#8B5A36]/10 px-2.5 py-1 rounded-lg border border-[#8B5A36]/20">
                         {b.code}
                       </span>
-                      <h4 className="text-base font-bold text-[#082A4F]">{b.name}</h4>
+                      <h4 className="text-base font-bold text-[#4B2B18]">{b.name}</h4>
                       {b.isDefault && (
                         <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full">
                           Cabang Utama
@@ -369,7 +369,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                         href={`https://www.google.com/maps?q=${b.latitude},${b.longitude}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[#082A4F] font-semibold hover:underline"
+                        className="inline-flex items-center gap-1 text-[#4B2B18] font-semibold hover:underline"
                       >
                         <ExternalLink className="w-3.5 h-3.5 text-[#D4AF37]" />
                         <span>Buka di Google Maps</span>
@@ -386,7 +386,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                       className={`w-full px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                         isReadOnly
                           ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                          : 'bg-[#082A4F] hover:bg-[#0A335F] text-white cursor-pointer active:scale-95'
+                          : 'bg-[#8B5A36] hover:bg-[#94603B] text-white cursor-pointer active:scale-95'
                       }`}
                     >
                       <Edit2 className="w-3.5 h-3.5 text-[#D4AF37]" />
@@ -420,7 +420,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
       {isEditing && (
         <div className="p-5 sm:p-6 border-t border-slate-200 bg-slate-50/50">
           <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
-            <h4 className="text-sm font-bold text-[#082A4F]">
+            <h4 className="text-sm font-bold text-[#4B2B18]">
               {isNewBranch ? 'Tambah Cabang Operasional Baru' : `Edit Cabang: ${name}`}
             </h4>
             <button
@@ -444,7 +444,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
                   required
                   placeholder="Contoh: PLG001"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#082A4F] uppercase focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#4B2B18] uppercase focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -458,7 +458,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                   onChange={(e) => setName(e.target.value)}
                   required
                   placeholder="Senzu Reflexology & Family Massage Palembang"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#082A4F] focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#4B2B18] focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
             </div>
@@ -473,7 +473,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                 onChange={(e) => setAddress(e.target.value)}
                 required
                 placeholder="Jl. Riau No.3, 26 Ilir D. I, Kec. Ilir Bar. I, Kota Palembang, Sumatera Selatan"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
 
@@ -517,14 +517,14 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
             {/* GPS Coordinates Section with Map Picker */}
             <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                <span className="font-bold text-[#4B2B18] flex items-center gap-1.5">
                   <Navigation className="w-4 h-4 text-[#D4AF37]" />
                   Titik Koordinat Base Hub (GPS Cabang)
                 </span>
                 <button
                   type="button"
                   onClick={handleResetToPalembangCoords}
-                  className="text-[11px] text-[#082A4F] font-semibold hover:underline flex items-center gap-1"
+                  className="text-[11px] text-[#4B2B18] font-semibold hover:underline flex items-center gap-1"
                 >
                   <Compass className="w-3.5 h-3.5 text-[#D4AF37]" />
                   <span>Preset Senzu Palembang (Jl. Riau No.3)</span>
@@ -637,7 +637,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                   type="checkbox"
                   checked={isDefault}
                   onChange={(e) => setIsDefault(e.target.checked)}
-                  className="w-4 h-4 text-[#082A4F] rounded border-slate-300 focus:ring-[#082A4F]"
+                  className="w-4 h-4 text-[#4B2B18] rounded border-slate-300 focus:ring-[#8B5A36]"
                 />
                 <span className="font-semibold text-slate-700">Jadikan Cabang Default</span>
               </label>
@@ -647,7 +647,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
                   type="checkbox"
                   checked={status === 'ACTIVE'}
                   onChange={(e) => setStatus(e.target.checked ? 'ACTIVE' : 'INACTIVE')}
-                  className="w-4 h-4 text-[#082A4F] rounded border-slate-300 focus:ring-[#082A4F]"
+                  className="w-4 h-4 text-[#4B2B18] rounded border-slate-300 focus:ring-[#8B5A36]"
                 />
                 <span className="font-semibold text-slate-700">Cabang Aktif Beroperasi</span>
               </label>
@@ -665,7 +665,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
               <button
                 type="submit"
                 disabled={saving}
-                className="px-5 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white font-bold flex items-center gap-2 transition disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-2 transition disabled:opacity-50"
               >
                 <Save className="w-4 h-4 text-[#D4AF37]" />
                 <span>{saving ? 'Menyimpan...' : 'Simpan Cabang'}</span>
@@ -679,7 +679,7 @@ export const BranchSettingsCard: React.FC<BranchSettingsCardProps> = ({
       {toggleConfirmBranch && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4 text-xs">
-            <h4 className="text-sm font-bold text-[#082A4F]">
+            <h4 className="text-sm font-bold text-[#4B2B18]">
               Konfirmasi {toggleConfirmBranch.status === 'ACTIVE' ? 'Penonaktifan' : 'Pengaktifan'} Cabang
             </h4>
             <p className="text-slate-600 leading-relaxed">

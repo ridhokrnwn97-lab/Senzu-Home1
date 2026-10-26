@@ -76,11 +76,11 @@ export const RoleAlertBanners: React.FC<RoleAlertBannerProps> = ({
         {hasUnassigned && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 flex items-center justify-between gap-3 shadow-2xs">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 text-[#082A4F] rounded-lg flex-shrink-0">
+              <div className="p-2 bg-blue-100 text-[#4B2B18] rounded-lg flex-shrink-0">
                 <UserCheck className="w-5 h-5 animate-pulse" />
               </div>
               <div>
-                <h4 className="text-xs sm:text-sm font-bold text-[#082A4F]">
+                <h4 className="text-xs sm:text-sm font-bold text-[#4B2B18]">
                   {unassigned} Pesanan Lunas Siap Ditugaskan
                 </h4>
                 <p className="text-[11px] sm:text-xs text-blue-800">
@@ -92,7 +92,7 @@ export const RoleAlertBanners: React.FC<RoleAlertBannerProps> = ({
               <button
                 type="button"
                 onClick={() => onActionClick('ready_for_assignment')}
-                className="px-3 py-1.5 rounded-lg bg-[#082A4F] hover:bg-[#0d3866] text-[#FDF3CD] font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer whitespace-nowrap"
+                className="px-3 py-1.5 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-[#FDF3CD] font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer whitespace-nowrap"
               >
                 <span>Tugaskan Terapis</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -116,7 +116,7 @@ export const RoleAlertBanners: React.FC<RoleAlertBannerProps> = ({
       >
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-amber-200 text-amber-900 rounded-xl flex-shrink-0">
-            <Sparkles className="w-5 h-5 text-[#082A4F]" />
+            <Sparkles className="w-5 h-5 text-[#4B2B18]" />
           </div>
           <div>
             <h4 className="text-xs sm:text-sm font-bold text-amber-900">
@@ -136,7 +136,7 @@ export const RoleAlertBanners: React.FC<RoleAlertBannerProps> = ({
               e.stopPropagation();
               onActionClick('new_assignments');
             }}
-            className="px-3.5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0d3866] active:bg-[#051c36] text-[#FDF3CD] font-bold text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer whitespace-nowrap select-none touch-manipulation active:scale-95 shrink-0"
+            className="px-3.5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] active:bg-[#3D2315] text-[#FDF3CD] font-bold text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer whitespace-nowrap select-none touch-manipulation active:scale-95 shrink-0"
           >
             <span>Buka Tugas</span>
             <ChevronRight className="w-3.5 h-3.5" />

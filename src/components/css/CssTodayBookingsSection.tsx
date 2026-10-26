@@ -96,7 +96,7 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
           <div className="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
             Total Jadwal Hari Ini
           </div>
-          <div className="text-2xl font-black text-[#082A4F] mt-1">{totalToday}</div>
+          <div className="text-2xl font-black text-[#4B2B18] mt-1">{totalToday}</div>
           <div className="text-[11px] text-slate-400 mt-0.5">{todayStr} (WIB)</div>
         </div>
 
@@ -136,7 +136,7 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
             onClick={() => setFilterTab('ALL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
               filterTab === 'ALL'
-                ? 'bg-[#082A4F] text-white shadow-sm'
+                ? 'bg-[#8B5A36] text-white shadow-sm'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
@@ -196,7 +196,7 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
             placeholder="Cari kode, nama, terapis..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-slate-50/50"
           />
         </div>
       </div>
@@ -205,7 +205,7 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-[#082A4F] text-white uppercase text-[11px] font-semibold tracking-wider">
+            <thead className="bg-[#8B5A36] text-white uppercase text-[11px] font-semibold tracking-wider">
               <tr>
                 <th className="py-3.5 px-4">Jam (WIB)</th>
                 <th className="py-3.5 px-4">Kode Booking</th>
@@ -239,14 +239,14 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
                     >
                       {/* Jam */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="font-bold text-sm text-[#082A4F] flex items-center gap-1.5">
+                        <div className="font-bold text-sm text-[#4B2B18] flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           <span>{b.scheduleTime} WIB</span>
                         </div>
                       </td>
 
                       {/* Kode */}
-                      <td className="py-3.5 px-4 font-mono font-bold text-[#082A4F]">
+                      <td className="py-3.5 px-4 font-mono font-bold text-[#4B2B18]">
                         {b.bookingCode}
                       </td>
 

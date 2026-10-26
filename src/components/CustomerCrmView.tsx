@@ -444,7 +444,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
     <div className="space-y-6">
       {/* Toast Notification */}
       {syncToast && (
-        <div className="fixed bottom-5 right-5 z-50 p-4 rounded-xl bg-[#082A4F] text-white shadow-2xl border border-[#D4AF37] flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5">
+        <div className="fixed bottom-5 right-5 z-50 p-4 rounded-xl bg-[#8B5A36] text-white shadow-2xl border border-[#D4AF37] flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5">
           <Sparkles className="w-5 h-5 text-[#D4AF37] shrink-0" />
           <span className="text-xs font-medium">{syncToast}</span>
           <button
@@ -464,7 +464,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
             <Users className="w-3.5 h-3.5 text-[#B89628]" />
             Customer Relationship Management
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F]">
+          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#4B2B18]">
             Master Database & CRM Pelanggan
           </h2>
           <p className="text-xs text-slate-500">
@@ -481,7 +481,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
             className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 cursor-pointer"
             title="Sinkronisasi ulang agregasi dari data transaksi booking"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#082A4F] ${isSyncing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-[#4B2B18] ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Sinkronisasi...' : 'Sinkronkan CRM'}</span>
           </button>
 
@@ -504,7 +504,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
             Total Pelanggan
           </span>
           <div className="flex items-baseline justify-between">
-            <span className="text-xl font-bold font-serif text-[#082A4F]">
+            <span className="text-xl font-bold font-serif text-[#4B2B18]">
               {metrics.total}
             </span>
             <Users className="w-4 h-4 text-slate-300" />
@@ -587,7 +587,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
           onClick={() => setActiveMainView('directory')}
           className={`pb-3 transition border-b-2 flex items-center gap-2 cursor-pointer ${
             activeMainView === 'directory'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -600,7 +600,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
           onClick={() => setActiveMainView('retention')}
           className={`pb-3 transition border-b-2 flex items-center gap-2 cursor-pointer ${
             activeMainView === 'retention'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -613,7 +613,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
           onClick={() => setActiveMainView('service_recovery')}
           className={`pb-3 transition border-b-2 flex items-center gap-2 cursor-pointer ${
             activeMainView === 'service_recovery'
-              ? 'border-[#082A4F] text-[#082A4F]'
+              ? 'border-[#8B5A36] text-[#4B2B18]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
@@ -635,7 +635,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 placeholder="Cari nama pelanggan, nomor WhatsApp, email, kecamatan..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50 focus:bg-white"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-slate-50 focus:bg-white"
               />
             </div>
 
@@ -691,7 +691,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-[#082A4F] text-white uppercase text-[10px] font-semibold tracking-wider">
+                <thead className="bg-[#8B5A36] text-white uppercase text-[10px] font-semibold tracking-wider">
                   <tr>
                     <th className="py-3.5 px-4">Nama Pelanggan</th>
                     <th className="py-3.5 px-4">WhatsApp / Kontak</th>
@@ -727,7 +727,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                             <div className="font-bold text-slate-900 flex items-center gap-1.5">
                               <span>{c.name}</span>
                               {c.customerSegment === 'VIP' && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-[#D4AF37] text-[#082A4F] text-[9px] font-bold">
+                                <span className="px-1.5 py-0.5 rounded-full bg-[#D4AF37] text-[#4B2B18] text-[9px] font-bold">
                                   VIP
                                 </span>
                               )}
@@ -786,7 +786,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                             <button
                               type="button"
                               onClick={() => setSelectedCustomer(c)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#082A4F] hover:text-white text-slate-700 text-xs font-semibold transition cursor-pointer"
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#8B5A36] hover:text-white text-slate-700 text-xs font-semibold transition cursor-pointer"
                             >
                               Detail
                             </button>
@@ -849,7 +849,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                       </div>
 
                       <div className="text-right text-xs">
-                        <span className="font-bold text-[#082A4F]">
+                        <span className="font-bold text-[#4B2B18]">
                           {c.completedBooking || c.completedBookings || 0}x Treatment
                         </span>
                         <span className="block text-[10px] text-slate-400">
@@ -879,7 +879,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setSelectedCustomer(c)}
-                        className="text-xs text-[#082A4F] font-semibold hover:underline"
+                        className="text-xs text-[#4B2B18] font-semibold hover:underline"
                       >
                         Buka Profil
                       </button>
@@ -1001,7 +1001,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-4xl rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#082A4F] via-[#0C3866] to-[#082A4F] text-white p-5 sm:p-6 flex items-start justify-between shrink-0">
+            <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex items-start justify-between shrink-0">
               <div className="flex items-start gap-3 sm:gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] shrink-0 font-serif font-bold text-lg">
                   {selectedCustomer.name.slice(0, 1).toUpperCase()}
@@ -1095,7 +1095,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                       onRepeatBooking(customerBookings[0]);
                       setSelectedCustomer(null);
                     }}
-                    className="px-3.5 py-1.5 rounded-xl bg-[#082A4F] hover:bg-[#0C3866] text-white font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="px-3.5 py-1.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Repeat className="w-3.5 h-3.5 text-[#D4AF37]" />
                     <span>Buatkan Repeat Booking</span>
@@ -1126,7 +1126,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
 
               <div className="p-2.5 rounded-xl bg-white border border-slate-200">
                 <span className="text-slate-400 text-[10px] block uppercase font-semibold">Total Nilai (Spend)</span>
-                <span className="text-base font-bold text-[#082A4F]">
+                <span className="text-base font-bold text-[#4B2B18]">
                   {formatRupiah(selectedCustomer.totalSpend || 0)}
                 </span>
               </div>
@@ -1151,7 +1151,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                   <span>Loyalty & Tier</span>
                 </span>
                 <div className="flex items-center justify-between mt-1">
-                  <span className="px-1.5 py-0.5 rounded bg-[#082A4F] text-white text-[10px] font-bold uppercase">
+                  <span className="px-1.5 py-0.5 rounded bg-[#8B5A36] text-white text-[10px] font-bold uppercase">
                     {selectedLoyaltyAccount?.currentTierId || 'Member'}
                   </span>
                   <span className="font-mono font-black text-amber-700 text-xs flex items-center gap-1">
@@ -1169,7 +1169,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 onClick={() => setProfileTab('history')}
                 className={`py-3 transition border-b-2 cursor-pointer ${
                   profileTab === 'history'
-                    ? 'border-[#082A4F] text-[#082A4F]'
+                    ? 'border-[#8B5A36] text-[#4B2B18]'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
@@ -1181,7 +1181,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 onClick={() => setProfileTab('notes')}
                 className={`py-3 transition border-b-2 cursor-pointer ${
                   profileTab === 'notes'
-                    ? 'border-[#082A4F] text-[#082A4F]'
+                    ? 'border-[#8B5A36] text-[#4B2B18]'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
@@ -1193,7 +1193,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 onClick={() => setProfileTab('tasks')}
                 className={`py-3 transition border-b-2 cursor-pointer ${
                   profileTab === 'tasks'
-                    ? 'border-[#082A4F] text-[#082A4F]'
+                    ? 'border-[#8B5A36] text-[#4B2B18]'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
@@ -1205,7 +1205,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 onClick={() => setProfileTab('reviews')}
                 className={`py-3 transition border-b-2 cursor-pointer ${
                   profileTab === 'reviews'
-                    ? 'border-[#082A4F] text-[#082A4F]'
+                    ? 'border-[#8B5A36] text-[#4B2B18]'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
@@ -1217,7 +1217,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                 onClick={() => setProfileTab('addresses')}
                 className={`py-3 transition border-b-2 cursor-pointer ${
                   profileTab === 'addresses'
-                    ? 'border-[#082A4F] text-[#082A4F]'
+                    ? 'border-[#8B5A36] text-[#4B2B18]'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
@@ -1243,7 +1243,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-[#082A4F]">
+                              <span className="font-mono font-bold text-[#4B2B18]">
                                 {b.bookingCode}
                               </span>
                               <span
@@ -1264,7 +1264,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                           </div>
 
                           <div className="text-right">
-                            <span className="font-serif font-bold text-sm text-[#082A4F]">
+                            <span className="font-serif font-bold text-sm text-[#4B2B18]">
                               {formatRupiah(b.totalAmount)}
                             </span>
                             <span className="block text-[10px] text-slate-400 font-medium">
@@ -1303,7 +1303,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                   {/* Add Note Form */}
                   <form onSubmit={handleAddNote} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5 text-xs">
                     <h5 className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-[#082A4F]" />
+                      <FileText className="w-3.5 h-3.5 text-[#4B2B18]" />
                       Tambah Catatan Operasional CRM
                     </h5>
                     <div className="flex gap-2">
@@ -1329,7 +1329,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                       <button
                         type="submit"
                         disabled={isAddingNote}
-                        className="px-4 py-2 bg-[#082A4F] text-white rounded-lg font-bold hover:bg-[#0C3866] transition disabled:opacity-50"
+                        className="px-4 py-2 bg-[#8B5A36] text-white rounded-lg font-bold hover:bg-[#94603B] transition disabled:opacity-50"
                       >
                         {isAddingNote ? 'Menyimpan...' : 'Tambah'}
                       </button>
@@ -1378,7 +1378,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                   {/* Add Task Form */}
                   <form onSubmit={handleAddTask} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5 text-xs">
                     <h5 className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <Plus className="w-3.5 h-3.5 text-[#082A4F]" />
+                      <Plus className="w-3.5 h-3.5 text-[#4B2B18]" />
                       Tambah Tugas / Reminder Follow-up
                     </h5>
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
@@ -1400,7 +1400,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                       <button
                         type="submit"
                         disabled={isAddingTask}
-                        className="p-2 bg-[#082A4F] text-white rounded-lg font-bold hover:bg-[#0C3866] transition disabled:opacity-50"
+                        className="p-2 bg-[#8B5A36] text-white rounded-lg font-bold hover:bg-[#94603B] transition disabled:opacity-50"
                       >
                         {isAddingTask ? 'Menyimpan...' : 'Simpan Tugas'}
                       </button>
@@ -1422,7 +1422,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleToggleTask(task.id, task.status)}
-                            className="mt-0.5 text-[#082A4F] hover:opacity-80"
+                            className="mt-0.5 text-[#4B2B18] hover:opacity-80"
                           >
                             {task.status === 'completed' ? (
                               <CheckSquare className="w-5 h-5 text-emerald-600" />
@@ -1523,7 +1523,7 @@ export const CustomerCrmView: React.FC<CustomerCrmViewProps> = ({
                         className="p-3.5 rounded-xl border border-slate-200 bg-white text-xs space-y-1"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                          <span className="font-bold text-[#4B2B18] flex items-center gap-1.5">
                             <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
                             {addr.label}
                           </span>

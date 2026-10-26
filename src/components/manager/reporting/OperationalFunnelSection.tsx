@@ -20,7 +20,7 @@ export const OperationalFunnelSection: React.FC<OperationalFunnelSectionProps> =
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div>
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
             <GitCommit className="w-4 h-4 text-[#B89628]" />
             Funnel Operasional &amp; Analisis Bottleneck
           </h3>
@@ -47,11 +47,11 @@ export const OperationalFunnelSection: React.FC<OperationalFunnelSectionProps> =
                 {/* Stage Row Card */}
                 <div className="p-3 bg-slate-50/70 hover:bg-slate-50 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition">
                   <div className="flex items-center gap-3 min-w-[220px]">
-                    <div className="w-6 h-6 rounded-full bg-[#082A4F] text-white flex items-center justify-center font-mono text-[10px] font-bold shrink-0">
+                    <div className="w-6 h-6 rounded-full bg-[#8B5A36] text-white flex items-center justify-center font-mono text-[10px] font-bold shrink-0">
                       {idx + 1}
                     </div>
                     <div>
-                      <span className="font-bold text-[#082A4F] text-xs block">
+                      <span className="font-bold text-[#4B2B18] text-xs block">
                         {stage.label}
                       </span>
                       <span className="text-[10px] text-slate-400">
@@ -64,7 +64,7 @@ export const OperationalFunnelSection: React.FC<OperationalFunnelSectionProps> =
                   <div className="flex-1 max-w-xs hidden md:block">
                     <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-[#082A4F] rounded-full transition-all duration-300"
+                        className="h-full bg-[#8B5A36] rounded-full transition-all duration-300"
                         style={{ width: `${Math.min(100, stage.pctOfTotal)}%` }}
                       />
                     </div>
@@ -73,7 +73,7 @@ export const OperationalFunnelSection: React.FC<OperationalFunnelSectionProps> =
                   {/* Numbers & Duration */}
                   <div className="flex items-center gap-4 text-xs">
                     <div className="text-right">
-                      <span className="font-bold text-[#082A4F] text-sm block">
+                      <span className="font-bold text-[#4B2B18] text-sm block">
                         {stage.count}
                       </span>
                       <span className="text-[10px] text-slate-400">Reservasi</span>

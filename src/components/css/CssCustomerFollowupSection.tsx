@@ -125,7 +125,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
             onClick={() => setActiveTab('ALL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
               activeTab === 'ALL'
-                ? 'bg-[#082A4F] text-white shadow-sm'
+                ? 'bg-[#8B5A36] text-white shadow-sm'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
@@ -173,7 +173,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
             placeholder="Cari kode booking, nama..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-slate-50/50"
           />
         </div>
       </div>
@@ -194,7 +194,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
                     <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
                       TIDAK MERESPON #{b.unreachableCount}
                     </span>
-                    <span className="font-mono font-bold text-xs text-[#082A4F]">
+                    <span className="font-mono font-bold text-xs text-[#4B2B18]">
                       {b.bookingCode}
                     </span>
                     <span className="text-xs text-slate-500 font-medium">
@@ -265,7 +265,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
                     <span className="px-2.5 py-0.5 rounded-full bg-purple-600 text-white text-[10px] font-bold">
                       ESKALASI: {b.escalation?.priority || 'HIGH'}
                     </span>
-                    <span className="font-mono font-bold text-xs text-[#082A4F]">
+                    <span className="font-mono font-bold text-xs text-[#4B2B18]">
                       {b.bookingCode}
                     </span>
                     <span className="text-xs text-slate-500 font-medium">
@@ -289,7 +289,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
                   <button
                     type="button"
                     onClick={() => onSelectBooking(b)}
-                    className="px-4 py-2 rounded-xl bg-[#082A4F] text-white text-xs font-bold transition hover:bg-[#0D3B68]"
+                    className="px-4 py-2 rounded-xl bg-[#8B5A36] text-white text-xs font-bold transition hover:bg-[#94603B]"
                   >
                     Pantau Tiket
                   </button>
@@ -315,7 +315,7 @@ export const CssCustomerFollowupSection: React.FC<CssCustomerFollowupSectionProp
                         <Star className="w-3 h-3 fill-white" />
                         {r.overallRating} Bintang
                       </span>
-                      <span className="font-mono font-bold text-xs text-[#082A4F]">
+                      <span className="font-mono font-bold text-xs text-[#4B2B18]">
                         {r.bookingCode}
                       </span>
                       <span className="text-xs text-slate-500 font-medium">

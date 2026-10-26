@@ -102,7 +102,7 @@ export const CssEscalateModal: React.FC<CssEscalateModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-150">
         {/* Header */}
-        <div className="bg-[#082A4F] text-white p-5 flex items-center justify-between">
+        <div className="bg-[#8B5A36] text-white p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-400/30">
               <ShieldAlert className="w-5 h-5" />
@@ -138,7 +138,7 @@ export const CssEscalateModal: React.FC<CssEscalateModalProps> = ({
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1 text-slate-700">
             <div className="flex justify-between">
               <span className="text-slate-500">Jadwal:</span>
-              <span className="font-semibold text-[#082A4F]">
+              <span className="font-semibold text-[#4B2B18]">
                 {booking.scheduleDate} - {booking.scheduleTime} WIB
               </span>
             </div>
@@ -162,7 +162,7 @@ export const CssEscalateModal: React.FC<CssEscalateModalProps> = ({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-white font-medium text-slate-800"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium text-slate-800"
             >
               {ESCALATION_CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
@@ -231,7 +231,7 @@ export const CssEscalateModal: React.FC<CssEscalateModalProps> = ({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               required
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F]"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
