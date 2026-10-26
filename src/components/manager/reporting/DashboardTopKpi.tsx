@@ -75,8 +75,8 @@ export const DashboardTopKpi: React.FC<DashboardTopKpiProps> = ({
       subtext: 'Seluruh reservasi terdaftar',
       badge: renderComparisonBadge(metrics.bookingsGrowthPct),
       icon: CalendarCheck,
-      iconBg: 'bg-[#082A4F]/10 text-[#082A4F]',
-      borderHover: 'hover:border-[#082A4F]/40',
+      iconBg: 'bg-[#8B5A36]/10 text-[#4B2B18]',
+      borderHover: 'hover:border-[#8B5A36]/40',
       drilldownKey: 'sales',
       tooltip: 'Semua status booking',
     },
@@ -122,7 +122,7 @@ export const DashboardTopKpi: React.FC<DashboardTopKpiProps> = ({
       value: metrics.repeatCustomers.toLocaleString('id-ID'),
       subtext: `Repeat Rate: ${metrics.repeatRate}%`,
       badge: (
-        <span className="text-[11px] font-semibold text-[#082A4F] bg-[#082A4F]/10 px-1.5 py-0.5 rounded">
+        <span className="text-[11px] font-semibold text-[#4B2B18] bg-[#8B5A36]/10 px-1.5 py-0.5 rounded">
           {metrics.repeatRate}% loyal
         </span>
       ),
@@ -165,14 +165,14 @@ export const DashboardTopKpi: React.FC<DashboardTopKpiProps> = ({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#082A4F]">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#4B2B18]">
           Ringkasan Indikator Kinerja Utama (Executive KPI)
         </h3>
         {onOpenDefinitions && (
           <button
             type="button"
             onClick={onOpenDefinitions}
-            className="text-xs text-[#082A4F] hover:text-[#B89628] font-semibold flex items-center gap-1 transition"
+            className="text-xs text-[#4B2B18] hover:text-[#B89628] font-semibold flex items-center gap-1 transition"
           >
             <span>Definisi Metrik</span>
           </button>
@@ -202,7 +202,7 @@ export const DashboardTopKpi: React.FC<DashboardTopKpiProps> = ({
               </div>
 
               <div className="space-y-1">
-                <div className="text-xl font-bold text-[#082A4F] tracking-tight truncate">
+                <div className="text-xl font-bold text-[#4B2B18] tracking-tight truncate">
                   {c.value}
                 </div>
                 <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
