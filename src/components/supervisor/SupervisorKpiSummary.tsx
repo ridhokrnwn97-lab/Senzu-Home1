@@ -75,8 +75,8 @@ export const SupervisorKpiSummary: React.FC<SupervisorKpiSummaryProps> = ({
       title: 'Jadwal Hari Ini',
       count: todayBookings.length,
       icon: Calendar,
-      accent: 'text-[#082A4F] bg-blue-50 border-blue-200',
-      activeClass: 'ring-2 ring-[#082A4F] bg-blue-50/50',
+      accent: 'text-[#4B2B18] bg-blue-50 border-blue-200',
+      activeClass: 'ring-2 ring-[#8B5A36] bg-blue-50/50',
       subtitle: `${completedToday.length} selesai`,
     },
     {
@@ -192,7 +192,7 @@ export const SupervisorKpiSummary: React.FC<SupervisorKpiSummaryProps> = ({
               </div>
 
               <div>
-                <div className="text-xl sm:text-2xl font-bold font-mono text-[#082A4F] tracking-tight">
+                <div className="text-xl sm:text-2xl font-bold font-mono text-[#4B2B18] tracking-tight">
                   {kpi.count}
                 </div>
                 <div className="text-[10px] text-slate-400 truncate mt-0.5">
@@ -201,7 +201,7 @@ export const SupervisorKpiSummary: React.FC<SupervisorKpiSummaryProps> = ({
               </div>
 
               {isSelected && (
-                <div className="mt-1 flex items-center gap-1 text-[9px] font-bold text-[#082A4F] uppercase tracking-wider">
+                <div className="mt-1 flex items-center gap-1 text-[9px] font-bold text-[#4B2B18] uppercase tracking-wider">
                   <Check className="w-2.5 h-2.5" />
                   <span>Filter Aktif</span>
                 </div>
