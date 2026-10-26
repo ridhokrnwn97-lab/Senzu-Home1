@@ -118,7 +118,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       {/* Header & Date Filter */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <TrendingUp className="w-6 h-6 text-[#B89628]" />
             Executive Management Dashboard
           </h2>
@@ -137,7 +137,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
               setCustomEnd('');
             }}
             className={`px-3 py-1.5 rounded-lg transition ${
-              filterMode === 'today' && !customStart ? 'bg-[#082A4F] text-white' : 'text-slate-600 hover:bg-slate-100'
+              filterMode === 'today' && !customStart ? 'bg-[#8B5A36] text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Hari Ini
@@ -150,7 +150,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
               setCustomEnd('');
             }}
             className={`px-3 py-1.5 rounded-lg transition ${
-              filterMode === 'week' && !customStart ? 'bg-[#082A4F] text-white' : 'text-slate-600 hover:bg-slate-100'
+              filterMode === 'week' && !customStart ? 'bg-[#8B5A36] text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Minggu Ini
@@ -163,7 +163,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
               setCustomEnd('');
             }}
             className={`px-3 py-1.5 rounded-lg transition ${
-              filterMode === 'month' && !customStart ? 'bg-[#082A4F] text-white' : 'text-slate-600 hover:bg-slate-100'
+              filterMode === 'month' && !customStart ? 'bg-[#8B5A36] text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Bulan Ini
@@ -176,7 +176,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
               setCustomEnd('');
             }}
             className={`px-3 py-1.5 rounded-lg transition ${
-              filterMode === 'all' && !customStart ? 'bg-[#082A4F] text-white' : 'text-slate-600 hover:bg-slate-100'
+              filterMode === 'all' && !customStart ? 'bg-[#8B5A36] text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Semua
@@ -187,7 +187,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       {/* Primary KPI Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Revenue */}
-        <div className="col-span-2 bg-gradient-to-br from-[#082A4F] to-[#0D3B6F] text-white p-5 rounded-2xl border border-[#D4AF37]/40 shadow-sm flex flex-col justify-between">
+        <div className="col-span-2 bg-gradient-to-br from-[#8B5A36] to-[#94603B] text-white p-5 rounded-2xl border border-[#D4AF37]/40 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase font-bold text-[#D4AF37] tracking-wider">
               Total Revenue
@@ -209,10 +209,10 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500">
             <span className="text-xs font-semibold">Total Booking</span>
-            <ShoppingBag className="w-4 h-4 text-[#082A4F]" />
+            <ShoppingBag className="w-4 h-4 text-[#4B2B18]" />
           </div>
           <div className="my-2">
-            <div className="text-2xl font-bold text-[#082A4F]">{totalBooking}</div>
+            <div className="text-2xl font-bold text-[#4B2B18]">{totalBooking}</div>
           </div>
           <div className="text-[10px] text-slate-400">Periode terpilih</div>
         </div>
@@ -267,7 +267,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
               Top Therapist
             </span>
-            <div className="text-sm sm:text-base font-bold text-[#082A4F]">{topTherapist}</div>
+            <div className="text-sm sm:text-base font-bold text-[#4B2B18]">{topTherapist}</div>
             <p className="text-[11px] text-slate-500">
               Total {therapists.length} terapis aktif terdaftar
             </p>
@@ -276,14 +276,14 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
 
         {/* Top Treatment */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#082A4F] flex items-center justify-center flex-shrink-0">
+          <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#4B2B18] flex items-center justify-center flex-shrink-0">
             <Sparkles className="w-6 h-6" />
           </div>
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
               Top Treatment
             </span>
-            <div className="text-sm sm:text-base font-bold text-[#082A4F]">{topTreatment}</div>
+            <div className="text-sm sm:text-base font-bold text-[#4B2B18]">{topTreatment}</div>
             <p className="text-[11px] text-slate-500">Layanan paling diminati keluarga</p>
           </div>
         </div>
@@ -297,7 +297,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
               Top Area Palembang
             </span>
-            <div className="text-sm sm:text-base font-bold text-[#082A4F] truncate max-w-[200px]">
+            <div className="text-sm sm:text-base font-bold text-[#4B2B18] truncate max-w-[200px]">
               {topArea}
             </div>
             <p className="text-[11px] text-slate-500">Kecamatan order terpadat</p>
@@ -309,7 +309,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Treatment Distribution */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold text-[#082A4F] flex items-center gap-2">
+          <h3 className="text-sm font-bold text-[#4B2B18] flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-[#B89628]" />
             Distribusi Layanan Treatment
           </h3>
@@ -328,7 +328,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                     </div>
                     <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-[#082A4F] to-[#D4AF37] rounded-full transition-all duration-500"
+                        className="h-full bg-gradient-to-r from-[#8B5A36] to-[#D4AF37] rounded-full transition-all duration-500"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -341,7 +341,7 @@ export const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
 
         {/* Palembang Area Distribution */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold text-[#082A4F] flex items-center gap-2">
+          <h3 className="text-sm font-bold text-[#4B2B18] flex items-center gap-2">
             <MapPin className="w-4 h-4 text-[#B89628]" />
             Distribusi Wilayah Palembang
           </h3>
