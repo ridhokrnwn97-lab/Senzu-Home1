@@ -45,7 +45,7 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
     { key: 'ACTIVE', label: 'Aktif', desc: 'Rutin reservasi berkala', color: 'bg-emerald-500' },
     { key: 'REPEAT', label: 'Repeat', desc: 'Telah berkunjung ≥ 2x', color: 'bg-purple-500' },
     { key: 'HIGH_VALUE', label: 'High Value', desc: 'Pengeluaran di atas rata-rata', color: 'bg-[#B89628]' },
-    { key: 'VIP', label: 'VIP Priority', desc: 'Pelanggan istimewa Senzu', color: 'bg-[#082A4F]' },
+    { key: 'VIP', label: 'VIP Priority', desc: 'Pelanggan istimewa Senzu', color: 'bg-[#8B5A36]' },
     { key: 'AT_RISK', label: 'At Risk', desc: 'Melewati siklus biasanya', color: 'bg-amber-500' },
     { key: 'INACTIVE', label: 'Tidak Aktif', desc: 'Belum booking > 60 hari', color: 'bg-slate-400' },
   ];
@@ -56,7 +56,7 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
       <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div>
-            <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+            <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
               <MapPin className="w-4 h-4 text-[#B89628]" />
               Sebaran Wilayah &amp; Kecamatan Palembang
             </h3>
@@ -92,7 +92,7 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
                     title="Klik untuk memfilter laporan berdasarkan area ini"
                   >
                     <td className="py-2.5 px-3">
-                      <div className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                      <div className="font-bold text-[#4B2B18] flex items-center gap-1.5">
                         <span className="w-4 h-4 rounded-full bg-slate-100 text-slate-600 text-[10px] flex items-center justify-center font-mono">
                           {idx + 1}
                         </span>
@@ -105,7 +105,7 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
                     <td className="py-2.5 px-3 text-right text-emerald-700 font-semibold">
                       {a.completedCount}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">
+                    <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">
                       {formatRupiah(a.realizedRevenue)}
                     </td>
                     <td className="py-2.5 px-3 text-right text-slate-600">
@@ -133,8 +133,8 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
       {/* Column 3: CRM Customer Segments */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
         <div className="pb-3 border-b border-slate-100">
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
-            <Users className="w-4 h-4 text-[#082A4F]" />
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
+            <Users className="w-4 h-4 text-[#4B2B18]" />
             Segmentasi Pelanggan (CRM)
           </h3>
           <p className="text-xs text-slate-500">
@@ -155,7 +155,7 @@ export const CustomerGeographySection: React.FC<CustomerGeographySectionProps> =
                     <span className="font-semibold text-slate-700">{seg.label}</span>
                   </div>
                   <div className="flex items-center gap-1.5 font-medium text-slate-500">
-                    <span className="font-bold text-[#082A4F]">{count}</span>
+                    <span className="font-bold text-[#4B2B18]">{count}</span>
                     <span className="text-[11px]">({pct}%)</span>
                   </div>
                 </div>
