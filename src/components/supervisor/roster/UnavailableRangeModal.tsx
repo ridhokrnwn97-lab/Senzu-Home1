@@ -215,7 +215,7 @@ export const UnavailableRangeModal: React.FC<UnavailableRangeModalProps> = ({
                   onClick={() => setReason(r)}
                   className={`px-3 py-2 rounded-xl border text-left font-semibold transition cursor-pointer text-[11px] ${
                     reason === r
-                      ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                      ? 'bg-[#8B5A36] text-white border-[#8B5A36]'
                       : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
@@ -267,7 +267,7 @@ export const UnavailableRangeModal: React.FC<UnavailableRangeModalProps> = ({
                     className="p-2 rounded-lg bg-white border border-amber-200 flex items-center justify-between text-[11px]"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-[#082A4F]">
+                      <span className="font-mono font-bold text-[#4B2B18]">
                         {b.bookingCode}
                       </span>
                       <span className="text-slate-600">
