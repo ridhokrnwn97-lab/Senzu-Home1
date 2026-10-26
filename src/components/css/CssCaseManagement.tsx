@@ -395,7 +395,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
       {/* Top Header & Counters */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <h2 className="text-xl font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h2 className="text-xl font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <ShieldAlert className="w-6 h-6 text-amber-500" />
             Manajemen Komplain & Pemulihan Layanan (CSS)
           </h2>
@@ -410,7 +410,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
             setCreateBookingId(bookings[0]?.id || '');
             setShowCreateModal(true);
           }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A3663] text-white text-xs font-bold transition shadow-sm cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition shadow-sm cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>Buat Kasus / Komplain Baru</span>
@@ -421,7 +421,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-xs">
           <span className="text-[11px] font-medium text-slate-500">Kasus Aktif</span>
-          <div className="text-2xl font-bold text-[#082A4F] mt-1">
+          <div className="text-2xl font-bold text-[#4B2B18] mt-1">
             {cases.filter((c) => c.status !== 'CLOSED').length}
           </div>
         </div>
@@ -463,7 +463,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 onClick={() => setActiveFilterTab(tab.id as any)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                   activeFilterTab === tab.id
-                    ? 'bg-[#082A4F] text-white shadow-xs'
+                    ? 'bg-[#8B5A36] text-white shadow-xs'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
                 }`}
               >
@@ -497,7 +497,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Cari berdasarkan Kode Kasus (SC-...), Kode Booking, Nama Pelanggan, atau Ringkasan..."
-            className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#082A4F] outline-none"
+            className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#8B5A36] outline-none"
           />
         </div>
       </div>
@@ -524,12 +524,12 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 key={c.id}
                 onClick={() => setSelectedCase(c)}
                 className={`p-4 rounded-2xl bg-white border transition shadow-xs hover:shadow-md cursor-pointer space-y-3 ${
-                  selectedCase?.id === c.id ? 'border-[#082A4F] ring-1 ring-[#082A4F]' : 'border-slate-200 hover:border-slate-300'
+                  selectedCase?.id === c.id ? 'border-[#8B5A36] ring-1 ring-[#8B5A36]' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-[#082A4F] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                    <span className="font-mono text-xs font-bold text-[#4B2B18] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
                       {c.caseCode}
                     </span>
                     <span className="text-xs font-semibold text-slate-600">
@@ -632,7 +632,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-2xl h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200">
             {/* Drawer Header */}
-            <div className="p-5 bg-[#082A4F] text-white flex items-center justify-between shrink-0">
+            <div className="p-5 bg-[#8B5A36] text-white flex items-center justify-between shrink-0">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-bold bg-white/20 px-2.5 py-0.5 rounded-md">
@@ -873,7 +873,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
                     {(timelineEvents || []).map((evt) => (
                       <div key={evt.id} className="relative space-y-1">
-                        <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-[#082A4F] ring-4 ring-white" />
+                        <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-[#8B5A36] ring-4 ring-white" />
                         <div className="flex items-center justify-between">
                           <strong className="text-slate-900 text-xs">{evt.summary}</strong>
                           <span className="text-[10px] text-slate-400">
@@ -901,7 +901,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Catat Kontak Pelanggan</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Catat Kontak Pelanggan</h3>
               <button
                 type="button"
                 onClick={() => setShowContactModal(false)}
@@ -958,7 +958,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={contactSummary}
                   onChange={(e) => setContactSummary(e.target.value)}
                   placeholder="Tuliskan poin penting yang disampaikan ke pelanggan..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                   required
                 />
               </div>
@@ -973,7 +973,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0A3663] text-white font-bold cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold cursor-pointer"
                 >
                   Simpan Catatan Kontak
                 </button>
@@ -990,7 +990,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Tambah Catatan Internal</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Tambah Catatan Internal</h3>
               <button
                 type="button"
                 onClick={() => setShowNoteModal(false)}
@@ -1009,7 +1009,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 value={noteContent}
                 onChange={(e) => setNoteContent(e.target.value)}
                 placeholder="Tuliskan investigasi, observasi lapangan, atau instruksi internal..."
-                className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                 required
               />
 
@@ -1023,7 +1023,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0A3663] text-white font-bold cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold cursor-pointer"
                 >
                   Simpan Catatan
                 </button>
@@ -1040,7 +1040,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Ajukan Pemulihan Layanan (Service Recovery)</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Ajukan Pemulihan Layanan (Service Recovery)</h3>
               <button
                 type="button"
                 onClick={() => setShowRecoveryModal(false)}
@@ -1089,7 +1089,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={recoveryDescription}
                   onChange={(e) => setRecoveryDescription(e.target.value)}
                   placeholder="Contoh: Diskon voucher 20% untuk kompensasi keterlambatan 30 menit."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                   required
                 />
               </div>
@@ -1121,7 +1121,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Sampaikan Recovery ke Pelanggan</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Sampaikan Recovery ke Pelanggan</h3>
               <button
                 type="button"
                 onClick={() => setShowDeliverModal(false)}
@@ -1152,7 +1152,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={deliverNote}
                   onChange={(e) => setDeliverNote(e.target.value)}
                   placeholder="Contoh: Voucher telah dikirimkan via WhatsApp dan pelanggan mengonfirmasi puas dengan penanganan."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1183,7 +1183,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Selesaikan Kasus (Resolve)</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Selesaikan Kasus (Resolve)</h3>
               <button
                 type="button"
                 onClick={() => setShowResolveModal(false)}
@@ -1216,7 +1216,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={resolutionSummary}
                   onChange={(e) => setResolutionSummary(e.target.value)}
                   placeholder="Ringkas tindakan yang telah diambil..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                   required
                 />
               </div>
@@ -1228,7 +1228,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={correctiveAction}
                   onChange={(e) => setCorrectiveAction(e.target.value)}
                   placeholder="Langkah antisipasi agar kendala tidak berulang..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1259,7 +1259,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-scale-in text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-sm text-[#082A4F]">Buat Kasus / Komplain Manual</h3>
+              <h3 className="font-bold text-sm text-[#4B2B18]">Buat Kasus / Komplain Manual</h3>
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
@@ -1325,7 +1325,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={createSummary}
                   onChange={(e) => setCreateSummary(e.target.value)}
                   placeholder="Contoh: Pelanggan komplain terapis terlambat 40 menit"
-                  className="w-full p-2.5 rounded-xl border border-slate-300 outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 outline-none focus:ring-2 focus:ring-[#8B5A36]"
                   required
                 />
               </div>
@@ -1337,7 +1337,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={createDesc}
                   onChange={(e) => setCreateDesc(e.target.value)}
                   placeholder="Kronologi dan fakta lapangan..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                   required
                 />
               </div>
@@ -1349,7 +1349,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                   value={createInternalNote}
                   onChange={(e) => setCreateInternalNote(e.target.value)}
                   placeholder="Instruksi atau catatan untuk rekan CSS / Supervisor..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 resize-none outline-none focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1363,7 +1363,7 @@ export const CssCaseManagement: React.FC<CssCaseManagementProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0A3663] text-white font-bold cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold cursor-pointer"
                 >
                   Buat Kasus
                 </button>
