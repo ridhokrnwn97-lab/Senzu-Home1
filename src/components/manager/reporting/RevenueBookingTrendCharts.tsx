@@ -42,11 +42,11 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
       {/* Header with Tab Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div>
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
             {activeTab === 'revenue' ? (
               <TrendingUp className="w-4 h-4 text-[#B89628]" />
             ) : (
-              <BarChart2 className="w-4 h-4 text-[#082A4F]" />
+              <BarChart2 className="w-4 h-4 text-[#4B2B18]" />
             )}
             {activeTab === 'revenue' ? 'Tren Omzet Terealisasi Harian' : 'Tren Volume Reservasi Harian'}
           </h3>
@@ -65,8 +65,8 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
             }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
               activeTab === 'revenue'
-                ? 'bg-white text-[#082A4F] shadow-xs'
-                : 'text-slate-600 hover:text-[#082A4F]'
+                ? 'bg-white text-[#4B2B18] shadow-xs'
+                : 'text-slate-600 hover:text-[#4B2B18]'
             }`}
           >
             Omzet (Rp)
@@ -79,8 +79,8 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
             }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
               activeTab === 'bookings'
-                ? 'bg-white text-[#082A4F] shadow-xs'
-                : 'text-slate-600 hover:text-[#082A4F]'
+                ? 'bg-white text-[#4B2B18] shadow-xs'
+                : 'text-slate-600 hover:text-[#4B2B18]'
             }`}
           >
             Volume Booking
@@ -116,7 +116,7 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
             ) : (
               <>
                 <div className="flex items-center gap-1.5 text-slate-600">
-                  <span className="w-3 h-3 rounded-sm bg-[#082A4F]" />
+                  <span className="w-3 h-3 rounded-sm bg-[#8B5A36]" />
                   <span>Booking Masuk: <strong>{totalBookings}</strong></span>
                 </div>
                 <div className="flex items-center gap-1.5 text-slate-600">
@@ -196,7 +196,7 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
                         y={paddingY}
                         width={step}
                         height={usableHeight}
-                        fill="#082A4F"
+                        fill="#8B5A36"
                         fillOpacity="0.04"
                       />
                     )}
@@ -221,7 +221,7 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
                           y={paddingY + usableHeight - bookHeight}
                           width={barWidth / 2}
                           height={bookHeight}
-                          fill="#082A4F"
+                          fill="#8B5A36"
                           opacity={isHovered ? 1 : 0.85}
                           rx="2"
                         />
@@ -257,7 +257,7 @@ export const RevenueBookingTrendCharts: React.FC<RevenueBookingTrendChartsProps>
             {/* Interactive Tooltip Card */}
             {hoveredIndex !== null && trendData[hoveredIndex] && (
               <div
-                className="absolute top-2 right-4 bg-[#082A4F] text-white p-3 rounded-xl shadow-xl text-xs space-y-1 z-10 pointer-events-none border border-[#D4AF37]/40 min-w-[200px]"
+                className="absolute top-2 right-4 bg-[#8B5A36] text-white p-3 rounded-xl shadow-xl text-xs space-y-1 z-10 pointer-events-none border border-[#D4AF37]/40 min-w-[200px]"
               >
                 <div className="font-bold text-[#D4AF37] border-b border-white/10 pb-1 flex items-center justify-between">
                   <span>{formatDateIndo(trendData[hoveredIndex].date)}</span>
