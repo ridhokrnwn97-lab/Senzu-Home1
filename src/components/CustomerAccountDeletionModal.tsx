@@ -116,7 +116,7 @@ export const CustomerAccountDeletionModal: React.FC<CustomerAccountDeletionModal
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-rose-200 overflow-hidden">
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-rose-900 to-[#082A4F] text-white flex items-center justify-between border-b border-rose-800/40 shrink-0">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-rose-900 to-[#8B5A36] text-white flex items-center justify-between border-b border-rose-800/40 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
               <ShieldAlert className="w-5 h-5 text-rose-300" />
@@ -151,7 +151,7 @@ export const CustomerAccountDeletionModal: React.FC<CustomerAccountDeletionModal
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <div className="space-y-1.5">
-                <h4 className="font-serif font-bold text-lg text-[#082A4F]">
+                <h4 className="font-serif font-bold text-lg text-[#4B2B18]">
                   Permintaan Berhasil Diajukan
                 </h4>
                 <p className="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto">
