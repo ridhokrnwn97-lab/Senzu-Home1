@@ -60,9 +60,9 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
       }
     } finally { if (generation.current === version) { flight.current = false; setBusy(false); } }
   };
-  const button = 'min-h-[44px] rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-[#082A4F] disabled:opacity-50';
+  const button = 'min-h-[44px] rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-[#4B2B18] disabled:opacity-50';
   return <section aria-label="Accurate Online — Pencatatan Transaksi" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-    <h3 className="text-lg font-bold text-[#082A4F]">Accurate Online — Pencatatan Transaksi</h3>
+    <h3 className="text-lg font-bold text-[#4B2B18]">Accurate Online — Pencatatan Transaksi</h3>
     <p className="text-sm text-slate-600">Pembayaran Xendit Live masuk ke Uang Muka Penjualan dan Saldo Xendit. Saat treatment selesai, uang muka dipakai melunasi faktur layanan.</p>
     <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Aktivasi membuat dokumen akuntansi pada PT KSBONE UNTUK KITA, database 2974047. Booking lama, pembayaran manual, dan simulasi Test tidak dimasukkan otomatis. Biaya transaksi Xendit dapat diaktifkan terpisah sebagai beban termasuk PPN. Processing fee harian, pencairan bank, pembatalan, dan refund tetap diperiksa terpisah.</p>
     {status && <div className="space-y-1 text-sm text-slate-700">
@@ -126,7 +126,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
       <h4 className="font-semibold">Aktivasi pencatatan booking baru</h4>
       <label className="flex gap-2"><input type="checkbox" disabled={busy} checked={ack} onChange={e => setAck(e.target.checked)} />Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.</label>
       <label className="flex gap-2"><input type="checkbox" disabled={busy} checked={tax} onChange={e => setTax(e.target.checked)} />Finance sudah memastikan transaksi ini dicatat tanpa tambahan pajak. Jika penjualan memerlukan pajak, aktivasi menunggu penyesuaian.</label>
-      <button type="button" className="min-h-[44px] rounded-lg bg-[#082A4F] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !status?.writesConfigured || !preview?.itemCode || !ack || !tax} onClick={() => act('activate')}>{status?.activatedAt ? 'Lanjutkan Pengiriman Accurate' : 'Aktifkan Pencatatan Booking Baru'}</button>
+      <button type="button" className="min-h-[44px] rounded-lg bg-[#8B5A36] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy || !status?.writesConfigured || !preview?.itemCode || !ack || !tax} onClick={() => act('activate')}>{status?.activatedAt ? 'Lanjutkan Pengiriman Accurate' : 'Aktifkan Pencatatan Booking Baru'}</button>
       <p>Jeda menghentikan pengiriman berikutnya. Dokumen yang sudah terkirim tetap tersimpan di Accurate.</p>
     </div>}
     {status && <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
