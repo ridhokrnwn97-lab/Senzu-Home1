@@ -198,8 +198,8 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <h2 className="text-xl font-bold font-serif text-[#082A4F] flex items-center gap-2">
-            <ShieldCheck className="w-6 h-6 text-[#082A4F]" />
+          <h2 className="text-xl font-bold font-serif text-[#4B2B18] flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-[#4B2B18]" />
             Tata Kelola Komplain & Persetujuan Recovery (Manager)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -225,7 +225,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
               onClick={() => setActiveTab('approvals')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'approvals'
-                  ? 'bg-[#082A4F] text-white'
+                  ? 'bg-[#8B5A36] text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -238,7 +238,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
               onClick={() => setActiveTab('refunds')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'refunds'
-                  ? 'bg-[#082A4F] text-white'
+                  ? 'bg-[#8B5A36] text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -251,7 +251,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
               onClick={() => setActiveTab('all')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                 activeTab === 'all'
-                  ? 'bg-[#082A4F] text-white'
+                  ? 'bg-[#8B5A36] text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -263,7 +263,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
               onClick={() => setActiveTab('analytics')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'analytics'
-                  ? 'bg-[#082A4F] text-white'
+                  ? 'bg-[#8B5A36] text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
             >
@@ -294,7 +294,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-xs">
               <span className="text-xs text-slate-500">Total Kasus Tercatat</span>
-              <div className="text-2xl font-bold text-[#082A4F] mt-1">{cases.length}</div>
+              <div className="text-2xl font-bold text-[#4B2B18] mt-1">{cases.length}</div>
             </div>
             <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-xs">
               <span className="text-xs text-slate-500">Tingkat Penyelesaian (Closure Rate)</span>
@@ -327,7 +327,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                         <div
-                          className="bg-[#082A4F] h-2 rounded-full transition-all duration-300"
+                          className="bg-[#8B5A36] h-2 rounded-full transition-all duration-300"
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -360,12 +360,12 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
                   key={c.id}
                   onClick={() => setSelectedCase(c)}
                   className={`p-4 rounded-2xl bg-white border transition shadow-xs hover:shadow-md cursor-pointer space-y-3 ${
-                    selectedCase?.id === c.id ? 'border-[#082A4F] ring-1 ring-[#082A4F]' : 'border-slate-200 hover:border-slate-300'
+                    selectedCase?.id === c.id ? 'border-[#8B5A36] ring-1 ring-[#8B5A36]' : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-[#082A4F] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      <span className="font-mono text-xs font-bold text-[#4B2B18] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                         {c.caseCode}
                       </span>
                       <strong className="text-xs text-slate-800">{c.category}</strong>
@@ -442,7 +442,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
                       </span>
                     )}
 
-                    <span className="text-[11px] text-[#082A4F] font-semibold flex items-center gap-1">
+                    <span className="text-[11px] text-[#4B2B18] font-semibold flex items-center gap-1">
                       Buka Rincian Kasus <ChevronRight className="w-3.5 h-3.5" />
                     </span>
                   </div>
@@ -458,7 +458,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
         <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-xl h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200 text-xs">
             {/* Header */}
-            <div className="p-4 bg-[#082A4F] text-white flex items-center justify-between shrink-0">
+            <div className="p-4 bg-[#8B5A36] text-white flex items-center justify-between shrink-0">
               <div>
                 <span className="font-mono text-xs font-bold bg-white/20 px-2 py-0.5 rounded">
                   {selectedCase.caseCode}
@@ -589,7 +589,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
       {showApprovalModal && selectedCase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3 text-xs">
-            <h4 className="font-bold text-[#082A4F] text-sm">
+            <h4 className="font-bold text-[#4B2B18] text-sm">
               {approvalDecision === 'approve'
                 ? 'Konfirmasi Persetujuan Service Recovery'
                 : 'Tolak Pengajuan Service Recovery'}
@@ -676,7 +676,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
       {showRefundModal && selectedCase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3 text-xs">
-            <h4 className="font-bold text-[#082A4F] text-sm">Perbarui Status Refund Manual</h4>
+            <h4 className="font-bold text-[#4B2B18] text-sm">Perbarui Status Refund Manual</h4>
             <form onSubmit={handleUpdateRefund} className="space-y-3">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Status Refund Baru:</label>
