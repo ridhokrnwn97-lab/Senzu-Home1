@@ -22,7 +22,7 @@ export const DataQualityPanel: React.FC<DataQualityPanelProps> = ({ dataQuality 
             <Database className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-[#082A4F] text-base">
+            <h3 className="font-bold text-[#4B2B18] text-base">
               Panel Kualitas &amp; Kelengkapan Data Operasional
             </h3>
             <p className="text-xs text-slate-500">
@@ -51,7 +51,7 @@ export const DataQualityPanel: React.FC<DataQualityPanelProps> = ({ dataQuality 
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Tanpa Waktu Tiba (arrivedAt)
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {dataQuality.missingArrivedAt ?? (dataQuality as any).missingArrivedAtCount ?? 0}
           </div>
           <span className="text-[10px] text-slate-400">Dari booking selesai dikerjakan</span>
@@ -62,7 +62,7 @@ export const DataQualityPanel: React.FC<DataQualityPanelProps> = ({ dataQuality 
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Terapis Tanpa Shift Roster
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {dataQuality.therapistsMissingRoster ?? (dataQuality as any).missingRosterCount ?? 0}
           </div>
           <span className="text-[10px] text-slate-400">Perlu input jadwal di Master Roster</span>
@@ -73,7 +73,7 @@ export const DataQualityPanel: React.FC<DataQualityPanelProps> = ({ dataQuality 
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Tanpa Status Pembayaran
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {dataQuality.missingPaymentStatus ?? (dataQuality as any).missingPaymentStatusCount ?? 0}
           </div>
           <span className="text-[10px] text-slate-400">Record tanpa kepastian lunas/pending</span>
@@ -84,7 +84,7 @@ export const DataQualityPanel: React.FC<DataQualityPanelProps> = ({ dataQuality 
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">
             Tanpa Wilayah / Area
           </span>
-          <div className="text-lg font-bold text-[#082A4F]">
+          <div className="text-lg font-bold text-[#4B2B18]">
             {dataQuality.missingArea ?? (dataQuality as any).missingAreaCount ?? 0}
           </div>
           <span className="text-[10px] text-slate-400">Tidak terpetakan di kecamatan</span>
