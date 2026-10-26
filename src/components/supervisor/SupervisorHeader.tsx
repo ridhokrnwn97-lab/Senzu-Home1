@@ -69,7 +69,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="px-2.5 py-0.5 rounded-md bg-[#082A4F] text-[#D4AF37] font-mono text-[11px] font-bold tracking-wider uppercase">
+            <span className="px-2.5 py-0.5 rounded-md bg-[#8B5A36] text-[#D4AF37] font-mono text-[11px] font-bold tracking-wider uppercase">
               OPERATIONS HQ
             </span>
             <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
@@ -77,7 +77,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
               <span>Sistem Realtime Aktif</span>
             </div>
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F] mt-1">
+          <h1 className="text-xl sm:text-2xl font-bold font-serif text-[#4B2B18] mt-1">
             Senzu Supervisor Control Room
           </h1>
           <p className="text-xs text-slate-500">
@@ -88,7 +88,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
         {/* Right side: Live Clock & Supervisor badge */}
         <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
           {/* Live WIB Clock */}
-          <div className="bg-[#FAF9F6] border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-[#082A4F] font-mono font-bold shadow-2xs">
+          <div className="bg-[#FAF9F6] border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-[#4B2B18] font-mono font-bold shadow-2xs">
             <Clock className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" />
             <span>{currentWibTime || 'Memuat Waktu WIB...'}</span>
           </div>
@@ -127,12 +127,12 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
               className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition cursor-pointer"
               title="Refresh Data"
             >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#082A4F]' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#4B2B18]' : ''}`} />
             </button>
           )}
 
           {/* Supervisor User Badge */}
-          <div className="flex items-center gap-2 bg-[#082A4F] text-white px-3 py-1.5 rounded-xl text-xs font-semibold shadow-xs">
+          <div className="flex items-center gap-2 bg-[#8B5A36] text-white px-3 py-1.5 rounded-xl text-xs font-semibold shadow-xs">
             <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
             <div className="leading-tight">
               <div className="font-bold text-[11px] truncate max-w-[120px] sm:max-w-[150px]">
@@ -154,7 +154,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('BOARD')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'BOARD'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -167,7 +167,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('MAP')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'MAP'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -181,7 +181,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('ROSTER')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'ROSTER'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -194,7 +194,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('THERAPISTS')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'THERAPISTS'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -207,7 +207,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('CASES')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'CASES'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -220,7 +220,7 @@ export const SupervisorHeader: React.FC<SupervisorHeaderProps> = ({
             onClick={() => onViewChange('AUDIT')}
             className={`min-h-[38px] px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeView === 'AUDIT'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
