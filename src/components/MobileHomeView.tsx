@@ -244,20 +244,20 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       case 'confirmed':
         return {
           label: 'Booking Dikonfirmasi',
-          badgeClass: 'bg-blue-50 text-[#082A4F] border-[#D4AF37]/50',
+          badgeClass: 'bg-blue-50 text-[#4B2B18] border-[#D4AF37]/50',
           dotClass: 'bg-[#D4AF37]',
         };
       case 'assigned':
       case 'therapist_assigned':
         return {
           label: 'Terapis Ditugaskan',
-          badgeClass: 'bg-sky-50 text-[#082A4F] border-sky-300',
+          badgeClass: 'bg-sky-50 text-[#4B2B18] border-sky-300',
           dotClass: 'bg-sky-600',
         };
       case 'on_the_way':
         return {
           label: 'Terapis Menuju Lokasi',
-          badgeClass: 'bg-[#FDF3CD] text-[#082A4F] border-[#D4AF37] font-bold',
+          badgeClass: 'bg-[#FDF3CD] text-[#4B2B18] border-[#D4AF37] font-bold',
           dotClass: 'bg-[#D4AF37] animate-ping',
         };
       case 'arrived':
@@ -269,7 +269,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       case 'in_progress':
         return {
           label: 'Sedang Treatment',
-          badgeClass: 'bg-[#082A4F] text-[#FDF3CD] border-[#D4AF37]',
+          badgeClass: 'bg-[#8B5A36] text-[#FDF3CD] border-[#D4AF37]',
           dotClass: 'bg-[#D4AF37] animate-pulse',
         };
       case 'completed':
@@ -300,22 +300,22 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
         {isCustomerPreviewMode && (
           <div
             id="badge-customer-preview-mode"
-            className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[#082A4F]"
+            className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[#4B2B18]"
           >
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
-              <span className="text-xs font-semibold text-[#082A4F]">
+              <span className="text-xs font-semibold text-[#4B2B18]">
                 Mode Pratinjau Tampilan Publik
               </span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#082A4F] text-[#FDF3CD]">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#8B5A36] text-[#FDF3CD]">
               Sesi Staf Aktif
             </span>
           </div>
         )}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold text-[#082A4F] truncate tracking-tight">
+            <h1 className="text-lg sm:text-xl font-bold text-[#4B2B18] truncate tracking-tight">
               {greetingName ? `Halo, ${greetingName}` : 'Selamat datang di Senzu'}
             </h1>
             <p className="text-xs text-slate-500 truncate">
@@ -324,7 +324,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           </div>
 
           {/* Location Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/90 border border-slate-200/80 text-[11px] font-semibold text-[#082A4F] shrink-0">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/90 border border-slate-200/80 text-[11px] font-semibold text-[#4B2B18] shrink-0">
             <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>Kota Palembang</span>
           </div>
@@ -335,7 +335,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {activeBooking && (
         <section
           id="active-booking-card"
-          className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-br from-[#082A4F] via-[#0D3866] to-[#051C34] text-white border-2 border-[#D4AF37]/50 shadow-xl space-y-3 relative overflow-hidden transition"
+          className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-br from-[#5B351F] via-[#70442A] to-[#3D2315] text-white border-2 border-[#D4AF37]/50 shadow-xl space-y-3 relative overflow-hidden transition"
         >
           {/* Subtle Background Glow */}
           <div className="absolute top-0 right-0 w-36 h-36 bg-[#D4AF37]/10 rounded-full blur-2xl pointer-events-none" />
@@ -425,9 +425,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                   if (onOpenPayment) onOpenPayment(activeBooking);
                   else setPayingBooking(activeBooking);
                 }}
-                className="w-full py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-[#082A4F] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-[#4B2B18] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <CreditCard className="w-4 h-4 text-[#082A4F]" />
+                <CreditCard className="w-4 h-4 text-[#4B2B18]" />
                 <span>Lanjutkan Pembayaran Sekarang</span>
               </button>
             )}
@@ -440,7 +440,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 className={`px-3.5 py-2.5 min-h-[44px] rounded-xl font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeBooking.status === 'Menunggu Pembayaran'
                     ? 'bg-white/15 hover:bg-white/20 text-white border border-white/20'
-                    : 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F]'
+                    : 'bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18]'
                 }`}
               >
                 <Search className="w-4 h-4" />
@@ -481,7 +481,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {/* 3. PRIMARY HERO / BOOKING CTA (Compact & Focused) */}
       <section
         id="hero-booking-cta"
-        className="relative rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-[#082A4F] via-[#0B3461] to-[#051C34] text-white p-5 sm:p-6 shadow-md border border-[#D4AF37]/35"
+        className="relative rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-[#5B351F] via-[#70442A] to-[#3D2315] text-white p-5 sm:p-6 shadow-md border border-[#D4AF37]/35"
       >
         <div className="relative z-10 space-y-3">
           <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/15 border border-[#D4AF37]/35 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-[#FDF3CD]">
@@ -507,9 +507,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               id="btn-hero-order-now"
               type="button"
               onClick={() => onStartBooking()}
-              className="px-4 py-3 min-h-[46px] rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+              className="px-4 py-3 min-h-[46px] rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18] font-bold text-xs sm:text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <Sparkles className="w-4 h-4 text-[#082A4F]" />
+              <Sparkles className="w-4 h-4 text-[#4B2B18]" />
               <span>Pesan Sekarang</span>
             </button>
 
@@ -530,7 +530,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       <section id="services-section" className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div>
-            <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F] flex items-center gap-1.5">
+            <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18] flex items-center gap-1.5">
               <span>Layanan Senzu</span>
               <span className="text-[10px] font-sans font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
                 Home Service
@@ -544,7 +544,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           <button
             type="button"
             onClick={() => onStartBooking()}
-            className="text-xs font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer select-none"
+            className="text-xs font-bold text-[#4B2B18] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer select-none"
           >
             <span>Semua</span>
             <ChevronRight className="w-4 h-4" />
@@ -568,11 +568,11 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
 
               <div>
                 <div className="flex items-center gap-2.5 mb-1.5">
-                  <div className="w-8 h-8 rounded-xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center font-serif font-bold text-sm shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center font-serif font-bold text-sm shrink-0">
                     {srv.name.charAt(0)}
                   </div>
                   <div className="min-w-0 pr-12">
-                    <h3 className="font-bold text-xs sm:text-sm text-[#082A4F] group-hover:text-[#0D3866] transition truncate">
+                    <h3 className="font-bold text-xs sm:text-sm text-[#4B2B18] group-hover:text-[#633C24] transition truncate">
                       {srv.name}
                     </h3>
                     <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
@@ -592,14 +592,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                 <div>
                   <span className="text-[9px] text-slate-400 uppercase font-semibold block">Tarif</span>
-                  <span className="font-mono font-bold text-sm text-[#082A4F]">
+                  <span className="font-mono font-bold text-sm text-[#4B2B18]">
                     {formatRupiah(srv.price)}
                   </span>
                 </div>
 
                 <button
                   type="button"
-                  className="px-3 py-1.5 rounded-xl bg-slate-100 group-hover:bg-[#082A4F] text-slate-700 group-hover:text-white text-xs font-bold transition flex items-center gap-1 min-h-[36px]"
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 group-hover:bg-[#8B5A36] text-slate-700 group-hover:text-white text-xs font-bold transition flex items-center gap-1 min-h-[36px]"
                 >
                   <span>Pilih</span>
                   <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
@@ -618,7 +618,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-[#082A4F] text-[#D4AF37] flex items-center justify-center shrink-0 shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-[#8B5A36] text-[#D4AF37] flex items-center justify-center shrink-0 shadow-xs">
                 <RotateCcw className="w-5 h-5" />
               </div>
               <div className="min-w-0">
@@ -644,7 +644,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               id="btn-repeat-order"
               type="button"
               onClick={() => onRepeatBooking(recentCompletedBooking)}
-              className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-[#FDF3CD] text-xs font-bold flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer shadow-xs"
+              className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-[#FDF3CD] text-xs font-bold flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer shadow-xs"
             >
               <span>Pesan Lagi</span>
               <ArrowRight className="w-3.5 h-3.5 text-[#D4AF37]" />
@@ -664,7 +664,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <Star className="w-5 h-5 fill-[#D4AF37] text-[#D4AF37]" />
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#082A4F] block">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#4B2B18] block">
                 Treatment Favorit Anda
               </span>
               <p className="text-xs sm:text-sm font-bold text-slate-800 truncate">
@@ -679,7 +679,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           <button
             type="button"
             onClick={() => onStartBooking(favoriteService.id)}
-            className="px-3 py-2 min-h-[40px] rounded-xl bg-slate-100 hover:bg-[#082A4F] text-slate-800 hover:text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
+            className="px-3 py-2 min-h-[40px] rounded-xl bg-slate-100 hover:bg-[#8B5A36] text-slate-800 hover:text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
           >
             <span>Pesan</span>
             <ChevronRight className="w-3.5 h-3.5 text-[#D4AF37]" />
@@ -691,7 +691,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {savedAddresses.length > 0 && (
         <section id="saved-address-section" className="space-y-2.5">
           <div className="flex items-center justify-between px-1">
-            <h2 className="font-serif font-bold text-xs sm:text-sm text-[#082A4F] flex items-center gap-1.5">
+            <h2 className="font-serif font-bold text-xs sm:text-sm text-[#4B2B18] flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
               <span>Lokasi Tersimpan Anda</span>
             </h2>
@@ -699,7 +699,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenAccount}
-                className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] cursor-pointer"
+                className="text-[11px] font-bold text-[#4B2B18] hover:text-[#D4AF37] cursor-pointer"
               >
                 Kelola Alamat
               </button>
@@ -715,7 +715,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-[#082A4F]">{addr.label}</span>
+                    <span className="text-xs font-bold text-[#4B2B18]">{addr.label}</span>
                     {addr.isDefault && (
                       <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
                         Utama
@@ -737,7 +737,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {loyaltyAccount && (
         <section
           id="rewards-summary-section"
-          className="rounded-2xl p-4 bg-gradient-to-br from-[#082A4F] to-[#0D3866] text-white border border-[#D4AF37]/40 shadow-sm flex items-center justify-between gap-3"
+          className="rounded-2xl p-4 bg-gradient-to-br from-[#8B5A36] to-[#94603B] text-white border border-[#D4AF37]/40 shadow-sm flex items-center justify-between gap-3"
         >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
@@ -748,7 +748,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#FDF3CD]">
                   Senzu Rewards
                 </span>
-                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-[#D4AF37] text-[#082A4F]">
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-[#D4AF37] text-[#4B2B18]">
                   {loyaltyAccount.currentTierName}
                 </span>
               </div>
@@ -780,14 +780,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {/* 9. PROMO SECTION (Carousel / Compact Cards) */}
       <section id="promo-section" className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-serif font-bold text-xs sm:text-sm text-[#082A4F] flex items-center gap-1.5">
+          <h2 className="font-serif font-bold text-xs sm:text-sm text-[#4B2B18] flex items-center gap-1.5">
             <Gift className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>Promo & Penawaran Spesial</span>
           </h2>
           <button
             type="button"
             onClick={onOpenRewards}
-            className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+            className="text-[11px] font-bold text-[#4B2B18] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
           >
             <span>Katalog</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -815,7 +815,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                     )}
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-1">
-                    <p className="font-bold text-xs text-[#082A4F]">Kode: {promo.code}</p>
+                    <p className="font-bold text-xs text-[#4B2B18]">Kode: {promo.code}</p>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -842,7 +842,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onStartBooking(undefined, promo.code)}
-                    className="text-[11px] font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+                    className="text-[11px] font-bold text-[#4B2B18] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
                   >
                     <span>Gunakan</span>
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -860,7 +860,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 <Ticket className="w-3.5 h-3.5 text-amber-600" />
                 <span>Diskon Pengguna Baru</span>
               </div>
-              <p className="font-bold text-xs text-[#082A4F]">Kode: SENZUWELCOME</p>
+              <p className="font-bold text-xs text-[#4B2B18]">Kode: SENZUWELCOME</p>
               <p className="text-[11px] text-slate-600 mt-0.5">
                 Potongan Rp 20.000 untuk treatment pertama Anda di Kota Palembang.
               </p>
@@ -876,7 +876,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <Users className="w-3.5 h-3.5 text-indigo-600" />
               <span>Ajak Teman (Referral)</span>
             </div>
-            <p className="font-bold text-xs text-[#082A4F]">Dapatkan 200 Poin</p>
+            <p className="font-bold text-xs text-[#4B2B18]">Dapatkan 200 Poin</p>
             <p className="text-[11px] text-slate-600 mt-0.5">
               Bagikan kode referral Anda dan raih saldo poin setiap teman selesai treatment.
             </p>
@@ -891,7 +891,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
               <Award className="w-3.5 h-3.5 text-emerald-600" />
               <span>Keuntungan Member</span>
             </div>
-            <p className="font-bold text-xs text-[#082A4F]">Cashback Poin Hingga 1.5x</p>
+            <p className="font-bold text-xs text-[#4B2B18]">Cashback Poin Hingga 1.5x</p>
             <p className="text-[11px] text-slate-600 mt-0.5">
               Nikmati diskon eksklusif dan prioritas terapis di level Silver, Gold & Platinum.
             </p>
@@ -902,14 +902,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
       {/* 10. RECENT ORDERS ("Pesanan Terakhir") */}
       <section id="recent-orders-section" className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-serif font-bold text-sm sm:text-base text-[#082A4F]">
+          <h2 className="font-serif font-bold text-sm sm:text-base text-[#4B2B18]">
             Pesanan Terakhir
           </h2>
           {recentCustomerBookings.length > 0 && (
             <button
               type="button"
               onClick={onOpenOrders}
-              className="text-xs font-bold text-[#082A4F] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
+              className="text-xs font-bold text-[#4B2B18] hover:text-[#D4AF37] flex items-center gap-0.5 cursor-pointer"
             >
               <span>Riwayat</span>
               <ChevronRight className="w-4 h-4" />
@@ -928,7 +928,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                 >
                   <div className="min-w-0 space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#082A4F] truncate">
+                      <span className="text-xs font-bold text-[#4B2B18] truncate">
                         {b.serviceName}
                       </span>
                       <span
@@ -954,14 +954,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenTracking(b.bookingCode)}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#082A4F] text-xs font-semibold transition active:scale-95 cursor-pointer min-h-[36px]"
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#4B2B18] text-xs font-semibold transition active:scale-95 cursor-pointer min-h-[36px]"
                     >
                       Detail
                     </button>
                     <button
                       type="button"
                       onClick={() => onRepeatBooking(b)}
-                      className="px-2.5 py-1.5 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-[#FDF3CD] text-xs font-bold transition active:scale-95 cursor-pointer min-h-[36px]"
+                      className="px-2.5 py-1.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-[#FDF3CD] text-xs font-bold transition active:scale-95 cursor-pointer min-h-[36px]"
                     >
                       Pesan Lagi
                     </button>
@@ -976,7 +976,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             <button
               type="button"
               onClick={() => onStartBooking()}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#082A4F] text-[#FDF3CD] text-xs font-bold shadow-xs hover:bg-[#0D3866] transition cursor-pointer min-h-[40px]"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#8B5A36] text-[#FDF3CD] text-xs font-bold shadow-xs hover:bg-[#94603B] transition cursor-pointer min-h-[40px]"
             >
               <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
               <span>Pesan Treatment Pertama Anda</span>
@@ -987,14 +987,14 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
 
       {/* 11. WHY SENZU (Trust & Safety Section) */}
       <section id="why-senzu-section" className="space-y-3">
-        <h2 className="font-serif font-bold text-sm sm:text-base text-[#082A4F] px-1">
+        <h2 className="font-serif font-bold text-sm sm:text-base text-[#4B2B18] px-1">
           Kenyamanan & Standar Senzu Home
         </h2>
 
         <div className="grid grid-cols-2 gap-2.5 text-xs">
           <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
-            <div className="w-7 h-7 rounded-lg bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center">
-              <ShieldCheck className="w-4 h-4 text-[#082A4F]" />
+            <div className="w-7 h-7 rounded-lg bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center">
+              <ShieldCheck className="w-4 h-4 text-[#4B2B18]" />
             </div>
             <h3 className="font-bold text-slate-800 text-[11px] sm:text-xs">Terapis Terlatih</h3>
             <p className="text-[10px] text-slate-500 leading-normal">
@@ -1013,8 +1013,8 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
           </div>
 
           <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
-            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4 text-blue-600" />
+            <div className="w-7 h-7 rounded-lg bg-[#F5E9DE] text-[#8B5A36] flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-[#8B5A36]" />
             </div>
             <h3 className="font-bold text-slate-800 text-[11px] sm:text-xs">Pembayaran Resmi</h3>
             <p className="text-[10px] text-slate-500 leading-normal">
