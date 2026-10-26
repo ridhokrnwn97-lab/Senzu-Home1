@@ -35,7 +35,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs animate-in fade-in">
       <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
         {/* Header */}
-        <div className="px-6 py-4 bg-[#082A4F] text-white flex items-center justify-between border-b border-[#D4AF37]/30">
+        <div className="px-6 py-4 bg-[#8B5A36] text-white flex items-center justify-between border-b border-[#D4AF37]/30">
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-bold tracking-wider text-[#D4AF37]">
@@ -70,7 +70,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
         <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
           {/* Customer Card */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
               <User className="w-3.5 h-3.5 text-[#B89628]" />
               Data Pelanggan
             </h4>
@@ -89,7 +89,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
               <div className="col-span-2">
                 <span className="text-[11px] text-slate-400 block">Alamat / Lokasi Layanan:</span>
                 <span className="font-medium text-slate-700 flex items-start gap-1 mt-0.5">
-                  <MapPin className="w-3.5 h-3.5 text-[#082A4F] shrink-0 mt-0.5" />
+                  <MapPin className="w-3.5 h-3.5 text-[#4B2B18] shrink-0 mt-0.5" />
                   <span>{booking.address || (booking as any).customerAddress || (booking as any).locationAddress || 'Alamat tidak tertera'}</span>
                 </span>
               </div>
@@ -98,14 +98,14 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
 
           {/* Service Snapshot Card */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-[#B89628]" />
               Layanan &amp; Jadwal
             </h4>
             <div className="grid grid-cols-2 gap-2 text-slate-700">
               <div>
                 <span className="text-[11px] text-slate-400 block">Nama Treatment:</span>
-                <span className="font-semibold text-[#082A4F]">
+                <span className="font-semibold text-[#4B2B18]">
                   {booking.serviceNameSnapshot || booking.serviceName}
                 </span>
               </div>
@@ -132,7 +132,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
 
           {/* Financial Breakdown Card */}
           <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-2 shadow-xs">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
               <CreditCard className="w-3.5 h-3.5 text-[#B89628]" />
               Rincian Biaya &amp; Pembayaran
             </h4>
@@ -163,7 +163,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
                   <span>-{formatRupiah(booking.pointsDiscount || 0)}</span>
                 </div>
               )}
-              <div className="flex justify-between font-bold text-sm text-[#082A4F] pt-2 border-t border-slate-200">
+              <div className="flex justify-between font-bold text-sm text-[#4B2B18] pt-2 border-t border-slate-200">
                 <span>Total Transaksi:</span>
                 <span>{formatRupiah(booking.totalAmount || 0)}</span>
               </div>
@@ -191,8 +191,8 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
 
           {/* Operational Timestamps */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-[#082A4F]" />
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[#4B2B18]" />
               Jejak Audit Waktu Operasional (WIB)
             </h4>
             <div className="space-y-1.5 font-mono text-[11px] text-slate-600">
