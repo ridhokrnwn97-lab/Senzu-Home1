@@ -84,7 +84,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         {/* Preset Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
-          <span className="text-xs font-bold text-[#082A4F] mr-1 hidden sm:inline flex items-center gap-1">
+          <span className="text-xs font-bold text-[#4B2B18] mr-1 hidden sm:inline flex items-center gap-1">
             <Calendar className="w-3.5 h-3.5 text-[#B89628]" />
             Periode:
           </span>
@@ -97,8 +97,8 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
                 onClick={() => handlePresetSelect(p.id)}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition cursor-pointer ${
                   isSelected
-                    ? 'bg-[#082A4F] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-[#082A4F]'
+                    ? 'bg-[#8B5A36] text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-[#4B2B18]'
                 }`}
               >
                 {p.label}
@@ -142,14 +142,14 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             onClick={() => setShowAdvanced(!showAdvanced)}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center gap-1.5 transition ${
               showAdvanced || activeAdvancedCount > 0
-                ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#082A4F]'
+                ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#4B2B18]'
                 : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
             <span>Filter Detail</span>
             {activeAdvancedCount > 0 && (
-              <span className="w-4 h-4 rounded-full bg-[#082A4F] text-white text-[10px] flex items-center justify-center font-bold">
+              <span className="w-4 h-4 rounded-full bg-[#8B5A36] text-white text-[10px] flex items-center justify-center font-bold">
                 {activeAdvancedCount}
               </span>
             )}
@@ -181,7 +181,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.branchId}
               onChange={(e) => onChange({ ...filters, branchId: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Cabang</option>
               {(branches || []).map((b) => (
@@ -200,7 +200,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.serviceId}
               onChange={(e) => onChange({ ...filters, serviceId: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden truncate"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden truncate"
             >
               <option value="ALL">Semua Layanan</option>
               {(services || []).map((s) => (
@@ -219,7 +219,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.therapistId}
               onChange={(e) => onChange({ ...filters, therapistId: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Terapis</option>
               {(therapists || []).map((t) => (
@@ -238,7 +238,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.areaName}
               onChange={(e) => onChange({ ...filters, areaName: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Wilayah</option>
               {(areas || []).map((a) => (
@@ -257,7 +257,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.paymentMethod}
               onChange={(e) => onChange({ ...filters, paymentMethod: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Metode</option>
               <option value="qris">QRIS Senzu</option>
@@ -276,7 +276,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.bookingStatus}
               onChange={(e) => onChange({ ...filters, bookingStatus: e.target.value })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Status</option>
               <option value="completed">Completed (Selesai)</option>
@@ -296,7 +296,7 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
             <select
               value={filters.customerType}
               onChange={(e) => onChange({ ...filters, customerType: e.target.value as any })}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#082A4F] focus:outline-hidden"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:border-[#8B5A36] focus:outline-hidden"
             >
               <option value="ALL">Semua Customer</option>
               <option value="NEW">Customer Baru</option>
