@@ -88,7 +88,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <button
                 type="button"
                 onClick={this.handleRetry}
-                className="px-4 py-2.5 rounded-xl bg-[#082A4F] text-white hover:bg-[#0A3866] text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-xs"
+                className="px-4 py-2.5 rounded-xl bg-[#8B5A36] text-white hover:bg-[#94603B] text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-xs"
               >
                 <RefreshCw className="w-4 h-4" />
                 <span>Coba Lagi</span>
@@ -127,7 +127,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="w-full py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A3866] text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition shadow-xs"
+              className="w-full py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition shadow-xs"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Muat Ulang Halaman</span>
