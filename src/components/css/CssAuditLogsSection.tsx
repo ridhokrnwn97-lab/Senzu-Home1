@@ -76,7 +76,7 @@ export const CssAuditLogsSection: React.FC = () => {
             onClick={() => setFilterAction('ALL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
               filterAction === 'ALL'
-                ? 'bg-[#082A4F] text-white'
+                ? 'bg-[#8B5A36] text-white'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
@@ -135,7 +135,7 @@ export const CssAuditLogsSection: React.FC = () => {
             placeholder="Cari kode, staf, alasan..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-slate-50/50"
           />
         </div>
       </div>
@@ -158,7 +158,7 @@ export const CssAuditLogsSection: React.FC = () => {
                   <div className="flex items-center gap-2 flex-wrap">
                     {getActionBadge(log.action)}
                     {log.bookingCode && (
-                      <span className="font-mono font-bold text-[#082A4F] bg-slate-100 px-2 py-0.5 rounded">
+                      <span className="font-mono font-bold text-[#4B2B18] bg-slate-100 px-2 py-0.5 rounded">
                         {log.bookingCode}
                       </span>
                     )}
