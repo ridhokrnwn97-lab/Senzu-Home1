@@ -137,7 +137,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
             <Sliders className="w-6 h-6 text-[#D4AF37]" />
@@ -180,7 +180,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
       <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-6 text-xs">
         {/* Section 1: Cabang Default & Waktu */}
         <div className="space-y-4">
-          <h4 className="font-bold text-[#082A4F] text-sm flex items-center gap-2">
+          <h4 className="font-bold text-[#4B2B18] text-sm flex items-center gap-2">
             <Building2 className="w-4 h-4 text-[#D4AF37]" />
             Cabang Default &amp; Zona Waktu Sistem
           </h4>
@@ -194,7 +194,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
                 value={defaultBranchId}
                 onChange={(e) => setDefaultBranchId(e.target.value)}
                 disabled={isReadOnly}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold text-[#082A4F] disabled:bg-slate-100"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold text-[#4B2B18] disabled:bg-slate-100"
               >
                 {(branches || []).map((b) => (
                   <option key={b.id} value={b.id}>
@@ -226,7 +226,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
 
         {/* Section 2: Jam Layanan & Lead Time */}
         <div className="pt-4 border-t border-slate-200 space-y-4">
-          <h4 className="font-bold text-[#082A4F] text-sm flex items-center gap-2">
+          <h4 className="font-bold text-[#4B2B18] text-sm flex items-center gap-2">
             <Clock className="w-4 h-4 text-[#D4AF37]" />
             Jam Operasional &amp; Batas Reservasi
           </h4>
@@ -240,7 +240,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
                 onChange={(e) => setStartTime(e.target.value)}
                 disabled={isReadOnly}
                 placeholder="10:00"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-center text-[#082A4F] disabled:bg-slate-100"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-center text-[#4B2B18] disabled:bg-slate-100"
               />
             </div>
 
@@ -252,7 +252,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
                 onChange={(e) => setEndTime(e.target.value)}
                 disabled={isReadOnly}
                 placeholder="22:00"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-center text-[#082A4F] disabled:bg-slate-100"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-center text-[#4B2B18] disabled:bg-slate-100"
               />
             </div>
 
@@ -296,7 +296,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
 
         {/* Section 3: Kontak Support & Bantuan */}
         <div className="pt-4 border-t border-slate-200 space-y-4">
-          <h4 className="font-bold text-[#082A4F] text-sm flex items-center gap-2">
+          <h4 className="font-bold text-[#4B2B18] text-sm flex items-center gap-2">
             <Phone className="w-4 h-4 text-[#D4AF37]" />
             Kontak Resmi Customer Support &amp; Bantuan
           </h4>
@@ -337,7 +337,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
 
         {/* Section 4: Rekening Pembayaran Resmi (a.n PT KSBONE UNTUK KITA) */}
         <div className="pt-4 border-t border-slate-200 space-y-4">
-          <h4 className="font-bold text-[#082A4F] text-sm flex items-center gap-2">
+          <h4 className="font-bold text-[#4B2B18] text-sm flex items-center gap-2">
             <CreditCard className="w-4 h-4 text-[#D4AF37]" />
             Rekening Pembayaran &amp; QRIS Senzu
           </h4>
@@ -362,7 +362,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
                 value={bankAccount}
                 onChange={(e) => setBankAccount(e.target.value)}
                 disabled={isReadOnly}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#082A4F] disabled:bg-slate-100"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-[#4B2B18] disabled:bg-slate-100"
                 placeholder="021-8899-721"
               />
             </div>
@@ -376,7 +376,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
                 value={bankHolder}
                 onChange={(e) => setBankHolder(e.target.value)}
                 disabled={isReadOnly}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#082A4F] disabled:bg-slate-100"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-[#4B2B18] disabled:bg-slate-100"
                 placeholder="PT KSBONE UNTUK KITA"
               />
             </div>
@@ -400,7 +400,7 @@ export const BusinessSettingsCard: React.FC<BusinessSettingsCardProps> = ({
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-bold flex items-center gap-2 transition disabled:opacity-50 shadow-sm cursor-pointer active:scale-95"
+              className="px-6 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center gap-2 transition disabled:opacity-50 shadow-sm cursor-pointer active:scale-95"
             >
               <Save className="w-4 h-4 text-[#D4AF37]" />
               <span>{saving ? 'Menyimpan...' : 'Simpan Konfigurasi Bisnis'}</span>
