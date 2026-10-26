@@ -372,7 +372,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
       <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full bg-[#082A4F] text-white text-[10px] font-bold uppercase tracking-wider">
+            <span className="px-2.5 py-0.5 rounded-full bg-[#8B5A36] text-white text-[10px] font-bold uppercase tracking-wider">
               SENZU CSS Operations
             </span>
             <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
@@ -380,7 +380,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
               <span>Shift Siaga • Aktif</span>
             </span>
           </div>
-          <h1 className="text-xl sm:text-2xl font-black font-serif text-[#082A4F] tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-black font-serif text-[#4B2B18] tracking-tight">
             Pusat Operasional CSS
           </h1>
           <p className="text-xs text-slate-500">
@@ -391,12 +391,12 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
         <div className="flex items-center gap-3 self-start md:self-auto flex-wrap">
           {/* Live WIB Clock */}
           <div className="bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-2xl flex items-center gap-2.5">
-            <Clock className="w-4 h-4 text-[#082A4F]" />
+            <Clock className="w-4 h-4 text-[#4B2B18]" />
             <div>
               <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
                 {currentDateWIB}
               </div>
-              <div className="font-mono text-sm sm:text-base font-black text-[#082A4F]">
+              <div className="font-mono text-sm sm:text-base font-black text-[#4B2B18]">
                 {currentTimeWIB} <span className="text-[10px] font-normal text-slate-500">WIB</span>
               </div>
             </div>
@@ -421,7 +421,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('workQueue')}
           className={`p-4 rounded-2xl border transition cursor-pointer shadow-sm relative overflow-hidden ${
             activeTab === 'workQueue'
-              ? 'bg-[#082A4F] text-white border-[#082A4F] ring-2 ring-[#082A4F]/20'
+              ? 'bg-[#8B5A36] text-white border-[#8B5A36] ring-2 ring-[#8B5A36]/20'
               : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
           }`}
         >
@@ -451,7 +451,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('today')}
           className={`p-4 rounded-2xl border transition cursor-pointer shadow-sm ${
             activeTab === 'today'
-              ? 'bg-[#082A4F] text-white border-[#082A4F] ring-2 ring-[#082A4F]/20'
+              ? 'bg-[#8B5A36] text-white border-[#8B5A36] ring-2 ring-[#8B5A36]/20'
               : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
           }`}
         >
@@ -552,7 +552,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('workQueue')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'workQueue'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -568,7 +568,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('today')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'today'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -584,7 +584,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('pending_verification')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'pending_verification'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -600,7 +600,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('reconciliation')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'reconciliation'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -613,7 +613,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('customerFollowup')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'customerFollowup'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -629,7 +629,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('cases')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'cases'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -642,7 +642,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('all')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'all'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -658,7 +658,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           onClick={() => setActiveTab('auditLogs')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'auditLogs'
-              ? 'bg-[#082A4F] text-white shadow-sm'
+              ? 'bg-[#8B5A36] text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
@@ -752,7 +752,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                 placeholder="Cari kode, nama, nomor WA, area..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
 
@@ -761,7 +761,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-slate-50 font-medium"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36] bg-slate-50 font-medium"
               >
                 <option value="ALL">Semua Status</option>
                 <option value="Menunggu Pembayaran">Menunggu Pembayaran</option>
@@ -782,7 +782,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-[#082A4F] text-white uppercase text-[11px] font-semibold tracking-wider">
+                <thead className="bg-[#8B5A36] text-white uppercase text-[11px] font-semibold tracking-wider">
                   <tr>
                     <th className="py-3.5 px-4">Kode Booking</th>
                     <th className="py-3.5 px-4">Customer & WA</th>
@@ -809,7 +809,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                         onClick={() => handleOpenDrawer(b)}
                         className="hover:bg-slate-50/80 transition cursor-pointer"
                       >
-                        <td className="py-3.5 px-4 font-mono font-bold text-[#082A4F]">
+                        <td className="py-3.5 px-4 font-mono font-bold text-[#4B2B18]">
                           {b.bookingCode}
                         </td>
 
@@ -827,7 +827,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-[#082A4F]">{b.scheduleDate}</div>
+                          <div className="font-semibold text-[#4B2B18]">{b.scheduleDate}</div>
                           <div className="text-[11px] text-slate-500">{b.scheduleTime} WIB</div>
                         </td>
 
@@ -1004,7 +1004,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
       {isRescheduleOpen && rescheduleBookingTarget && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-[#082A4F] text-white p-5 flex items-center justify-between">
+            <div className="bg-[#8B5A36] text-white p-5 flex items-center justify-between">
               <div>
                 <span className="text-[10px] text-[#D4AF37] font-semibold uppercase">Reschedule Jadwal</span>
                 <h4 className="font-mono text-lg font-bold">{rescheduleBookingTarget.bookingCode}</h4>
@@ -1036,7 +1036,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                   value={newDate}
                   onChange={(e) => setNewDate(e.target.value)}
                   required
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1047,7 +1047,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                   value={newTime}
                   onChange={(e) => setNewTime(e.target.value)}
                   required
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1058,7 +1058,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                   placeholder="Permintaan customer diundur 1 jam..."
                   value={rescheduleNote}
                   onChange={(e) => setRescheduleNote(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36]"
                 />
               </div>
 
@@ -1072,7 +1072,7 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-[#082A4F] hover:bg-[#0A335F] text-white font-bold"
+                  className="px-4 py-2 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold"
                 >
                   Simpan Jadwal Baru
                 </button>
