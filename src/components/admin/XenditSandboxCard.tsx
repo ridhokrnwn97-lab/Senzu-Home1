@@ -7,7 +7,7 @@ import { normalizeXenditBookingPreview, type XenditBookingPreviewInput } from '.
 import { closeReviewedXenditTestAttempt, createXenditTestSession, getLatestXenditTestSession, getXenditTestStatus, readXenditTestSession,
   safeXenditTestLink, type XenditTestSession, type XenditTestStatus } from '../../lib/xenditSandboxService';
 
-const button = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-[#082A4F] hover:bg-slate-50 disabled:opacity-50';
+const button = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-[#4B2B18] hover:bg-slate-50 disabled:opacity-50';
 const labels: Record<string, string> = { ACTIVE: 'Menunggu simulasi pembayaran', COMPLETED: 'Sesi Test selesai',
   EXPIRED: 'Sesi Test kedaluwarsa', CANCELED: 'Sesi Test dibatalkan', creating: 'Sedang dibuat',
   uncertain: 'Hasil pembuatan belum pasti', rejected: 'Permintaan ditolak Xendit',
@@ -100,8 +100,8 @@ export function XenditSandboxCard({ currentUser, bookingPreview }: {
   const recoverable = session && !session.sessionId && ['creating', 'uncertain'].includes(session.creationState);
   return <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby={headingId}>
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 p-5 sm:p-6">
-      <div className="flex items-center gap-3"><CreditCard className="h-6 w-6 text-[#082A4F]" /><div>
-        <h3 id={headingId} className="font-serif text-lg font-bold text-[#082A4F]">{bookingCheckout ? 'Xendit — Uji Checkout Booking' : 'Xendit — Mode Tes'}</h3>
+      <div className="flex items-center gap-3"><CreditCard className="h-6 w-6 text-[#4B2B18]" /><div>
+        <h3 id={headingId} className="font-serif text-lg font-bold text-[#4B2B18]">{bookingCheckout ? 'Xendit — Uji Checkout Booking' : 'Xendit — Mode Tes'}</h3>
         <p className="mt-1 text-xs text-slate-500">Uji koneksi pembayaran sebelum aktivasi pelanggan.</p>
       </div></div>
       <button type="button" className={button} disabled={busy} onClick={() => act('load')}><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Muat Ulang</button>
