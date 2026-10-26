@@ -196,9 +196,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <>
-    <header className="sticky top-0 z-40 bg-[#082A4F]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all">
+    <header className="sticky top-0 z-40 bg-[#5B351F]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all">
       {/* Top Banner / Announcement - Hidden on mobile to save vertical viewport */}
-      <div className="hidden sm:flex bg-[#051C34] text-[11px] sm:text-xs py-1 px-3 sm:px-4 text-center border-b border-white/5 text-slate-300 items-center justify-center gap-1.5 sm:gap-2">
+      <div className="hidden sm:flex bg-[#3D2315] text-[11px] sm:text-xs py-1 px-3 sm:px-4 text-center border-b border-white/5 text-slate-300 items-center justify-center gap-1.5 sm:gap-2">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <span className="truncate">Home Service Senzu Reflexology & Massage Palembang</span>
         <span className="hidden md:inline text-[#D4AF37] font-medium">• Hadirkan Home Massage & Refleksi di Rumah Anda</span>
@@ -243,7 +243,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Bell className="w-4 h-4 text-[#D4AF37]" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-sm border border-[#082A4F] animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-sm border border-[#5B351F] animate-pulse">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -292,7 +292,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       aria-labelledby="btn-mobile-staff-account"
                     >
                       {/* Current Staff Info */}
-                      <div className="p-3.5 bg-gradient-to-br from-[#082A4F] to-[#0D3B66] text-white border-b border-[#D4AF37]/30">
+                      <div className="p-3.5 bg-gradient-to-br from-[#5B351F] to-[#70442A] text-white border-b border-[#D4AF37]/30">
                         <p id="mobile-staff-name" className="font-bold text-xs text-white truncate leading-tight">
                           {currentUser.name || 'Staff Senzu'}
                         </p>
@@ -362,7 +362,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-label="Akun Pelanggan"
                 title={`Akun: ${currentCustomer.displayName || currentCustomer.name}`}
               >
-                <div className="w-5 h-5 rounded-full bg-[#D4AF37] text-[#082A4F] flex items-center justify-center text-[10px] font-extrabold">
+                <div className="w-5 h-5 rounded-full bg-[#D4AF37] text-[#4B2B18] flex items-center justify-center text-[10px] font-extrabold">
                   {(currentCustomer.displayName || currentCustomer.name || 'M').charAt(0).toUpperCase()}
                 </div>
                 <span className="text-[11px] truncate max-w-[70px]">
@@ -460,7 +460,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 {isCustomerAuthenticated && currentCustomer ? (
                   <>
-                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#D4AF37] to-[#B89628] text-[#082A4F] flex items-center justify-center font-bold text-[10px]">
+                    <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#D4AF37] to-[#B89628] text-[#4B2B18] flex items-center justify-center font-bold text-[10px]">
                       {(currentCustomer.displayName || currentCustomer.name || 'M').charAt(0).toUpperCase()}
                     </div>
                     <span>{currentCustomer.nickname || currentCustomer.displayName || 'Akun Saya'}</span>
@@ -485,7 +485,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-[#D4AF37]" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-extrabold text-white shadow-md border-2 border-[#082A4F] animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-extrabold text-white shadow-md border-2 border-[#5B351F] animate-pulse">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -526,7 +526,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 id="btn-nav-login"
                 type="button"
                 onClick={onOpenLogin}
-                className="flex items-center justify-center gap-1.5 px-3 md:px-4 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#082A4F]"
+                className="flex items-center justify-center gap-1.5 px-3 md:px-4 min-h-[40px] md:min-h-[44px] text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18] shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5B351F]"
               >
                 <UserCheck className="w-4 h-4 shrink-0" />
                 <span>Staff Login</span>
