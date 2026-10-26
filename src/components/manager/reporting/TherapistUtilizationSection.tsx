@@ -22,7 +22,7 @@ export const TherapistUtilizationSection: React.FC<TherapistUtilizationSectionPr
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div>
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
             <Activity className="w-4 h-4 text-[#B89628]" />
             Kapasitas &amp; Utilisasi Kerja Terapis
           </h3>
@@ -65,7 +65,7 @@ export const TherapistUtilizationSection: React.FC<TherapistUtilizationSectionPr
                   className="hover:bg-slate-50/80 transition cursor-pointer group"
                 >
                   <td className="py-2.5 px-3">
-                    <div className="font-bold text-[#082A4F] flex items-center gap-2">
+                    <div className="font-bold text-[#4B2B18] flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center font-mono text-[10px]">
                         {idx + 1}
                       </div>
@@ -88,7 +88,7 @@ export const TherapistUtilizationSection: React.FC<TherapistUtilizationSectionPr
                       </span>
                     )}
                   </td>
-                  <td className="py-2.5 px-3 text-right text-[#082A4F] font-bold">
+                  <td className="py-2.5 px-3 text-right text-[#4B2B18] font-bold">
                     {t.jobsCompleted}
                   </td>
                   <td className="py-2.5 px-3 text-right text-slate-600 font-mono">
@@ -156,7 +156,7 @@ export const TherapistUtilizationSection: React.FC<TherapistUtilizationSectionPr
                   <td className="py-2.5 px-3 text-center">
                     <button
                       type="button"
-                      className="p-1 rounded text-slate-400 group-hover:text-[#082A4F] group-hover:bg-slate-100 transition"
+                      className="p-1 rounded text-slate-400 group-hover:text-[#4B2B18] group-hover:bg-slate-100 transition"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
