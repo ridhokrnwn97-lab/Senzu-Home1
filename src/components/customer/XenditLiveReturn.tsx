@@ -34,7 +34,7 @@ export function XenditLiveReturn() {
   if (!open) return null;
   return <div role="dialog" aria-modal="true" aria-label="Hasil pembayaran" className="fixed inset-0 z-[90] overflow-y-auto bg-slate-900/70 p-4">
     <div className="mx-auto my-8 max-w-2xl space-y-3 rounded-3xl bg-white p-4">
-      <div className="flex justify-end"><button type="button" onClick={close} className="min-h-[44px] px-4 font-semibold text-[#082A4F]">Tutup</button></div>
+      <div className="flex justify-end"><button type="button" onClick={close} className="min-h-[44px] px-4 font-semibold text-[#4B2B18]">Tutup</button></div>
       {booking ? <XenditLivePaymentPage booking={booking} /> : <p role="status" className="p-6 text-slate-700">{message}</p>}
     </div>
   </div>;
