@@ -509,12 +509,12 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-md bg-[#082A4F] text-[#D4AF37] font-mono text-[10px] font-bold uppercase tracking-wider">
+              <span className="px-2.5 py-0.5 rounded-md bg-[#8B5A36] text-[#D4AF37] font-mono text-[10px] font-bold uppercase tracking-wider">
                 ROSTER OPERASIONAL
               </span>
               <span className="text-xs text-slate-500 font-medium">Kota Palembang</span>
             </div>
-            <h2 className="text-lg sm:text-xl font-bold font-serif text-[#082A4F] mt-1 flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl font-bold font-serif text-[#4B2B18] mt-1 flex items-center gap-2">
               <Calendar className="w-5 h-5 text-[#D4AF37]" />
               <span>Jadwal & Ketersediaan Armada Terapis</span>
             </h2>
@@ -531,7 +531,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                 onClick={() => handleSelectQuickTab('today')}
                 className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                   activeTab === 'today'
-                    ? 'bg-[#082A4F] text-white shadow-xs'
+                    ? 'bg-[#8B5A36] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -542,7 +542,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                 onClick={() => handleSelectQuickTab('tomorrow')}
                 className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                   activeTab === 'tomorrow'
-                    ? 'bg-[#082A4F] text-white shadow-xs'
+                    ? 'bg-[#8B5A36] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -564,7 +564,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                 type="date"
                 value={selectedDate}
                 onChange={(e) => handleCustomDateChange(e.target.value)}
-                className="text-xs font-mono font-bold text-[#082A4F] bg-transparent border-0 focus:ring-0 p-0 cursor-pointer"
+                className="text-xs font-mono font-bold text-[#4B2B18] bg-transparent border-0 focus:ring-0 p-0 cursor-pointer"
               />
               <button
                 type="button"
@@ -612,7 +612,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                     <button
                       type="button"
                       onClick={() => onOpenAssignModal(c.booking)}
-                      className="px-2 py-1 rounded bg-[#082A4F] text-white text-[10px] font-bold hover:bg-[#0E3D73] transition cursor-pointer whitespace-nowrap"
+                      className="px-2 py-1 rounded bg-[#8B5A36] text-white text-[10px] font-bold hover:bg-[#94603B] transition cursor-pointer whitespace-nowrap"
                     >
                       Alihkan
                     </button>
@@ -627,7 +627,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
           <div className="bg-[#FAF9F6] border border-slate-200 p-3 rounded-xl">
             <span className="text-[10px] text-slate-500 block font-semibold uppercase">Total Armada</span>
-            <strong className="text-lg text-[#082A4F] font-mono">{capacitySummary.total}</strong>
+            <strong className="text-lg text-[#4B2B18] font-mono">{capacitySummary.total}</strong>
             <span className="text-[10px] text-slate-400 block">Terapis Terdaftar</span>
           </div>
 
@@ -649,9 +649,9 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
             <span className="text-[10px] text-slate-500 block">Tidak Bertugas</span>
           </div>
 
-          <div className="bg-[#082A4F]/5 border border-[#082A4F]/20 p-3 rounded-xl">
-            <span className="text-[10px] text-[#082A4F] block font-semibold uppercase">Order Hari Ini</span>
-            <strong className="text-lg text-[#082A4F] font-mono">{sameDayBookings.length}</strong>
+          <div className="bg-[#8B5A36]/5 border border-[#8B5A36]/20 p-3 rounded-xl">
+            <span className="text-[10px] text-[#4B2B18] block font-semibold uppercase">Order Hari Ini</span>
+            <strong className="text-lg text-[#4B2B18] font-mono">{sameDayBookings.length}</strong>
             <span className="text-[10px] text-slate-500 block">Sesi Terjadwal</span>
           </div>
 
@@ -674,7 +674,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
             onClick={() => setSubView('master_table')}
             className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer ${
               subView === 'master_table'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -686,7 +686,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
             onClick={() => setSubView('timeline')}
             className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer ${
               subView === 'timeline'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -703,7 +703,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
               setTemplatesBulkMode('bulk_apply');
               setIsTemplatesBulkModalOpen(true);
             }}
-            className="px-3 py-1.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+            className="px-3 py-1.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
             title="Terapkan jadwal / shift ke beberapa terapis sekaligus"
           >
             <Users className="w-3.5 h-3.5 text-[#D4AF37]" />
@@ -732,7 +732,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
             className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
             title="Salin jadwal terapis ke tanggal lain"
           >
-            <Copy className="w-3.5 h-3.5 text-[#082A4F]" />
+            <Copy className="w-3.5 h-3.5 text-[#4B2B18]" />
             <span>Salin Jadwal</span>
           </button>
         </div>
@@ -786,7 +786,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 min-w-[760px]">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-[#D4AF37]" />
-            <h3 className="text-sm font-bold font-serif text-[#082A4F]">
+            <h3 className="text-sm font-bold font-serif text-[#4B2B18]">
               Timeline Operasional Harian (10:00 - 22:00 WIB)
             </h3>
           </div>
@@ -794,7 +794,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
           {/* Color Legend */}
           <div className="flex items-center gap-3 text-[11px] text-slate-600 font-medium">
             <div className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded bg-[#082A4F]"></span>
+              <span className="w-3 h-3 rounded bg-[#8B5A36]"></span>
               <span>Order Treatment</span>
             </div>
             <div className="flex items-center gap-1">
@@ -878,7 +878,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                     <button
                       type="button"
                       onClick={() => handleOpenShiftDrawer(th)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-[#082A4F] hover:bg-slate-100 transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-[#4B2B18] hover:bg-slate-100 transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
                       title="Kelola Shift & Skill"
                     >
                       <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -971,7 +971,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                               <div
                                 style={{ left: bookingPos.left, width: bookingPos.width }}
                                 onClick={() => onSelectBooking && onSelectBooking(b)}
-                                className="absolute top-0.5 bottom-0.5 bg-[#082A4F] text-[#D4AF37] hover:bg-[#0E3D73] rounded-md px-1.5 py-0.5 flex items-center justify-between text-[9px] font-bold cursor-pointer z-10 shadow-xs transition truncate"
+                                className="absolute top-0.5 bottom-0.5 bg-[#8B5A36] text-[#D4AF37] hover:bg-[#94603B] rounded-md px-1.5 py-0.5 flex items-center justify-between text-[9px] font-bold cursor-pointer z-10 shadow-xs transition truncate"
                                 title={`Order ${b.bookingCode}: ${b.customerName} (${b.scheduleTime} WIB, ${duration}m, ${b.area})`}
                               >
                                 <span className="truncate font-mono">{b.bookingCode}</span>
@@ -1005,7 +1005,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex justify-end">
           <div className="bg-white w-full max-w-lg h-full shadow-2xl flex flex-col justify-between overflow-y-auto animate-slide-left">
             {/* Drawer Header */}
-            <div className="p-5 bg-[#082A4F] text-white flex items-center justify-between">
+            <div className="p-5 bg-[#8B5A36] text-white flex items-center justify-between">
               <div>
                 <span className="text-[10px] text-[#D4AF37] font-mono font-bold uppercase tracking-wider">
                   MANAJEMEN SHIFT & ROSTER
@@ -1040,7 +1040,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                       onClick={() => setDrawerRoster({ ...drawerRoster, status: st })}
                       className={`p-2 rounded-xl border text-center font-bold capitalize transition cursor-pointer ${
                         drawerRoster.status === st
-                          ? 'bg-[#082A4F] text-white border-[#082A4F] shadow-xs'
+                          ? 'bg-[#8B5A36] text-white border-[#8B5A36] shadow-xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
@@ -1192,7 +1192,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                     <button
                       type="button"
                       onClick={handleAddBreak}
-                      className="px-3 py-1.5 bg-[#082A4F] text-white rounded-lg text-xs font-bold hover:bg-[#0E3D73] transition cursor-pointer flex items-center gap-1"
+                      className="px-3 py-1.5 bg-[#8B5A36] text-white rounded-lg text-xs font-bold hover:bg-[#94603B] transition cursor-pointer flex items-center gap-1"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Tambah</span>
@@ -1227,7 +1227,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => handleToggleSkill(srv.id)}
-                            className="w-4 h-4 rounded text-[#082A4F] accent-[#082A4F]"
+                            className="w-4 h-4 rounded text-[#4B2B18] accent-[#8B5A36]"
                           />
                           <span>{srv.name}</span>
                         </div>
@@ -1287,7 +1287,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
                 type="button"
                 onClick={handleSaveDrawer}
                 disabled={isSavingDrawer}
-                className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
                 <span>{isSavingDrawer ? 'Menyimpan Perubahan...' : 'Simpan Shift & Roster'}</span>
