@@ -98,7 +98,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
-        <div className="bg-[#082A4F] text-white p-6 border-b border-[#D4AF37]/30 relative">
+        <div className="bg-[#8B5A36] text-white p-6 border-b border-[#D4AF37]/30 relative">
           <button
             type="button"
             onClick={onClose}
@@ -148,7 +148,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">Peran (Role)</span>
-                <span className="font-semibold uppercase text-[#082A4F]">{staff.role}</span>
+                <span className="font-semibold uppercase text-[#4B2B18]">{staff.role}</span>
               </div>
               <div className="col-span-2">
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">Email Login</span>
@@ -170,7 +170,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
               <label
                 className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start gap-3 ${
                   mode === 'INVITE_LINK'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-1 ring-[#082A4F]'
+                    ? 'border-[#8B5A36] bg-[#8B5A36]/5 ring-1 ring-[#8B5A36]'
                     : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -179,7 +179,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
                   name="provisionMode"
                   checked={mode === 'INVITE_LINK'}
                   onChange={() => setMode('INVITE_LINK')}
-                  className="mt-1 text-[#082A4F]"
+                  className="mt-1 text-[#4B2B18]"
                 />
                 <div className="text-xs">
                   <div className="font-bold text-slate-800 flex items-center gap-1.5">
@@ -198,7 +198,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
               <label
                 className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start gap-3 ${
                   mode === 'TEMP_PASSWORD'
-                    ? 'border-[#082A4F] bg-[#082A4F]/5 ring-1 ring-[#082A4F]'
+                    ? 'border-[#8B5A36] bg-[#8B5A36]/5 ring-1 ring-[#8B5A36]'
                     : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -207,7 +207,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
                   name="provisionMode"
                   checked={mode === 'TEMP_PASSWORD'}
                   onChange={() => setMode('TEMP_PASSWORD')}
-                  className="mt-1 text-[#082A4F]"
+                  className="mt-1 text-[#4B2B18]"
                 />
                 <div className="text-xs">
                   <div className="font-bold text-slate-800">
@@ -231,7 +231,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
                 <button
                   type="button"
                   onClick={handleGenerateRandom}
-                  className="text-[11px] font-bold text-[#082A4F] hover:underline cursor-pointer flex items-center gap-1"
+                  className="text-[11px] font-bold text-[#4B2B18] hover:underline cursor-pointer flex items-center gap-1"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
                   <span>Generate Acak Aman</span>
@@ -245,7 +245,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
                   value={tempPassword}
                   onChange={(e) => setTempPassword(e.target.value)}
                   placeholder="Min. 12 karakter, huruf besar, kecil, angka, simbol"
-                  className="w-full pl-10 pr-10 py-2 rounded-xl border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#082A4F]"
+                  className="w-full pl-10 pr-10 py-2 rounded-xl border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#8B5A36]"
                 />
                 <button
                   type="button"
@@ -278,7 +278,7 @@ export const ProvisionAccountModal: React.FC<ProvisionAccountModalProps> = ({
             <button
               type="submit"
               disabled={loading || !hasEmail || (mode === 'TEMP_PASSWORD' && !validation.isValid)}
-              className="px-6 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center gap-2 cursor-pointer transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <UserCheck className="w-4 h-4" />
               <span>{loading ? 'Memproses Akun...' : 'Aktifkan Akun Login'}</span>
