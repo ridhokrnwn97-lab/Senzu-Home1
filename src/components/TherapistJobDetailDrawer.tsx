@@ -96,7 +96,7 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
         {/* Drawer Sticky Top Header */}
         <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-5 py-4 flex items-center justify-between z-10">
           <div>
-            <span className="text-[10px] uppercase font-bold tracking-widest text-[#082A4F] block">
+            <span className="text-[10px] uppercase font-bold tracking-widest text-[#4B2B18] block">
               Detail Tugas Pesanan
             </span>
             <div className="flex items-center gap-2 mt-0.5">
@@ -203,14 +203,14 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
           <div className="bg-[#FAF9F6] p-4 rounded-2xl border border-slate-200 space-y-2.5">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="font-bold text-[#082A4F] text-base leading-tight">
+                <h3 className="font-bold text-[#4B2B18] text-base leading-tight">
                   {booking.serviceName}
                 </h3>
                 <div className="flex items-center gap-2 mt-1.5 text-slate-600 text-xs font-medium">
                   <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
                   <span>{booking.serviceDuration} Menit Durasi</span>
                   <span>•</span>
-                  <Calendar className="w-3.5 h-3.5 text-[#082A4F]" />
+                  <Calendar className="w-3.5 h-3.5 text-[#4B2B18]" />
                   <span>
                     {booking.scheduleDate}, {booking.scheduleTime} WIB
                   </span>
@@ -223,7 +223,7 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
           <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3 shadow-2xs">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-[#082A4F]/10 flex items-center justify-center text-[#082A4F] font-bold text-sm">
+                <div className="w-9 h-9 rounded-full bg-[#8B5A36]/10 flex items-center justify-center text-[#4B2B18] font-bold text-sm">
                   {safeCustomerName.charAt(0)}
                 </div>
                 <div>
@@ -297,7 +297,7 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
                   href={getMapsUrl(booking)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 text-xs font-bold text-[#082A4F] bg-white border-2 border-[#082A4F]/20 hover:border-[#082A4F] px-4 py-2.5 rounded-xl transition shadow-2xs active:scale-95 cursor-pointer"
+                  className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 text-xs font-bold text-[#4B2B18] bg-white border-2 border-[#8B5A36]/20 hover:border-[#8B5A36] px-4 py-2.5 rounded-xl transition shadow-2xs active:scale-95 cursor-pointer"
                 >
                   <Navigation className="w-4 h-4 text-[#D4AF37]" />
                   <span>Buka Google Maps</span>
@@ -357,7 +357,7 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
                 )}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-[#082A4F] hover:text-[#0E3D73] font-bold min-h-[44px] px-2 cursor-pointer"
+                className="inline-flex items-center gap-1.5 text-[#4B2B18] hover:text-[#633C24] font-bold min-h-[44px] px-2 cursor-pointer"
               >
                 <HelpCircle className="w-4 h-4 text-[#D4AF37]" />
                 <span>Hubungi CS / SPV</span>
@@ -433,7 +433,7 @@ export const TherapistJobDetailDrawer: React.FC<TherapistJobDetailDrawerProps> =
               type="button"
               disabled={isUpdating}
               onClick={() => onConfirmStartTreatment?.(booking)}
-              className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#082A4F] hover:bg-[#0E3D73] active:bg-[#061d36] text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition active:scale-98 shadow-lg shadow-[#082A4F]/30 cursor-pointer disabled:opacity-50"
+              className="w-full min-h-[56px] py-4 px-6 rounded-2xl bg-[#8B5A36] hover:bg-[#94603B] active:bg-[#3D2315] text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition active:scale-98 shadow-lg shadow-[#8B5A36]/30 cursor-pointer disabled:opacity-50"
             >
               <Clock className="w-5 h-5 text-[#D4AF37]" />
               <span>MULAI TREATMENT</span>
