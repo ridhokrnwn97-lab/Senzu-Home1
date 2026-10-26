@@ -251,14 +251,14 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
       {/* Address Input & Places Autocomplete */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="block text-xs font-semibold text-[#082A4F] uppercase tracking-wider">
+          <label className="block text-xs font-semibold text-[#4B2B18] uppercase tracking-wider">
             Alamat Lengkap & Titik Peta Google Maps <span className="text-red-500">*</span>
           </label>
           <button
             type="button"
             onClick={handleDetectCurrentLocation}
             disabled={isLocating}
-            className="text-[11px] font-medium text-[#082A4F] hover:text-[#B89628] flex items-center gap-1 transition-colors px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200"
+            className="text-[11px] font-medium text-[#4B2B18] hover:text-[#B89628] flex items-center gap-1 transition-colors px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200"
           >
             <Crosshair className={`w-3 h-3 ${isLocating ? 'animate-spin text-[#B89628]' : ''}`} />
             <span>{isLocating ? 'Mendeteksi...' : 'Pakai GPS Saya'}</span>
@@ -288,7 +288,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
               value={address ?? ''}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="Ketik nama jalan, perumahan, atau gedung di Palembang..."
-              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 transition-all shadow-sm"
+              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36] text-slate-800 transition-all shadow-sm"
             />
           </div>
         )}
@@ -310,7 +310,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
               key={i}
               type="button"
               onClick={() => handleShortcutClick(sc)}
-              className="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200/80 text-slate-700 hover:text-[#082A4F] transition-all"
+              className="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200/80 text-slate-700 hover:text-[#4B2B18] transition-all"
             >
               {sc.name.split(' (')[0]}
             </button>
@@ -320,14 +320,14 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
 
       {/* Kecamatan / Area Selection */}
       <div>
-        <label className="block text-xs font-semibold text-[#082A4F] uppercase tracking-wider mb-1.5">
+        <label className="block text-xs font-semibold text-[#4B2B18] uppercase tracking-wider mb-1.5">
           Wilayah / Kecamatan Palembang <span className="text-red-500">*</span>
         </label>
         <div className="relative">
           <select
             value={area || PALEMBANG_AREAS[0]}
             onChange={(e) => setArea(e.target.value)}
-            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 shadow-sm appearance-none cursor-pointer"
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36] text-slate-800 shadow-sm appearance-none cursor-pointer"
           >
             {PALEMBANG_AREAS.map((ar) => (
               <option key={ar} value={ar}>
@@ -344,7 +344,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
       {/* Interactive Map View with AdvancedMarker & Dragging */}
       <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-50">
         <div className="p-3 bg-white border-b border-slate-100 flex items-center justify-between text-xs text-slate-600">
-          <div className="flex items-center gap-1.5 font-medium text-[#082A4F]">
+          <div className="flex items-center gap-1.5 font-medium text-[#4B2B18]">
             <Move className="w-3.5 h-3.5 text-[#B89628]" />
             <span>Geser pin atau klik peta untuk presisi lokasi</span>
           </div>
@@ -390,7 +390,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
 
       {/* Patokan / Catatan Alamat (addressNotes) */}
       <div>
-        <label className="block text-xs font-semibold text-[#082A4F] uppercase tracking-wider mb-1.5">
+        <label className="block text-xs font-semibold text-[#4B2B18] uppercase tracking-wider mb-1.5">
           Patokan Alamat / Landmark Kedatangan <span className="text-slate-400 font-normal">(Sangat Disarankan)</span>
         </label>
         <input
@@ -398,7 +398,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
           value={addressNotes ?? ''}
           onChange={(e) => setAddressNotes(e.target.value)}
           placeholder="Contoh: Seberang Indomaret, rumah pagar hitam no. 12, ada pohon mangga"
-          className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 placeholder:text-slate-400 shadow-sm"
+          className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36] text-slate-800 placeholder:text-slate-400 shadow-sm"
         />
         <p className="text-[11px] text-slate-600 mt-1">
           Membantu terapis menemukan lokasi Anda dengan cepat dan tepat waktu.
@@ -411,7 +411,7 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
           <div className="flex items-center gap-2.5">
             <Loader2 className="w-4 h-4 text-[#B89628] animate-spin shrink-0" />
             <div>
-              <span className="text-xs font-semibold text-[#082A4F] block">
+              <span className="text-xs font-semibold text-[#4B2B18] block">
                 Menghitung rute berkendara dari Senzu Base...
               </span>
               <span className="text-[11px] text-slate-500">
@@ -434,10 +434,10 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
       ) : (
         <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-amber-50/40 border border-[#D4AF37]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-0.5">
-            <span className="text-xs font-semibold text-[#082A4F] uppercase tracking-wider block">
+            <span className="text-xs font-semibold text-[#4B2B18] uppercase tracking-wider block">
               Jarak dari Senzu Base
             </span>
-            <div className="text-lg font-bold text-[#082A4F]">
+            <div className="text-lg font-bold text-[#4B2B18]">
               {formatDistanceDisplay(distanceKm)}
             </div>
             <p className="text-[11px] text-slate-500">
@@ -446,10 +446,10 @@ export const AddressAutocompleteMap: React.FC<AddressAutocompleteMapProps> = ({
           </div>
 
           <div className="text-left sm:text-right space-y-0.5">
-            <span className="text-xs font-semibold text-[#082A4F] uppercase tracking-wider block">
+            <span className="text-xs font-semibold text-[#4B2B18] uppercase tracking-wider block">
               Biaya Home Service
             </span>
-            <div className={`text-lg font-bold ${feeCalc.isFree ? 'text-emerald-700 font-bold' : 'text-[#082A4F]'}`}>
+            <div className={`text-lg font-bold ${feeCalc.isFree ? 'text-emerald-700 font-bold' : 'text-[#4B2B18]'}`}>
               {feeCalc.isFree ? 'GRATIS' : formatRupiah(feeCalc.fee)}
             </div>
             {!feeCalc.isFree && (
@@ -915,7 +915,7 @@ const AutocompleteGoogleInput: React.FC<AutocompleteGoogleInputProps> = ({
           }}
           onKeyDown={handleKeyDown}
           placeholder="Ketik nama jalan, perumahan, atau gedung di Palembang..."
-          className="w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F] text-slate-800 transition-all shadow-sm placeholder:text-slate-400"
+          className="w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36] text-slate-800 transition-all shadow-sm placeholder:text-slate-400"
         />
 
         <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center gap-1.5">
@@ -984,10 +984,10 @@ const AutocompleteGoogleInput: React.FC<AutocompleteGoogleInputProps> = ({
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
                 className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors ${
-                  isSelected ? 'bg-slate-100/90 text-[#082A4F]' : 'hover:bg-slate-50 text-slate-700'
+                  isSelected ? 'bg-slate-100/90 text-[#4B2B18]' : 'hover:bg-slate-50 text-slate-700'
                 }`}
               >
-                <div className="mt-0.5 p-1.5 rounded-lg bg-[#082A4F]/5 text-[#B89628] flex-shrink-0">
+                <div className="mt-0.5 p-1.5 rounded-lg bg-[#8B5A36]/5 text-[#B89628] flex-shrink-0">
                   <MapPin className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1117,10 +1117,10 @@ const InteractiveGoogleMap: React.FC<{
         title="Lokasi Anda (Geser untuk menyesuaikan)"
       >
         <div className="relative flex flex-col items-center justify-center -translate-y-8 cursor-grab active:cursor-grabbing group select-none">
-          <div className="w-9 h-9 rounded-full bg-[#082A4F] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-white transition-transform group-hover:scale-110">
+          <div className="w-9 h-9 rounded-full bg-[#8B5A36] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-white transition-transform group-hover:scale-110">
             <MapPin className="w-5 h-5 text-[#D4AF37]" />
           </div>
-          <div className="w-2.5 h-2.5 bg-[#082A4F] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1 shadow-xs" />
+          <div className="w-2.5 h-2.5 bg-[#8B5A36] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1 shadow-xs" />
           <div className="mt-1 px-2 py-0.5 rounded bg-slate-900/90 text-[#D4AF37] text-[10px] font-bold whitespace-nowrap shadow-md pointer-events-none">
             Titik Anda
           </div>
@@ -1133,11 +1133,11 @@ const InteractiveGoogleMap: React.FC<{
         title={baseLocation.name}
       >
         <div className="relative flex flex-col items-center justify-center -translate-y-8 pointer-events-none select-none">
-          <div className="w-8 h-8 rounded-full bg-[#D4AF37] border-2 border-[#082A4F] shadow-md flex items-center justify-center text-[#082A4F]">
+          <div className="w-8 h-8 rounded-full bg-[#D4AF37] border-2 border-[#8B5A36] shadow-md flex items-center justify-center text-[#4B2B18]">
             <Compass className="w-4 h-4" />
           </div>
-          <div className="w-2 h-2 bg-[#D4AF37] border-r-2 border-b-2 border-[#082A4F] rotate-45 -mt-1" />
-          <div className="mt-0.5 px-1.5 py-0.5 rounded bg-[#082A4F] text-[#D4AF37] text-[9px] font-bold whitespace-nowrap shadow-xs">
+          <div className="w-2 h-2 bg-[#D4AF37] border-r-2 border-b-2 border-[#8B5A36] rotate-45 -mt-1" />
+          <div className="mt-0.5 px-1.5 py-0.5 rounded bg-[#8B5A36] text-[#D4AF37] text-[9px] font-bold whitespace-nowrap shadow-xs">
             Hub Senzu
           </div>
         </div>
@@ -1229,10 +1229,10 @@ const FallbackSimulatedMap: React.FC<{
         style={{ left: `${basePos.x}%`, top: `${basePos.y}%` }}
       >
         <div className="flex flex-col items-center">
-          <div className="w-6 h-6 rounded-full bg-[#D4AF37] border-2 border-white shadow-md flex items-center justify-center text-[#082A4F] text-[10px] font-bold">
+          <div className="w-6 h-6 rounded-full bg-[#D4AF37] border-2 border-white shadow-md flex items-center justify-center text-[#4B2B18] text-[10px] font-bold">
             S
           </div>
-          <span className="bg-[#082A4F] text-white text-[9px] px-1.5 py-0.5 rounded shadow whitespace-nowrap mt-0.5">
+          <span className="bg-[#8B5A36] text-white text-[9px] px-1.5 py-0.5 rounded shadow whitespace-nowrap mt-0.5">
             Senzu Base
           </span>
         </div>
@@ -1244,11 +1244,11 @@ const FallbackSimulatedMap: React.FC<{
         style={{ left: `${custPos.x}%`, top: `${custPos.y}%` }}
       >
         <div className="flex flex-col items-center animate-bounce">
-          <div className="w-8 h-8 rounded-full bg-[#082A4F] border-2 border-[#D4AF37] shadow-xl flex items-center justify-center text-[#D4AF37]">
+          <div className="w-8 h-8 rounded-full bg-[#8B5A36] border-2 border-[#D4AF37] shadow-xl flex items-center justify-center text-[#D4AF37]">
             <MapPin className="w-4 h-4 fill-current" />
           </div>
           <div className="w-2 h-1 rounded-full bg-black/30 mt-0.5"></div>
-          <span className="bg-[#082A4F] text-[#D4AF37] font-semibold text-[9px] px-2 py-0.5 rounded-full shadow border border-[#D4AF37]/50 whitespace-nowrap mt-0.5">
+          <span className="bg-[#8B5A36] text-[#D4AF37] font-semibold text-[9px] px-2 py-0.5 rounded-full shadow border border-[#D4AF37]/50 whitespace-nowrap mt-0.5">
             Titik Anda
           </span>
         </div>
