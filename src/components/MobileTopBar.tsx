@@ -23,7 +23,7 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
   const { currentUser } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 bg-[#082A4F]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all pt-safe">
+    <header className="sticky top-0 z-40 bg-[#8B5A36]/95 text-white shadow-md border-b border-[#D4AF37]/30 backdrop-blur-md transition-all pt-safe">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-2">
           {/* Logo & Area Selector */}
@@ -69,7 +69,7 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
             >
               <Bell className="w-4 h-4 text-[#D4AF37]" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-md border border-[#082A4F] animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[9px] font-extrabold text-white shadow-md border border-[#8B5A36] animate-pulse">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -92,11 +92,11 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('account')}
-                className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] shadow-sm transition active:scale-95 cursor-pointer"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18] shadow-sm transition active:scale-95 cursor-pointer"
                 aria-label="Akun & Profil Saya"
                 title="Akun Saya"
               >
-                <User className="w-4 h-4 text-[#082A4F]" />
+                <User className="w-4 h-4 text-[#4B2B18]" />
               </button>
             )}
           </div>
