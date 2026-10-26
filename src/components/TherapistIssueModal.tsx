@@ -116,7 +116,7 @@ export const TherapistIssueModal: React.FC<TherapistIssueModalProps> = ({
               <AlertCircle className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-serif font-bold text-base text-[#082A4F]">Laporkan Kendala</h3>
+              <h3 className="font-serif font-bold text-base text-[#4B2B18]">Laporkan Kendala</h3>
               <p className="text-[11px] text-slate-500 font-mono">{booking.bookingCode} • {booking.customerName}</p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export const TherapistIssueModal: React.FC<TherapistIssueModalProps> = ({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-[#082A4F] focus:border-transparent outline-none"
+              className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent outline-none"
             >
               {ISSUE_CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
@@ -158,7 +158,7 @@ export const TherapistIssueModal: React.FC<TherapistIssueModalProps> = ({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Jelaskan secara singkat kendala yang terjadi..."
-              className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#082A4F] focus:border-transparent outline-none resize-none"
+              className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent outline-none resize-none"
               required
             />
           </div>
@@ -203,7 +203,7 @@ export const TherapistIssueModal: React.FC<TherapistIssueModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-2/3 min-h-[46px] py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-md shadow-[#082A4F]/20"
+              className="w-2/3 min-h-[46px] py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-md shadow-[#8B5A36]/20"
             >
               <Send className="w-4 h-4 text-[#D4AF37]" />
               <span>{isSubmitting ? 'Mengirim...' : 'Kirim Laporan'}</span>
