@@ -63,7 +63,7 @@ export const ForcedPasswordChangeModal: React.FC = () => {
     <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header with Senzu Home Official Branding */}
-        <div className="bg-[#082A4F] text-white p-6 border-b border-[#D4AF37]/30 text-center relative">
+        <div className="bg-[#8B5A36] text-white p-6 border-b border-[#D4AF37]/30 text-center relative">
           <div className="w-[180px] sm:w-[220px] mx-auto mb-2">
             <SenzuLogo variant="light" size="medium" className="w-full h-auto max-h-[50px]" />
           </div>
@@ -108,7 +108,7 @@ export const ForcedPasswordChangeModal: React.FC = () => {
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Masukkan kata sandi baru minimal 12 karakter"
                 disabled={isSubmitting}
-                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F] focus:border-transparent transition"
+                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent transition"
               />
               <button
                 type="button"
@@ -133,7 +133,7 @@ export const ForcedPasswordChangeModal: React.FC = () => {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Ulangi kata sandi baru persis sama"
                 disabled={isSubmitting}
-                className={`w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F] transition ${
+                className={`w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36] transition ${
                   confirmPassword && !isMatch
                     ? 'border-red-300 bg-red-50/30'
                     : 'border-slate-300'
@@ -192,7 +192,7 @@ export const ForcedPasswordChangeModal: React.FC = () => {
             <button
               type="submit"
               disabled={!isFormValid || isSubmitting}
-              className="flex-1 px-6 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed shadow-md cursor-pointer"
+              className="flex-1 px-6 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed shadow-md cursor-pointer"
             >
               <Lock className="w-4 h-4" />
               <span>{isSubmitting ? 'Menyimpan Kata Sandi...' : 'Simpan Kata Sandi & Masuk'}</span>
