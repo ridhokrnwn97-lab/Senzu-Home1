@@ -114,7 +114,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between selection:bg-[#D4AF37]/20 selection:text-[#082A4F]">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between selection:bg-[#D4AF37]/20 selection:text-[#4B2B18]">
       {/* 1. Header Bar */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -122,7 +122,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
             <button
               type="button"
               onClick={handleReturnHome}
-              className="p-2 -ml-2 rounded-xl text-slate-600 hover:text-[#082A4F] hover:bg-slate-100 transition cursor-pointer"
+              className="p-2 -ml-2 rounded-xl text-slate-600 hover:text-[#4B2B18] hover:bg-slate-100 transition cursor-pointer"
               title="Kembali ke Beranda"
               aria-label="Kembali"
             >
@@ -131,7 +131,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
             <div className="flex items-center gap-2.5">
               <SenzuLogo className="w-8 h-8" />
               <div>
-                <span className="font-serif font-bold text-base sm:text-lg text-[#082A4F] tracking-tight block leading-tight">
+                <span className="font-serif font-bold text-base sm:text-lg text-[#4B2B18] tracking-tight block leading-tight">
                   Senzu Home
                 </span>
                 <span className="text-[10px] text-[#D4AF37] font-semibold tracking-wider uppercase block">
@@ -178,7 +178,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
               <span className="px-3 py-1 rounded-full bg-emerald-100/80 text-emerald-800 text-xs font-bold uppercase tracking-wider">
                 Permintaan Diterima
               </span>
-              <h2 className="font-serif font-bold text-xl sm:text-2xl text-[#082A4F]">
+              <h2 className="font-serif font-bold text-xl sm:text-2xl text-[#4B2B18]">
                 Pengajuan Penghapusan Akun Berhasil
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
@@ -227,7 +227,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
               <button
                 type="button"
                 onClick={handleReturnHome}
-                className="flex-1 py-3 rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs sm:text-sm font-bold transition shadow-sm cursor-pointer"
+                className="flex-1 py-3 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs sm:text-sm font-bold transition shadow-sm cursor-pointer"
               >
                 Kembali ke Beranda Senzu Home
               </button>
@@ -249,11 +249,11 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
           <div className="space-y-6 sm:space-y-8">
             {/* Title Section */}
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#082A4F]/10 text-[#082A4F] text-xs font-bold">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#8B5A36]/10 text-[#4B2B18] text-xs font-bold">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#D4AF37]" />
                 <span>Google Play Data Safety & Privacy Compliance</span>
               </div>
-              <h1 className="font-serif font-bold text-2xl sm:text-3xl text-[#082A4F] tracking-tight">
+              <h1 className="font-serif font-bold text-2xl sm:text-3xl text-[#4B2B18] tracking-tight">
                 Pengajuan Penghapusan Akun Senzu Home
               </h1>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
@@ -277,7 +277,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
               {/* Data yang Dihapus dan Data yang Tetap Disimpan */}
               <div className="space-y-4 pt-1">
                 <div className="border-b border-slate-100 pb-2.5">
-                  <h2 className="font-serif font-bold text-base sm:text-lg text-[#082A4F] flex items-center gap-2">
+                  <h2 className="font-serif font-bold text-base sm:text-lg text-[#4B2B18] flex items-center gap-2">
                     <FileText className="w-5 h-5 text-[#D4AF37]" />
                     Data yang Dihapus dan Data yang Tetap Disimpan
                   </h2>
@@ -352,8 +352,8 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
 
                 {/* RETENTION PERIOD DISCLOSURE */}
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-[#082A4F]">
-                    <Info className="w-4 h-4 text-[#082A4F] shrink-0" />
+                  <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
+                    <Info className="w-4 h-4 text-[#4B2B18] shrink-0" />
                     <span>Kebijakan & Periode Retensi Data</span>
                   </div>
                   <p className="text-slate-700 leading-relaxed text-[11px] sm:text-xs italic bg-white p-3 rounded-xl border border-slate-200">
@@ -377,7 +377,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
             {/* Public Deletion Request Form */}
             <form onSubmit={handleSubmit} className="bg-white rounded-3xl p-5 sm:p-8 border border-slate-200 shadow-sm space-y-5">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="font-serif font-bold text-base text-[#082A4F]">
+                <h3 className="font-serif font-bold text-base text-[#4B2B18]">
                   Formulir Permintaan Penghapusan
                 </h3>
                 <p className="text-xs text-slate-500">
@@ -412,7 +412,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="nama@email.com"
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F]"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36]"
                     />
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -434,7 +434,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="contoh: 081234567890"
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F]"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36]"
                     />
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -451,7 +451,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                     id="select-del-reason"
                     value={reasonCategory}
                     onChange={(e) => setReasonCategory(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F]"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36]"
                   >
                     <option value="Pindah domisili">Sudah pindah domisili dari Kota Palembang</option>
                     <option value="Jarang menggunakan layanan">Jarang menggunakan layanan home service</option>
@@ -473,7 +473,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                     onChange={(e) => setCustomReason(e.target.value)}
                     placeholder="Tuliskan masukan atau catatan khusus bagi tim kami..."
                     maxLength={300}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#082A4F]/20 focus:border-[#082A4F]"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/20 focus:border-[#8B5A36]"
                   />
                 </div>
 
@@ -485,7 +485,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                       type="checkbox"
                       checked={isAgreed}
                       onChange={(e) => setIsAgreed(e.target.checked)}
-                      className="mt-0.5 rounded border-slate-300 text-[#082A4F] focus:ring-[#082A4F]"
+                      className="mt-0.5 rounded border-slate-300 text-[#4B2B18] focus:ring-[#8B5A36]"
                     />
                     <span className="text-[11px] sm:text-xs text-slate-600 leading-relaxed">
                       Saya memahami bahwa setelah verifikasi identitas berhasil diselesaikan, data profil, alamat tersimpan, dan poin reward akan dihapus permanen. Saya juga memahami bahwa catatan transaksi keuangan tertentu dapat tetap disimpan secara terbatas selama periode yang diwajibkan oleh hukum sebelum dihapus atau dianonimkan.
@@ -525,7 +525,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                   href={getWhatsAppUrl('Halo CS Senzu Home, saya ingin bertanya mengenai status penghapusan akun pelanggan.')}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[#082A4F] font-bold hover:underline flex items-center gap-1 shrink-0"
+                  className="text-[#4B2B18] font-bold hover:underline flex items-center gap-1 shrink-0"
                 >
                   <span>WhatsApp CS ({displayWhatsApp})</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -543,7 +543,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
             <button
               type="button"
               onClick={handleReturnHome}
-              className="hover:text-[#082A4F] hover:underline cursor-pointer"
+              className="hover:text-[#4B2B18] hover:underline cursor-pointer"
             >
               Beranda Senzu Home
             </button>
@@ -562,7 +562,7 @@ export const AccountDeletionPublicView: React.FC<AccountDeletionPublicViewProps>
                 window.history.pushState({}, '', '/kebijakan-privasi');
                 window.dispatchEvent(new PopStateEvent('popstate'));
               }}
-              className="hover:text-[#082A4F] hover:underline cursor-pointer"
+              className="hover:text-[#4B2B18] hover:underline cursor-pointer"
             >
               Kebijakan Privasi
             </a>
