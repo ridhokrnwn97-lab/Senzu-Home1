@@ -86,7 +86,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F] flex items-center gap-2">
+        <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#4B2B18] flex items-center gap-2">
           <Settings className="w-6 h-6 text-[#B89628]" />
           Pengaturan Tarif & Layanan
         </h2>
@@ -109,7 +109,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
           onSubmit={handleSaveSettings}
           className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 text-xs"
         >
-          <div className="text-sm font-bold text-[#082A4F] border-b border-slate-100 pb-2">
+          <div className="text-sm font-bold text-[#4B2B18] border-b border-slate-100 pb-2">
             Konfigurasi Biaya & Pembayaran
           </div>
 
@@ -124,7 +124,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
                 value={fee}
                 onChange={(e) => setFee(Number(e.target.value))}
                 required
-                className="w-full pl-10 pr-3 py-2 rounded-xl border border-slate-300 text-sm font-bold text-[#082A4F] focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full pl-10 pr-3 py-2 rounded-xl border border-slate-300 text-sm font-bold text-[#4B2B18] focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
             <p className="text-[10px] text-slate-400 mt-1">
@@ -133,7 +133,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
           </div>
 
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-            <div className="font-bold text-[#082A4F] text-xs">
+            <div className="font-bold text-[#4B2B18] text-xs">
               Pusat Operasional Palembang (Base Hub):
             </div>
             <div>
@@ -185,7 +185,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
               value={bankName}
               onChange={(e) => setBankName(e.target.value)}
               required
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
@@ -197,7 +197,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
                 value={bankAccount}
                 onChange={(e) => setBankAccount(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
 
@@ -208,7 +208,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
                 value={bankHolder}
                 onChange={(e) => setBankHolder(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
               />
             </div>
           </div>
@@ -219,14 +219,14 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
               rows={2}
               value={qrisInstruction}
               onChange={(e) => setQrisInstruction(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
           <button
             type="submit"
             disabled={savingSettings}
-            className="w-full py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
+            className="w-full py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
           >
             <Save className="w-4 h-4 text-[#D4AF37]" />
             <span>{savingSettings ? 'Menyimpan...' : 'Simpan Pengaturan'}</span>
@@ -235,7 +235,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
 
         {/* Services List Management */}
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <div className="text-sm font-bold text-[#082A4F] border-b border-slate-100 pb-2 flex items-center justify-between">
+          <div className="text-sm font-bold text-[#4B2B18] border-b border-slate-100 pb-2 flex items-center justify-between">
             <span>Katalog Layanan & Harga</span>
             <span className="text-xs text-slate-400 font-normal">Database Firestore</span>
           </div>
@@ -244,7 +244,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
             {(services || []).map((srv) => (
               <div
                 key={srv.id}
-                className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between hover:border-[#082A4F]/30 transition"
+                className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between hover:border-[#8B5A36]/30 transition"
               >
                 <div>
                   <div className="flex items-center gap-2">
@@ -257,14 +257,14 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
                   </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
                     Durasi: {srv.duration} Menit • Tarif:{' '}
-                    <strong className="text-[#082A4F]">{formatRupiah(srv.price)}</strong>
+                    <strong className="text-[#4B2B18]">{formatRupiah(srv.price)}</strong>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => handleOpenEditService(srv)}
-                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-[#082A4F] hover:text-white text-slate-700 text-xs transition"
+                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-[#8B5A36] hover:text-white text-slate-700 text-xs transition"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
@@ -274,7 +274,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
 
           {editingService && (
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-300 space-y-3 text-xs">
-              <div className="font-bold text-[#082A4F]">
+              <div className="font-bold text-[#4B2B18]">
                 Edit: {editingService.name}
               </div>
 
@@ -311,7 +311,7 @@ export const ServicesSettingsView: React.FC<ServicesSettingsViewProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveEditedService}
-                  className="px-3 py-1.5 rounded-lg bg-[#082A4F] text-white font-bold"
+                  className="px-3 py-1.5 rounded-lg bg-[#8B5A36] text-white font-bold"
                 >
                   Simpan Perubahan
                 </button>
