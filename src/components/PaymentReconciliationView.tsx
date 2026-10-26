@@ -288,11 +288,11 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
       {/* Header & Export Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/30 text-[#082A4F] text-xs font-bold mb-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/30 text-[#4B2B18] text-xs font-bold mb-1">
             <Building className="w-3.5 h-3.5 text-[#B89628]" />
             Keuangan & Rekonsiliasi Senzu Home
           </div>
-          <h2 className="font-serif text-2xl font-bold text-[#082A4F]">
+          <h2 className="font-serif text-2xl font-bold text-[#4B2B18]">
             Rekonsiliasi Pembayaran
           </h2>
           <p className="text-xs text-slate-500">
@@ -312,7 +312,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
           <button
             type="button"
             onClick={handleExportCSV}
-            className="px-4 py-2.5 min-h-[44px] rounded-xl bg-[#082A4F] hover:bg-[#0D3866] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
+            className="px-4 py-2.5 min-h-[44px] rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
           >
             <Download className="w-4 h-4 text-[#D4AF37]" />
             <span>Export CSV</span>
@@ -331,7 +331,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
             </div>
           </div>
           <div className="mt-2">
-            <span className="font-serif font-bold text-lg sm:text-xl text-[#082A4F]">
+            <span className="font-serif font-bold text-lg sm:text-xl text-[#4B2B18]">
               {formatRupiah(kpis.paidRevenue)}
             </span>
             <div className="text-[11px] text-emerald-700 font-semibold mt-0.5">
@@ -394,12 +394,12 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Total Order</span>
-            <div className="w-8 h-8 rounded-xl bg-[#082A4F]/10 text-[#082A4F] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2">
-            <span className="font-serif font-bold text-lg sm:text-xl text-[#082A4F]">
+            <span className="font-serif font-bold text-lg sm:text-xl text-[#4B2B18]">
               {kpis.totalCount} Order
             </span>
             <div className="text-[11px] text-slate-400 mt-0.5">Data terfilter</div>
@@ -418,7 +418,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Cari Kode, Pelanggan, WA..."
-              className="w-full pl-10 pr-3.5 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F] focus:outline-none"
+              className="w-full pl-10 pr-3.5 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:outline-none"
             />
           </div>
 
@@ -427,7 +427,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F] focus:outline-none bg-white font-medium text-slate-700"
+              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:outline-none bg-white font-medium text-slate-700"
             >
               <option value="ALL">Semua Status Bayar</option>
               <option value="paid">Lunas (Paid)</option>
@@ -443,7 +443,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
             <select
               value={methodFilter}
               onChange={(e) => setMethodFilter(e.target.value)}
-              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F] focus:outline-none bg-white font-medium text-slate-700"
+              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:outline-none bg-white font-medium text-slate-700"
             >
               <option value="ALL">Semua Metode Pembayaran</option>
               <option value="qris">QRIS Senzu</option>
@@ -460,7 +460,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F] focus:outline-none bg-white font-medium text-slate-700"
+              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:outline-none bg-white font-medium text-slate-700"
               placeholder="Dari Tanggal"
             />
           </div>
@@ -471,7 +471,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#082A4F] focus:outline-none bg-white font-medium text-slate-700"
+              className="w-full px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:outline-none bg-white font-medium text-slate-700"
               placeholder="Sampai Tanggal"
             />
           </div>
@@ -489,7 +489,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
                 setStartDate('');
                 setEndDate('');
               }}
-              className="text-[#082A4F] font-bold hover:underline"
+              className="text-[#4B2B18] font-bold hover:underline"
             >
               Reset Filter
             </button>
@@ -529,7 +529,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
                   const style = getPaymentStatusBadgeStyle(item.paymentStatus);
                   return (
                     <tr key={item.booking.id} className="hover:bg-slate-50/80 transition">
-                      <td className="px-4 py-3 font-mono font-bold text-[#082A4F]">
+                      <td className="px-4 py-3 font-mono font-bold text-[#4B2B18]">
                         {item.bookingCode}
                       </td>
                       <td className="px-4 py-3">
@@ -562,7 +562,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-[#082A4F]">
+                      <td className="px-4 py-3 text-right font-bold text-[#4B2B18]">
                         {formatRupiah(item.totalAmount)}
                       </td>
                       <td className="px-4 py-3">
@@ -600,7 +600,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
                             className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                             title="Lihat Bukti Bayar"
                           >
-                            <Eye className="w-4 h-4 text-[#082A4F]" />
+                            <Eye className="w-4 h-4 text-[#4B2B18]" />
                           </button>
                         )}
                       </td>
@@ -619,7 +619,7 @@ export const PaymentReconciliationView: React.FC<PaymentReconciliationViewProps>
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto space-y-4 relative">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h4 className="font-bold text-[#082A4F] text-base">Bukti Pembayaran</h4>
+                <h4 className="font-bold text-[#4B2B18] text-base">Bukti Pembayaran</h4>
                 <p className="text-xs text-slate-500">{selectedPayment.bookingCode}</p>
               </div>
               <button
