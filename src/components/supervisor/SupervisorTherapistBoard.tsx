@@ -148,7 +148,7 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
       {/* Top Header & Search */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
-          <h3 className="text-base sm:text-lg font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h3 className="text-base sm:text-lg font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <Users className="w-5 h-5 text-[#D4AF37]" />
             <span>Monitoring Armada Terapis Palembang</span>
           </h3>
@@ -163,7 +163,7 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
             type="button"
             onClick={() => setFilter('ALL')}
             className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-              filter === 'ALL' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              filter === 'ALL' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Semua ({therapists.length})
@@ -223,11 +223,11 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-[#082A4F] text-[#D4AF37] font-serif font-bold text-lg flex items-center justify-center shadow-xs">
+                    <div className="w-12 h-12 rounded-2xl bg-[#8B5A36] text-[#D4AF37] font-serif font-bold text-lg flex items-center justify-center shadow-xs">
                       {item.name.charAt(0)}
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm text-[#082A4F] flex items-center gap-1.5">
+                      <h4 className="font-bold text-sm text-[#4B2B18] flex items-center gap-1.5">
                         <span>{item.name}</span>
                         <span className="text-[11px] font-normal text-slate-500">
                           ({item.gender === 'Perempuan' ? 'P' : 'L'})
@@ -265,7 +265,7 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
                 {/* Active Booking Box */}
                 {item.activeBooking ? (
                   <div className="p-3 rounded-xl bg-[#FAF9F6] border border-amber-200/80 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between font-bold text-[#082A4F]">
+                    <div className="flex items-center justify-between font-bold text-[#4B2B18]">
                       <span className="flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
                         <span>Order Aktif: {item.activeBooking.bookingCode}</span>
@@ -312,7 +312,7 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
                 <div className="grid grid-cols-2 gap-2 text-center text-xs">
                   <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="text-[10px] text-slate-500 font-medium">Tugas Hari Ini</div>
-                    <div className="font-bold text-sm text-[#082A4F] font-mono">
+                    <div className="font-bold text-sm text-[#4B2B18] font-mono">
                       {item.todayJobsCount}
                     </div>
                   </div>
@@ -392,7 +392,7 @@ export const SupervisorTherapistBoard: React.FC<SupervisorTherapistBoardProps> =
                       className="py-1.5 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
                       title="Lihat Posisi di Peta"
                     >
-                      <MapPin className="w-3.5 h-3.5 text-[#082A4F]" />
+                      <MapPin className="w-3.5 h-3.5 text-[#4B2B18]" />
                       <span>Peta</span>
                     </button>
                   )}
