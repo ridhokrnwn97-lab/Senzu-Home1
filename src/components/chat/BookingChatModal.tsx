@@ -283,9 +283,9 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
     >
       <div className="w-full h-full sm:h-[620px] sm:max-w-md bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
         {/* Header (Section 5) */}
-        <div className="bg-[#082A4F] text-white px-4 py-3.5 flex items-center justify-between shadow-md shrink-0">
+        <div className="bg-[#8B5A36] text-white px-4 py-3.5 flex items-center justify-between shadow-md shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D4AF37] to-[#B89628] text-[#082A4F] font-bold flex items-center justify-center text-sm shadow-inner shrink-0">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D4AF37] to-[#B89628] text-[#4B2B18] font-bold flex items-center justify-center text-sm shadow-inner shrink-0">
               {partnerDisplayName.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
@@ -315,7 +315,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
         {/* Operational Security Notice */}
         <div className="bg-amber-50/90 border-b border-amber-200/80 px-4 py-1.5 text-[10px] text-amber-900 flex items-center justify-between shrink-0">
           <span>Obrolan operasional terkait reservasi <strong>#{booking.bookingCode}</strong></span>
-          <span className="text-[9px] uppercase font-bold text-[#082A4F]">{partnerRoleLabel}</span>
+          <span className="text-[9px] uppercase font-bold text-[#4B2B18]">{partnerRoleLabel}</span>
         </div>
 
         {/* Compact Notification Permission Prompt (Section 6) */}
@@ -329,7 +329,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
               <button
                 type="button"
                 onClick={handleEnableNotifications}
-                className="px-2.5 py-1 bg-[#082A4F] text-[#FDF3CD] font-bold rounded-lg text-[11px] shadow-2xs hover:bg-[#0d3866] transition cursor-pointer active:scale-95"
+                className="px-2.5 py-1 bg-[#8B5A36] text-[#FDF3CD] font-bold rounded-lg text-[11px] shadow-2xs hover:bg-[#94603B] transition cursor-pointer active:scale-95"
               >
                 Aktifkan
               </button>
@@ -380,7 +380,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
         >
           {isInitializing ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2">
-              <Loader2 className="w-6 h-6 animate-spin text-[#082A4F]" />
+              <Loader2 className="w-6 h-6 animate-spin text-[#4B2B18]" />
               <span className="text-xs">Memuat percakapan...</span>
             </div>
           ) : errorMessage && messages.length === 0 ? (
@@ -398,7 +398,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
                   setErrorMessage(null);
                   setRetryCount((c) => c + 1);
                 }}
-                className="px-4 py-2 bg-[#082A4F] text-[#FDF3CD] hover:bg-[#061d37] rounded-xl text-xs font-bold transition shadow-xs active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-[#8B5A36] text-[#FDF3CD] hover:bg-[#3D2315] rounded-xl text-xs font-bold transition shadow-xs active:scale-95 cursor-pointer"
               >
                 Coba Lagi
               </button>
@@ -406,7 +406,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
           ) : messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
               <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
-                <User className="w-6 h-6 text-[#082A4F]" />
+                <User className="w-6 h-6 text-[#4B2B18]" />
               </div>
               <h4 className="font-bold text-slate-800 text-sm">Belum Ada Pesan</h4>
               <p className="text-xs text-slate-500 max-w-xs leading-relaxed">
@@ -422,7 +422,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
                 return (
                   <div key={msg.id} className="flex justify-center my-2">
                     <div className="bg-slate-100 border border-slate-200/80 rounded-full px-3.5 py-1 text-[11px] text-slate-600 flex items-center gap-1.5 shadow-2xs text-center max-w-[90%]">
-                      <Info className="w-3.5 h-3.5 text-[#082A4F] shrink-0" />
+                      <Info className="w-3.5 h-3.5 text-[#4B2B18] shrink-0" />
                       <span>{msg.text}</span>
                     </div>
                   </div>
@@ -441,7 +441,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
                   <div
                     className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed break-words shadow-xs ${
                       isOutgoing
-                        ? 'bg-[#082A4F] text-white rounded-tr-xs'
+                        ? 'bg-[#8B5A36] text-white rounded-tr-xs'
                         : 'bg-white border border-slate-200 text-slate-900 rounded-tl-xs'
                     }`}
                   >
@@ -493,7 +493,7 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
                 type="button"
                 onClick={() => handleSendMessage(qr)}
                 disabled={isSending}
-                className="shrink-0 text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-[#082A4F] border border-slate-200 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                className="shrink-0 text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-[#4B2B18] border border-slate-200 transition cursor-pointer active:scale-95 disabled:opacity-50"
               >
                 {qr}
               </button>
@@ -542,14 +542,14 @@ export const BookingChatModal: React.FC<BookingChatModalProps> = ({
                   onKeyDown={handleKeyDown}
                   placeholder={`Ketik pesan ke ${partnerDisplayName}...`}
                   maxLength={MAX_CHAT_MESSAGE_LENGTH}
-                  className="w-full resize-none max-h-24 px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 rounded-2xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#082A4F] focus:border-[#082A4F] transition shadow-inner"
+                  className="w-full resize-none max-h-24 px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 rounded-2xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#8B5A36] focus:border-[#8B5A36] transition shadow-inner"
                 />
               </div>
               <button
                 type="button"
                 onClick={() => handleSendMessage()}
                 disabled={isSending || !inputText.trim()}
-                className="w-10 h-10 rounded-2xl bg-[#082A4F] hover:bg-[#0D3866] text-[#FDF3CD] flex items-center justify-center transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shrink-0"
+                className="w-10 h-10 rounded-2xl bg-[#8B5A36] hover:bg-[#94603B] text-[#FDF3CD] flex items-center justify-center transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md shrink-0"
                 aria-label="Kirim Pesan"
               >
                 {isSending ? (
