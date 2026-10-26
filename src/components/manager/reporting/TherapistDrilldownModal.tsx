@@ -38,7 +38,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
       <div className="relative w-full max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#082A4F] text-white border-b border-[#D4AF37]/30">
+        <div className="flex items-center justify-between px-6 py-4 bg-[#8B5A36] text-white border-b border-[#D4AF37]/30">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] font-bold">
               <User className="w-5 h-5" />
@@ -84,7 +84,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
               <span className="text-[11px] font-semibold text-slate-500 block mb-1">
                 Layanan Selesai
               </span>
-              <div className="text-lg font-bold text-[#082A4F]">
+              <div className="text-lg font-bold text-[#4B2B18]">
                 {therapistRow.jobsCompleted}
               </div>
               <span className="text-[10px] text-slate-400">Total job berstatus Completed</span>
@@ -95,7 +95,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
               <span className="text-[11px] font-semibold text-slate-500 block mb-1">
                 Utilisasi Jam Kerja
               </span>
-              <div className="text-lg font-bold text-[#082A4F]">
+              <div className="text-lg font-bold text-[#4B2B18]">
                 {therapistRow.rosterDataComplete && therapistRow.utilizationPct !== null ? (
                   <span className="text-emerald-700">{therapistRow.utilizationPct}%</span>
                 ) : (
@@ -114,7 +114,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
               <span className="text-[11px] font-semibold text-slate-500 block mb-1">
                 Ketepatan Waktu Tiba
               </span>
-              <div className="text-lg font-bold text-[#082A4F]">
+              <div className="text-lg font-bold text-[#4B2B18]">
                 {therapistRow.onTimeRate !== null ? (
                   <span className={therapistRow.onTimeRate >= 85 ? 'text-emerald-700' : 'text-amber-700'}>
                     {therapistRow.onTimeRate}%
@@ -133,7 +133,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
               <span className="text-[11px] font-semibold text-slate-500 block mb-1">
                 Rating Kepuasan
               </span>
-              <div className="text-lg font-bold text-[#082A4F] flex items-center gap-1">
+              <div className="text-lg font-bold text-[#4B2B18] flex items-center gap-1">
                 {therapistRow.averageRating !== null ? (
                   <>
                     <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
@@ -152,7 +152,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
 
           {/* Operational Efficiency Card */}
           <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-[#B89628]" />
               Detail Ketepatan &amp; Mobilitas Terapis
             </h4>
@@ -160,7 +160,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
                 <span className="text-[11px] text-slate-500 block">Rata-rata Waktu Respons Terima</span>
-                <span className="text-sm font-bold text-[#082A4F]">
+                <span className="text-sm font-bold text-[#4B2B18]">
                   {therapistRow.avgAcceptanceMinutes !== null ? `${therapistRow.avgAcceptanceMinutes} Menit` : '—'}
                 </span>
                 <p className="text-[10px] text-slate-400 mt-0.5">Waktu penugasan ke konfirmasi terima</p>
@@ -168,7 +168,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
 
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
                 <span className="text-[11px] text-slate-500 block">Rata-rata Waktu Tempuh (Travel)</span>
-                <span className="text-sm font-bold text-[#082A4F]">
+                <span className="text-sm font-bold text-[#4B2B18]">
                   {therapistRow.avgTravelMinutes !== null ? `${therapistRow.avgTravelMinutes} Menit` : '—'}
                 </span>
                 <p className="text-[10px] text-slate-400 mt-0.5">Durasi meluncur hingga tiba di lokasi</p>
@@ -176,7 +176,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
 
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
                 <span className="text-[11px] text-slate-500 block">Riwayat Reassignment</span>
-                <span className="text-sm font-bold text-[#082A4F]">
+                <span className="text-sm font-bold text-[#4B2B18]">
                   {therapistRow.reassignedCount} Kali
                 </span>
                 <p className="text-[10px] text-slate-400 mt-0.5">Keterlibatan operasional pergantian terapis</p>
@@ -225,8 +225,8 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
 
           {/* Bookings Table */}
           <div className="space-y-2">
-            <h4 className="font-bold text-[#082A4F] text-xs uppercase tracking-wider flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-[#082A4F]" />
+            <h4 className="font-bold text-[#4B2B18] text-xs uppercase tracking-wider flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-[#4B2B18]" />
               Daftar Reservasi yang Ditangani ({thBookings.length})
             </h4>
 
@@ -250,7 +250,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
                   <tbody className="divide-y divide-slate-100">
                     {(thBookings || []).map((b) => (
                       <tr key={b.id} className="hover:bg-slate-50/80">
-                        <td className="p-2.5 font-mono font-bold text-[#082A4F]">
+                        <td className="p-2.5 font-mono font-bold text-[#4B2B18]">
                           {b.bookingCode || b.id}
                         </td>
                         <td className="p-2.5 text-slate-600">
@@ -292,7 +292,7 @@ export const TherapistDrilldownModal: React.FC<TherapistDrilldownModalProps> = (
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-[#082A4F] hover:bg-[#082A4F]/90 text-white text-xs font-semibold rounded-xl transition shadow-xs"
+            className="px-4 py-2 bg-[#8B5A36] hover:bg-[#8B5A36]/90 text-white text-xs font-semibold rounded-xl transition shadow-xs"
           >
             Tutup Drilldown
           </button>
