@@ -160,7 +160,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="bg-[#082A4F] text-white p-5 flex items-center justify-between">
+        <div className="bg-[#8B5A36] text-white p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center">
               <HelpCircle className="w-5 h-5 text-amber-300" />
@@ -189,7 +189,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
             <div className="space-y-4">
               <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-bold text-[#082A4F]">
+                  <span className="text-xs font-mono font-bold text-[#4B2B18]">
                     {activeDisplayCase.caseCode}
                   </span>
                   {(() => {
@@ -211,7 +211,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
 
                 {activeDisplayCase.customerVisibleNote && (
                   <div className="mt-2 p-3 bg-white rounded-lg border border-slate-200 text-xs text-slate-700">
-                    <span className="font-bold text-[#082A4F] block mb-1">Catatan dari Tim Senzu:</span>
+                    <span className="font-bold text-[#4B2B18] block mb-1">Catatan dari Tim Senzu:</span>
                     {activeDisplayCase.customerVisibleNote}
                   </div>
                 )}
@@ -245,7 +245,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-3 bg-[#082A4F] hover:bg-[#0A3663] text-white text-sm font-bold rounded-xl transition cursor-pointer"
+                className="w-full py-3 bg-[#8B5A36] hover:bg-[#94603B] text-white text-sm font-bold rounded-xl transition cursor-pointer"
               >
                 Tutup
               </button>
@@ -267,7 +267,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as ComplaintCategory)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-[#082A4F] focus:border-transparent outline-none"
+                  className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent outline-none"
                 >
                   {COMPLAINT_CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
@@ -286,7 +286,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
                   placeholder="Contoh: Terapis belum tiba melewati waktu yang dijadwalkan"
-                  className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#082A4F] focus:border-transparent outline-none"
+                  className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent outline-none"
                   required
                 />
               </div>
@@ -300,7 +300,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Mohon ceritakan kronologi atau hal yang perlu kami bantu secara lengkap..."
-                  className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#082A4F] focus:border-transparent outline-none resize-none"
+                  className="w-full text-xs p-3 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-[#8B5A36] focus:border-transparent outline-none resize-none"
                   required
                 />
               </div>
@@ -331,7 +331,7 @@ export const CustomerComplaintModal: React.FC<CustomerComplaintModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3 bg-[#082A4F] hover:bg-[#0A3663] text-white text-sm font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                  className="w-full py-3 bg-[#8B5A36] hover:bg-[#94603B] text-white text-sm font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
                 >
                   {isSubmitting ? (
                     'Mengirim Laporan...'
