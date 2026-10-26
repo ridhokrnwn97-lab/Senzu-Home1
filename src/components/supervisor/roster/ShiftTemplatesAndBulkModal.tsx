@@ -244,7 +244,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
     <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
       <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-[#082A4F] text-white flex items-center justify-between">
+        <div className="p-4 sm:p-5 bg-[#8B5A36] text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-white/10 text-[#D4AF37]">
               {mode === 'templates' ? (
@@ -308,7 +308,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                     setErrorMessage('');
                     setIsEditingTemplate(true);
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                  className="px-3 py-1.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
                 >
                   <Plus className="w-3.5 h-3.5 text-[#D4AF37]" />
                   <span>Tambah Template</span>
@@ -388,7 +388,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                   <button
                     type="button"
                     onClick={handleSelectAllTherapists}
-                    className="text-[#082A4F] hover:underline font-bold text-[11px] cursor-pointer"
+                    className="text-[#4B2B18] hover:underline font-bold text-[11px] cursor-pointer"
                   >
                     {selectedTherapistIds.length === therapists.length
                       ? 'Batal Pilih Semua'
@@ -404,7 +404,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                         key={th.id}
                         className={`p-2 rounded-lg border text-xs font-semibold flex items-center gap-2 cursor-pointer transition ${
                           isChecked
-                            ? 'bg-[#082A4F] text-white border-[#082A4F]'
+                            ? 'bg-[#8B5A36] text-white border-[#8B5A36]'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
@@ -455,7 +455,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                         key={tpl.id}
                         type="button"
                         onClick={() => handleSelectTemplateForBulk(tpl)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-[#082A4F] hover:text-white border border-slate-200 font-semibold transition cursor-pointer text-[11px]"
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-[#8B5A36] hover:text-white border border-slate-200 font-semibold transition cursor-pointer text-[11px]"
                       >
                         {tpl.name} ({tpl.shiftStart}-{tpl.shiftEnd})
                       </button>
@@ -575,7 +575,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                 }
                 setShowConfirmModal(true);
               }}
-              className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm"
+              className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm"
             >
               <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
               <span>Lanjut Terapkan ({selectedTherapistIds.length} Terapis)</span>
@@ -588,7 +588,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
       {isEditingTemplate && (
         <div className="fixed inset-0 z-70 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 text-xs">
-            <h3 className="text-base font-bold text-[#082A4F]">
+            <h3 className="text-base font-bold text-[#4B2B18]">
               {editingTemplateData.id ? 'Edit Template Shift' : 'Tambah Template Shift Baru'}
             </h3>
 
@@ -692,7 +692,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                 type="button"
                 onClick={handleSaveTemplate}
                 disabled={isSubmitting}
-                className="px-4 py-1.5 rounded-xl bg-[#082A4F] text-white font-bold hover:bg-[#0E3D73] disabled:opacity-50"
+                className="px-4 py-1.5 rounded-xl bg-[#8B5A36] text-white font-bold hover:bg-[#94603B] disabled:opacity-50"
               >
                 Simpan Template
               </button>
@@ -754,7 +754,7 @@ export const ShiftTemplatesAndBulkModal: React.FC<ShiftTemplatesAndBulkModalProp
                 type="button"
                 onClick={handleExecuteBulkApply}
                 disabled={isSubmitting}
-                className="px-5 py-2 rounded-xl bg-[#082A4F] hover:bg-[#0E3D73] text-white font-bold flex items-center gap-2 shadow-xs disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold flex items-center gap-2 shadow-xs disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4 text-[#D4AF37]" />
                 <span>{isSubmitting ? 'Menerapkan...' : 'Ya, Terapkan Sekarang'}</span>
