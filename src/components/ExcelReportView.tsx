@@ -103,7 +103,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <FileSpreadsheet className="w-6 h-6 text-[#B89628]" />
             Laporan Senzu Home
           </h2>
@@ -134,7 +134,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <span className="text-[11px] text-slate-500 font-semibold block">Total Baris Laporan</span>
-          <span className="text-xl font-bold text-[#082A4F]">{filteredBookings.length} Order</span>
+          <span className="text-xl font-bold text-[#4B2B18]">{filteredBookings.length} Order</span>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <span className="text-[11px] text-slate-500 font-semibold block">Revenue (Completed + PAID)</span>
@@ -155,14 +155,14 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
       {/* Filter Card */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="text-xs font-bold text-[#082A4F] flex items-center gap-1.5 uppercase tracking-wider">
+          <div className="text-xs font-bold text-[#4B2B18] flex items-center gap-1.5 uppercase tracking-wider">
             <Filter className="w-4 h-4 text-[#B89628]" />
             Filter Data Laporan
           </div>
           <button
             type="button"
             onClick={handleResetFilters}
-            className="text-xs text-slate-500 hover:text-[#082A4F] font-semibold underline"
+            className="text-xs text-slate-500 hover:text-[#4B2B18] font-semibold underline"
           >
             Reset Filter
           </button>
@@ -177,7 +177,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
@@ -189,7 +189,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F]"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
@@ -200,7 +200,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               id="filter-therapist"
               value={selectedTherapist}
               onChange={(e) => setSelectedTherapist(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium"
             >
               <option value="ALL">Semua Therapist</option>
               {(therapists || []).map((th) => (
@@ -218,7 +218,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               id="filter-treatment"
               value={selectedTreatment}
               onChange={(e) => setSelectedTreatment(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium"
             >
               <option value="ALL">Semua Jenis Treatment</option>
               {(services || []).map((srv) => (
@@ -236,7 +236,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               id="filter-payment"
               value={selectedPaymentStatus}
               onChange={(e) => setSelectedPaymentStatus(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium"
             >
               <option value="ALL">Semua (PAID & UNPAID)</option>
               <option value="PAID">PAID</option>
@@ -251,7 +251,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
               id="filter-status"
               value={selectedBookingStatus}
               onChange={(e) => setSelectedBookingStatus(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] bg-white font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium"
             >
               <option value="ALL">Semua Status</option>
               <option value="Menunggu Pembayaran">Menunggu Pembayaran</option>
@@ -283,7 +283,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-[#082A4F] text-white uppercase text-[10px] font-semibold tracking-wider">
+            <thead className="bg-[#8B5A36] text-white uppercase text-[10px] font-semibold tracking-wider">
               <tr>
                 <th className="py-3 px-3">No</th>
                 <th className="py-3 px-3">Kode Booking</th>
@@ -310,7 +310,7 @@ export const ExcelReportView: React.FC<ExcelReportViewProps> = ({
                 (filteredBookings || []).map((b, idx) => (
                   <tr key={b.id} className="hover:bg-slate-50/80 transition">
                     <td className="py-3 px-3 text-slate-400">{idx + 1}</td>
-                    <td className="py-3 px-3 font-mono font-bold text-[#082A4F]">
+                    <td className="py-3 px-3 font-mono font-bold text-[#4B2B18]">
                       {b.bookingCode}
                     </td>
                     <td className="py-3 px-3">
