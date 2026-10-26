@@ -106,7 +106,7 @@ export function mapBookingStatusToDisplay(status: BookingStatus): {
       return {
         label: 'Terapis Menuju Lokasi',
         sublabel: 'Terapis sedang berkendara ke alamat Anda • Live GPS Aktif',
-        badgeClass: 'bg-[#D4AF37] text-[#082A4F] font-bold border border-amber-300 shadow-sm',
+        badgeClass: 'bg-[#D4AF37] text-[#4B2B18] font-bold border border-amber-300 shadow-sm',
         stageIndex: 2,
       };
     case 'Arrived':
@@ -148,7 +148,7 @@ export function mapBookingStatusToDisplay(status: BookingStatus): {
       return {
         label: status,
         sublabel: 'Sedang diproses oleh sistem Senzu Home',
-        badgeClass: 'bg-[#D4AF37] text-[#082A4F] font-bold',
+        badgeClass: 'bg-[#D4AF37] text-[#4B2B18] font-bold',
         stageIndex: 0,
       };
   }
@@ -942,7 +942,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
       <div className="bg-white w-full max-w-2xl sm:rounded-3xl shadow-2xl border-0 sm:border border-slate-200 overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[92vh] animate-fade-in">
         
         {/* Header: Senzu Deep Navy & Gold */}
-        <div className="bg-gradient-to-r from-[#082A4F] via-[#0B3461] to-[#082A4F] text-white p-4 sm:p-5 flex items-center justify-between border-b border-[#D4AF37]/30 flex-shrink-0">
+        <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-4 sm:p-5 flex items-center justify-between border-b border-[#D4AF37]/30 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center flex-shrink-0">
               <Navigation className="w-5 h-5 text-[#D4AF37]" />
@@ -994,8 +994,8 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
             <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-5 space-y-4 shadow-2xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Search className="w-4 h-4 text-[#082A4F]" />
-                  <h4 className="text-xs sm:text-sm font-bold text-[#082A4F]">
+                  <Search className="w-4 h-4 text-[#4B2B18]" />
+                  <h4 className="text-xs sm:text-sm font-bold text-[#4B2B18]">
                     Cari Status Reservasi Anda
                   </h4>
                 </div>
@@ -1023,7 +1023,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                       value={bookingCode}
                       onChange={(e) => setBookingCode(e.target.value.toUpperCase())}
                       required
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium shadow-2xs"
+                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium shadow-2xs"
                     />
                   </div>
 
@@ -1038,7 +1038,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       required
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#082A4F] bg-white font-medium shadow-2xs"
+                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36] bg-white font-medium shadow-2xs"
                     />
                   </div>
                 </div>
@@ -1047,7 +1047,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   id="btn-track-submit"
                   type="submit"
                   disabled={isLoading}
-                  className="w-full min-h-[46px] py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0B3766] text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
+                  className="w-full min-h-[46px] py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">
@@ -1077,7 +1077,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
             <div className="space-y-5 animate-fade-in">
               
               {/* Top Hero Status Banner */}
-              <div className="bg-gradient-to-br from-[#082A4F] via-[#0D3A6E] to-[#082A4F] text-white p-5 sm:p-6 rounded-3xl border border-[#D4AF37]/40 shadow-lg relative overflow-hidden">
+              <div className="bg-gradient-to-br from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 rounded-3xl border border-[#D4AF37]/40 shadow-lg relative overflow-hidden">
                 <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1145,7 +1145,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
               {showReceipt && (
                 <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-5 text-xs space-y-3 shadow-inner">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                    <span className="font-bold text-[#082A4F] text-sm">
+                    <span className="font-bold text-[#4B2B18] text-sm">
                       Ringkasan Reservasi & Pembayaran
                     </span>
                     <button
@@ -1176,7 +1176,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     <div className="space-y-1 text-slate-600">
                       <div><strong className="text-slate-900">Preferensi:</strong> {trackingData.booking.genderPreference}</div>
                       <div><strong className="text-slate-900">Metode Bayar:</strong> {trackingData.booking.paymentMethod}</div>
-                      <div><strong className="text-slate-900">Status Pembayaran:</strong> <span className="font-bold text-[#082A4F]">{trackingData.booking.paymentStatus}</span></div>
+                      <div><strong className="text-slate-900">Status Pembayaran:</strong> <span className="font-bold text-[#4B2B18]">{trackingData.booking.paymentStatus}</span></div>
                       <div><strong className="text-slate-900">Terapis Ditugaskan:</strong> {trackingData.booking.therapistName || 'Belum ditugaskan'}</div>
                     </div>
                   </div>
@@ -1187,7 +1187,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
               {trackingData.booking.status !== 'Cancelled' && (
                 <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-4 sm:p-5">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-[#082A4F] flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-[#4B2B18] flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
                       Perjalanan Reservasi Anda
                     </span>
@@ -1205,7 +1205,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                           key={step.id}
                           className={`flex flex-col items-center text-center p-2 rounded-2xl transition ${
                             isCurrent
-                              ? 'bg-[#082A4F] text-white shadow-md scale-[1.02]'
+                              ? 'bg-[#8B5A36] text-white shadow-md scale-[1.02]'
                               : isCompleted
                               ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
                               : 'bg-white text-slate-400 border border-slate-100'
@@ -1214,7 +1214,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                           <div
                             className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold mb-1 ${
                               isCurrent
-                                ? 'bg-[#D4AF37] text-[#082A4F]'
+                                ? 'bg-[#D4AF37] text-[#4B2B18]'
                                 : isCompleted
                                 ? 'bg-emerald-600 text-white'
                                 : 'bg-slate-200 text-slate-500'
@@ -1246,7 +1246,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                       <CreditCard className="w-5 h-5" />
                     </div>
                     <div className="space-y-1">
-                      <h4 className="text-sm font-bold text-[#082A4F]">
+                      <h4 className="text-sm font-bold text-[#4B2B18]">
                         {trackingData.booking.status === 'Menunggu Pembayaran'
                           ? 'Menunggu Penyelesaian Pembayaran Non-Tunai'
                           : 'Pembayaran Telah Dikonfirmasi'}
@@ -1272,11 +1272,11 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     <div className="bg-white p-4 rounded-2xl border border-amber-200 space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">Metode Terpilih:</span>
-                        <span className="font-bold text-[#082A4F]">{trackingData.booking.paymentMethod}</span>
+                        <span className="font-bold text-[#4B2B18]">{trackingData.booking.paymentMethod}</span>
                       </div>
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">Total Pembayaran:</span>
-                        <strong className="text-sm font-serif text-[#082A4F]">
+                        <strong className="text-sm font-serif text-[#4B2B18]">
                           {formatRupiah(trackingData.booking.totalAmount)}
                         </strong>
                       </div>
@@ -1302,7 +1302,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   {/* Assigned Therapist Card */}
                   <div className="bg-gradient-to-r from-amber-50 to-orange-50/60 border border-amber-200 rounded-3xl p-5 shadow-xs">
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-full bg-[#082A4F] text-[#D4AF37] font-serif font-bold text-xl flex items-center justify-center flex-shrink-0 ring-4 ring-[#D4AF37]/30 shadow-md">
+                      <div className="w-14 h-14 rounded-full bg-[#8B5A36] text-[#D4AF37] font-serif font-bold text-xl flex items-center justify-center flex-shrink-0 ring-4 ring-[#D4AF37]/30 shadow-md">
                         {trackingData.booking.therapistName
                           ? trackingData.booking.therapistName.charAt(0)
                           : 'S'}
@@ -1312,7 +1312,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Terapis Bersertifikasi Senzu</span>
                         </div>
-                        <h4 className="text-base font-bold text-[#082A4F] mt-1">
+                        <h4 className="text-base font-bold text-[#4B2B18] mt-1">
                           {trackingData.booking.therapistName || 'Terapis Berlisensi Senzu Palembang'}
                         </h4>
                         <p className="text-xs text-slate-600 mt-0.5">
@@ -1340,7 +1340,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                           target="_blank"
                           rel="noreferrer"
                           onClick={handleOpenConciergeWa}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#082A4F] text-white hover:bg-[#0E3D73] font-semibold text-[11px] transition shadow-2xs cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#8B5A36] text-white hover:bg-[#94603B] font-semibold text-[11px] transition shadow-2xs cursor-pointer"
                         >
                           <Phone className="w-3.5 h-3.5 text-[#D4AF37]" />
                           <span>Chat Konfirmasi Jadwal</span>
@@ -1351,7 +1351,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
 
                   {/* Customer Home Preparation Checklist */}
                   <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-5 space-y-3">
-                    <h5 className="text-xs font-bold text-[#082A4F] flex items-center gap-1.5">
+                    <h5 className="text-xs font-bold text-[#4B2B18] flex items-center gap-1.5">
                       <Sparkles className="w-4 h-4 text-[#D4AF37]" />
                       Panduan Persiapan Nyaman di Rumah
                     </h5>
@@ -1405,7 +1405,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                     />
                   ) : (
                     <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-4 text-xs text-slate-600 flex items-center gap-2.5">
-                      <ShieldCheck className="w-4 h-4 text-[#082A4F] flex-shrink-0" />
+                      <ShieldCheck className="w-4 h-4 text-[#4B2B18] flex-shrink-0" />
                       <span>
                         Demi privasi lokasi pelanggan, peta GPS langsung hanya ditampilkan pada sesi akun pemilik pesanan. Status perjalanan terapis tetap diperbarui secara otomatis.
                       </span>
@@ -1415,14 +1415,14 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   {/* Therapist Driver Info Card */}
                   <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 flex items-center justify-between gap-3 shadow-xs">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-full bg-[#082A4F] text-[#D4AF37] font-bold text-lg flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <div className="w-12 h-12 rounded-full bg-[#8B5A36] text-[#D4AF37] font-bold text-lg flex items-center justify-center flex-shrink-0 shadow-sm">
                         {trackingData.booking.therapistName ? trackingData.booking.therapistName.charAt(0) : 'T'}
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
                           Terapis Dalam Perjalanan:
                         </div>
-                        <div className="text-sm font-bold text-[#082A4F]">
+                        <div className="text-sm font-bold text-[#4B2B18]">
                           {trackingData.booking.therapistName || 'Terapis Senzu'}
                         </div>
                         <div className="text-xs text-slate-500">
@@ -1466,7 +1466,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   </div>
 
                   <div>
-                    <h4 className="text-base sm:text-lg font-bold text-[#082A4F]">
+                    <h4 className="text-base sm:text-lg font-bold text-[#4B2B18]">
                       Terapis Telah Sampai di Lokasi Anda!
                     </h4>
                     <p className="text-xs sm:text-sm text-teal-900 mt-1 max-w-md mx-auto">
@@ -1475,7 +1475,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   </div>
 
                   <div className="bg-white/80 backdrop-blur-xs p-4 rounded-2xl border border-teal-200 text-xs text-slate-700 space-y-2 max-w-md mx-auto text-left">
-                    <div className="flex items-center gap-2 font-bold text-[#082A4F]">
+                    <div className="flex items-center gap-2 font-bold text-[#4B2B18]">
                       <ShieldCheck className="w-4 h-4 text-emerald-600" />
                       <span>Ciri-ciri Terapis Resmi Senzu:</span>
                     </div>
@@ -1497,7 +1497,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
               {/* PHASE 5: Treatment (Sesi Berlangsung) */}
               {/* ------------------------------------------------------------- */}
               {trackingData.booking.status === 'Treatment' && (
-                <div className="bg-gradient-to-br from-[#082A4F] via-[#0E3D73] to-[#082A4F] text-white rounded-3xl p-6 space-y-5 shadow-xl border border-[#D4AF37]/50 relative overflow-hidden">
+                <div className="bg-gradient-to-br from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white rounded-3xl p-6 space-y-5 shadow-xl border border-[#D4AF37]/50 relative overflow-hidden">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full bg-purple-400 animate-ping"></span>
@@ -1571,7 +1571,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-[#B89628]" />
-                      <h4 className="font-bold text-sm text-[#082A4F]">
+                      <h4 className="font-bold text-sm text-[#4B2B18]">
                         Sesi Treatment Telah Selesai
                       </h4>
                     </div>
@@ -1595,7 +1595,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                             onClose();
                           }
                         }}
-                        className="flex-1 px-4 py-3 min-h-[44px] rounded-2xl bg-[#082A4F] hover:bg-[#0C3866] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
+                        className="flex-1 px-4 py-3 min-h-[44px] rounded-2xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
                       >
                         <Repeat className="w-4 h-4 text-[#D4AF37]" />
                         <span>Pesan Ulang (Repeat Order)</span>
@@ -1611,9 +1611,9 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setIsReviewModalOpen(true)}
-                          className="px-4 py-3 min-h-[44px] rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#082A4F] text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                          className="px-4 py-3 min-h-[44px] rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#B89628] hover:from-[#E5C158] hover:to-[#C9A432] text-[#4B2B18] text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
                         >
-                          <Star className="w-4 h-4 fill-[#082A4F] text-[#082A4F]" />
+                          <Star className="w-4 h-4 fill-[#4B2B18] text-[#4B2B18]" />
                           <span>Beri Ulasan Terapis (1-5★)</span>
                         </button>
                       )}
@@ -1626,27 +1626,27 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
               <div className="bg-[#FAF9F6] border border-slate-200 rounded-3xl p-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-[#082A4F]" />
+                    <Clock className="w-3.5 h-3.5 text-[#4B2B18]" />
                     Riwayat Perubahan Status (WIB)
                   </h5>
                   <button
                     type="button"
                     onClick={() => setShowManualSearch(true)}
-                    className="text-[11px] text-[#082A4F] hover:underline font-semibold cursor-pointer"
+                    className="text-[11px] text-[#4B2B18] hover:underline font-semibold cursor-pointer"
                   >
                     Lacak Booking Lain
                   </button>
                 </div>
 
-                <div className="border-l-2 border-[#082A4F]/20 ml-2 pl-4 space-y-4 pt-1">
+                <div className="border-l-2 border-[#8B5A36]/20 ml-2 pl-4 space-y-4 pt-1">
                   {(!trackingData.history || trackingData.history.length === 0) ? (
                     <p className="text-xs text-slate-400">Belum ada catatan riwayat status.</p>
                   ) : (
                     (trackingData.history || []).map((hist) => (
                       <div key={hist.id} className="relative">
-                        <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-[#082A4F] border-2 border-white ring-2 ring-[#082A4F]/20" />
+                        <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-[#8B5A36] border-2 border-white ring-2 ring-[#8B5A36]/20" />
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-[#082A4F]">{hist.status}</span>
+                          <span className="text-xs font-bold text-[#4B2B18]">{hist.status}</span>
                           <span className="text-[10px] text-slate-500 font-mono">
                             {hist.formattedWIB}
                           </span>
@@ -1677,7 +1677,7 @@ export const CustomerTrackingModal: React.FC<CustomerTrackingModalProps> = ({
             target="_blank"
             rel="noreferrer"
             onClick={handleOpenConciergeWa}
-            className="text-xs text-[#082A4F] font-semibold hover:underline flex items-center gap-1.5 cursor-pointer"
+            className="text-xs text-[#4B2B18] font-semibold hover:underline flex items-center gap-1.5 cursor-pointer"
           >
             <Phone className="w-3.5 h-3.5 text-emerald-600" />
             <span>Customer Care Senzu</span>
