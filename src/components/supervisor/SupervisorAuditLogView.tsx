@@ -72,7 +72,7 @@ export const SupervisorAuditLogView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
-          <h3 className="text-base sm:text-lg font-bold font-serif text-[#082A4F] flex items-center gap-2">
+          <h3 className="text-base sm:text-lg font-bold font-serif text-[#4B2B18] flex items-center gap-2">
             <History className="w-5 h-5 text-[#D4AF37]" />
             <span>Audit Trail Operasional Supervisor</span>
           </h3>
@@ -89,14 +89,14 @@ export const SupervisorAuditLogView: React.FC = () => {
               placeholder="Cari audit log..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:ring-2 focus:ring-[#082A4F]"
+              className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:ring-2 focus:ring-[#8B5A36]"
             />
           </div>
 
           <select
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium bg-white focus:ring-2 focus:ring-[#082A4F]"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium bg-white focus:ring-2 focus:ring-[#8B5A36]"
           >
             <option value="ALL">Semua Tindakan</option>
             <option value="reassign">Reassign Terapis</option>
@@ -122,7 +122,7 @@ export const SupervisorAuditLogView: React.FC = () => {
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-[#082A4F] text-white uppercase text-[11px] font-semibold">
+            <thead className="bg-[#8B5A36] text-white uppercase text-[11px] font-semibold">
               <tr>
                 <th className="py-3 px-4">Waktu (WIB)</th>
                 <th className="py-3 px-4">Tindakan</th>
@@ -151,7 +151,7 @@ export const SupervisorAuditLogView: React.FC = () => {
 
                     <td className="py-3 px-4">
                       {log.bookingCode ? (
-                        <span className="font-mono font-bold text-[#082A4F]">
+                        <span className="font-mono font-bold text-[#4B2B18]">
                           {log.bookingCode}
                         </span>
                       ) : log.therapistName ? (
