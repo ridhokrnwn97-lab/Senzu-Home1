@@ -130,7 +130,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0A335F] to-[#082A4F] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#8B5A36] text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#D4AF37]/30">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
             <Building2 className="w-6 h-6 text-[#D4AF37]" />
@@ -164,7 +164,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
             className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
               isReadOnly
                 ? 'bg-white/10 text-slate-400 cursor-not-allowed border border-white/10'
-                : 'bg-[#D4AF37] hover:bg-[#E5C158] text-[#082A4F] font-bold shadow-sm active:scale-95 cursor-pointer'
+                : 'bg-[#D4AF37] hover:bg-[#E5C158] text-[#4B2B18] font-bold shadow-sm active:scale-95 cursor-pointer'
             }`}
             title={isReadOnly ? 'Hanya Admin/Manager yang dapat mengedit' : 'Edit Pengaturan Perusahaan'}
           >
@@ -210,7 +210,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[11px]">Nama Legal Perusahaan:</span>
-                  <span className="text-sm font-bold text-[#082A4F] block">
+                  <span className="text-sm font-bold text-[#4B2B18] block">
                     {company.companyLegalName}
                   </span>
                 </div>
@@ -266,7 +266,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                   <span className="text-slate-500 block text-[11px]">Email Resmi Perusahaan:</span>
                   <a
                     href={`mailto:${company.officialEmail}`}
-                    className="font-semibold text-[#082A4F] hover:underline inline-flex items-center gap-1.5 mt-0.5"
+                    className="font-semibold text-[#4B2B18] hover:underline inline-flex items-center gap-1.5 mt-0.5"
                   >
                     <Mail className="w-3.5 h-3.5 text-[#D4AF37]" />
                     <span>{company.officialEmail}</span>
@@ -327,7 +327,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                 value={legalName}
                 onChange={(e) => setLegalName(e.target.value)}
                 required
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs font-bold text-[#082A4F]"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs font-bold text-[#4B2B18]"
                 placeholder="Contoh: PT KSBONE UNTUK KITA"
               />
               <p className="text-[10px] text-slate-400 mt-1">
@@ -344,7 +344,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                 value={brandName}
                 onChange={(e) => setBrandName(e.target.value)}
                 required
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs font-semibold"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs font-semibold"
                 placeholder="Contoh: SENZU REFLEXOLOGY & FAMILY MASSAGE"
               />
             </div>
@@ -360,7 +360,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs font-mono"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs font-mono"
                   placeholder="senzureflexology@gmail.com"
                 />
               </div>
@@ -380,7 +380,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
                   value={whatsapp}
                   onChange={(e) => setWhatsapp(e.target.value)}
                   required
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs font-mono font-bold text-emerald-700"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs font-mono font-bold text-emerald-700"
                   placeholder="+6289654623347"
                 />
               </div>
@@ -396,7 +396,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
               <select
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs bg-white"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs bg-white"
               >
                 {SUPPORTED_TIMEZONES.map((tz) => (
                   <option key={tz.value} value={tz.value}>
@@ -413,7 +413,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs bg-white font-semibold"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs bg-white font-semibold"
               >
                 <option value="ACTIVE">ACTIVE (Operasional Aktif)</option>
                 <option value="INACTIVE">INACTIVE (Nonaktif)</option>
@@ -429,7 +429,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
               rows={2}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#082A4F] text-xs"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#8B5A36] text-xs"
               placeholder="Jl. Riau No.3, 26 Ilir D. I, Kec. Ilir Bar. I, Kota Palembang, Sumatera Selatan"
             />
           </div>
@@ -486,7 +486,7 @@ export const CompanySettingsCard: React.FC<CompanySettingsCardProps> = ({
             <button
               type="submit"
               disabled={saving}
-              className="px-5 py-2.5 rounded-xl bg-[#082A4F] hover:bg-[#0A335F] text-white text-xs font-bold flex items-center gap-2 transition disabled:opacity-50 shadow-sm"
+              className="px-5 py-2.5 rounded-xl bg-[#8B5A36] hover:bg-[#94603B] text-white text-xs font-bold flex items-center gap-2 transition disabled:opacity-50 shadow-sm"
             >
               <Save className="w-4 h-4 text-[#D4AF37]" />
               <span>{saving ? 'Menyimpan ke Cloud...' : 'Simpan Profil Perusahaan'}</span>
