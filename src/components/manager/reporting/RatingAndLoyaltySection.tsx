@@ -28,7 +28,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
-            <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+            <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
               <Star className="w-4 h-4 text-[#B89628] fill-amber-400" />
               Rating Kepuasan &amp; Service Recovery
             </h3>
@@ -38,7 +38,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
           </div>
           {ratingMetrics.averageRating !== null && (
             <div className="text-right">
-              <div className="text-2xl font-bold text-[#082A4F] flex items-center gap-1 justify-end">
+              <div className="text-2xl font-bold text-[#4B2B18] flex items-center gap-1 justify-end">
                 <span>{ratingMetrics.averageRating}</span>
                 <span className="text-xs text-slate-400 font-normal">/ 5.0</span>
               </div>
@@ -98,7 +98,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
               {(lowRatingReviews || []).map((r) => (
                 <div key={r.id} className="p-2 bg-white rounded-lg border border-slate-200">
                   <div className="flex items-center justify-between font-semibold">
-                    <span className="text-[#082A4F]">{r.customerName} ({r.overallRating}★)</span>
+                    <span className="text-[#4B2B18]">{r.customerName} ({r.overallRating}★)</span>
                     <span className="text-slate-400 font-mono text-[10px]">{r.bookingCode}</span>
                   </div>
                   <p className="text-slate-600 italic mt-0.5 line-clamp-1">"{r.comment}"</p>
@@ -113,8 +113,8 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs p-5 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
-            <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-[#082A4F]" />
+            <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-[#4B2B18]" />
               Rekapitulasi Kanal Pembayaran
             </h3>
             <p className="text-xs text-slate-500">
@@ -136,7 +136,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-[#082A4F]">
+                    <span className="font-bold text-xs text-[#4B2B18]">
                       {pm.methodLabel}
                     </span>
                     {pm.isLegacyCash && (
@@ -145,7 +145,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
                       </span>
                     )}
                   </div>
-                  <span className="text-xs font-bold text-[#082A4F]">
+                  <span className="text-xs font-bold text-[#4B2B18]">
                     {formatRupiah(pm.paidAmount)}
                   </span>
                 </div>
@@ -164,7 +164,7 @@ export const RatingAndLoyaltySection: React.FC<RatingAndLoyaltySectionProps> = (
 
                 <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#082A4F] rounded-full"
+                    className="h-full bg-[#8B5A36] rounded-full"
                     style={{ width: `${Math.min(100, pm.sharePct)}%` }}
                   />
                 </div>
