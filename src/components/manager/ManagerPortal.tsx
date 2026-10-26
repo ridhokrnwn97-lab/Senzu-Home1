@@ -191,7 +191,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Top Manager Portal Header */}
-      <div className="bg-gradient-to-r from-[#082A4F] to-[#0A3866] rounded-3xl p-6 sm:p-8 text-white shadow-md relative overflow-hidden">
+      <div className="bg-gradient-to-r from-[#8B5A36] to-[#94603B] rounded-3xl p-6 sm:p-8 text-white shadow-md relative overflow-hidden">
         <div className="absolute right-0 top-0 -mt-8 -mr-8 w-64 h-64 bg-[#D4AF37]/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
@@ -228,7 +228,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
             onClick={() => setActiveSection('dashboard')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeSection === 'dashboard'
-                ? 'bg-[#D4AF37] text-[#082A4F] shadow-md'
+                ? 'bg-[#D4AF37] text-[#4B2B18] shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
@@ -241,7 +241,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
             onClick={() => setActiveSection('cases')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeSection === 'cases'
-                ? 'bg-[#D4AF37] text-[#082A4F] shadow-md'
+                ? 'bg-[#D4AF37] text-[#4B2B18] shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
@@ -254,7 +254,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
             onClick={() => setActiveSection('master_data')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeSection === 'master_data'
-                ? 'bg-[#D4AF37] text-[#082A4F] shadow-md'
+                ? 'bg-[#D4AF37] text-[#4B2B18] shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
@@ -270,7 +270,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
             onClick={() => setActiveSection('reports')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeSection === 'reports'
-                ? 'bg-[#D4AF37] text-[#082A4F] shadow-md'
+                ? 'bg-[#D4AF37] text-[#4B2B18] shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
@@ -283,7 +283,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({
             onClick={() => setActiveSection('audit_log')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer whitespace-nowrap ${
               activeSection === 'audit_log'
-                ? 'bg-[#D4AF37] text-[#082A4F] shadow-md'
+                ? 'bg-[#D4AF37] text-[#4B2B18] shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/10'
             }`}
           >
