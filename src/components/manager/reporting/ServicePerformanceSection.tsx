@@ -27,7 +27,7 @@ export const ServicePerformanceSection: React.FC<ServicePerformanceSectionProps>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div>
-          <h3 className="font-bold text-[#082A4F] text-base flex items-center gap-2">
+          <h3 className="font-bold text-[#4B2B18] text-base flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#B89628]" />
             Kinerja Layanan &amp; Paket Treatment
           </h3>
@@ -46,7 +46,7 @@ export const ServicePerformanceSection: React.FC<ServicePerformanceSectionProps>
             onClick={() => setDurationFilter('ALL')}
             className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition ${
               durationFilter === 'ALL'
-                ? 'bg-[#082A4F] text-white shadow-xs'
+                ? 'bg-[#8B5A36] text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
@@ -59,7 +59,7 @@ export const ServicePerformanceSection: React.FC<ServicePerformanceSectionProps>
               onClick={() => setDurationFilter(dur)}
               className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition ${
                 durationFilter === dur
-                  ? 'bg-[#082A4F] text-white shadow-xs'
+                  ? 'bg-[#8B5A36] text-white shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -99,7 +99,7 @@ export const ServicePerformanceSection: React.FC<ServicePerformanceSectionProps>
                   title="Klik untuk memfilter laporan berdasarkan treatment ini"
                 >
                   <td className="py-2.5 px-3">
-                    <div className="font-bold text-[#082A4F] flex items-center gap-1.5">
+                    <div className="font-bold text-[#4B2B18] flex items-center gap-1.5">
                       <span className="w-4 h-4 rounded-full bg-slate-100 text-slate-600 text-[10px] flex items-center justify-center font-mono">
                         {idx + 1}
                       </span>
@@ -117,7 +117,7 @@ export const ServicePerformanceSection: React.FC<ServicePerformanceSectionProps>
                   <td className="py-2.5 px-3 text-right text-emerald-700 font-semibold">
                     {s.completedCount}
                   </td>
-                  <td className="py-2.5 px-3 text-right font-bold text-[#082A4F]">
+                  <td className="py-2.5 px-3 text-right font-bold text-[#4B2B18]">
                     {formatRupiah(s.realizedRevenue)}
                   </td>
                   <td className="py-2.5 px-3 text-right text-slate-600">
