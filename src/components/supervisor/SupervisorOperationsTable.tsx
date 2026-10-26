@@ -195,7 +195,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
             placeholder="Cari kode booking, pelanggan, terapis, no WA, area..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] focus:border-[#082A4F] bg-slate-50/60 font-medium"
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] focus:border-[#8B5A36] bg-slate-50/60 font-medium"
           />
           {searchQuery && (
             <button
@@ -216,7 +216,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
               type="button"
               onClick={() => setDateFilter('TODAY')}
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                dateFilter === 'TODAY' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                dateFilter === 'TODAY' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Hari Ini
@@ -225,7 +225,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
               type="button"
               onClick={() => setDateFilter('TOMORROW')}
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                dateFilter === 'TOMORROW' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                dateFilter === 'TOMORROW' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Besok
@@ -234,7 +234,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
               type="button"
               onClick={() => setDateFilter('ALL')}
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                dateFilter === 'ALL' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                dateFilter === 'ALL' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Semua
@@ -245,7 +245,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
           <select
             value={selectedArea}
             onChange={(e) => setSelectedArea(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium bg-white focus:ring-2 focus:ring-[#082A4F]"
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium bg-white focus:ring-2 focus:ring-[#8B5A36]"
           >
             <option value="ALL">Semua Area Palembang</option>
             {PALEMBANG_AREAS.map((area) => (
@@ -275,7 +275,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
               type="button"
               onClick={() => setViewMode('TABLE')}
               className={`p-1.5 rounded-lg transition cursor-pointer ${
-                viewMode === 'TABLE' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                viewMode === 'TABLE' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
               title="Tampilan Tabel"
             >
@@ -285,7 +285,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
               type="button"
               onClick={() => setViewMode('CARDS')}
               className={`p-1.5 rounded-lg transition cursor-pointer ${
-                viewMode === 'CARDS' ? 'bg-[#082A4F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                viewMode === 'CARDS' ? 'bg-[#8B5A36] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
               title="Tampilan Kartu"
             >
@@ -300,7 +300,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
         <div className="flex items-center gap-2">
           <span>Menampilkan <strong>{filteredBookings.length}</strong> pesanan</span>
           {activeFilter !== 'ALL' && (
-            <span className="px-2 py-0.5 rounded-full bg-[#082A4F]/10 text-[#082A4F] font-bold text-[10px]">
+            <span className="px-2 py-0.5 rounded-full bg-[#8B5A36]/10 text-[#4B2B18] font-bold text-[10px]">
               Filter: {activeFilter}
             </span>
           )}
@@ -310,7 +310,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
           <button
             type="button"
             onClick={() => onFilterChange('ALL')}
-            className="text-[#082A4F] hover:underline font-semibold text-[11px] cursor-pointer"
+            className="text-[#4B2B18] hover:underline font-semibold text-[11px] cursor-pointer"
           >
             Reset Semua Filter
           </button>
@@ -321,7 +321,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
       {viewMode === 'TABLE' ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-[#082A4F] text-white uppercase text-[11px] font-semibold tracking-wider">
+            <thead className="bg-[#8B5A36] text-white uppercase text-[11px] font-semibold tracking-wider">
               <tr>
                 <th className="py-3.5 px-4">Jadwal & Jam</th>
                 <th className="py-3.5 px-4">Kode & Layanan</th>
@@ -363,7 +363,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                       {/* Schedule */}
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">{b.scheduleDate}</div>
-                        <div className="text-[11px] font-mono text-[#082A4F] font-bold">
+                        <div className="text-[11px] font-mono text-[#4B2B18] font-bold">
                           {b.scheduleTime} WIB
                         </div>
                         {timing.isToday && !isTerminal && (
@@ -385,7 +385,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
 
                       {/* Code & Service */}
                       <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-[#082A4F] flex items-center gap-1.5">
+                        <div className="font-mono font-bold text-[#4B2B18] flex items-center gap-1.5">
                           <span>{b.bookingCode}</span>
                           {b.issueReport && (
                             <span
@@ -411,7 +411,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                           {b.area}
                         </div>
                         {b.genderPreference && b.genderPreference !== 'Bebas' && (
-                          <div className="text-[9px] text-[#082A4F] font-bold">
+                          <div className="text-[9px] text-[#4B2B18] font-bold">
                             Pref: {b.genderPreference}
                           </div>
                         )}
@@ -508,7 +508,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                             className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
                             title="Buka Detail Order"
                           >
-                            <Eye className="w-4 h-4 text-[#082A4F]" />
+                            <Eye className="w-4 h-4 text-[#4B2B18]" />
                           </button>
 
                           {/* Assign / Reassign Button */}
@@ -522,7 +522,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                                   ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                                   : b.therapistId
                                   ? 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200'
-                                  : 'bg-[#082A4F] text-white hover:bg-[#0E3D73] shadow-2xs'
+                                  : 'bg-[#8B5A36] text-white hover:bg-[#94603B] shadow-2xs'
                               }`}
                               title={
                                 !isPaid
@@ -592,7 +592,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                   <div className="space-y-2">
                     <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5">
                       <div>
-                        <div className="font-mono font-bold text-sm text-[#082A4F]">
+                        <div className="font-mono font-bold text-sm text-[#4B2B18]">
                           {b.bookingCode}
                         </div>
                         <div className="text-xs font-semibold text-slate-800 mt-0.5">
@@ -622,7 +622,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                         Area: <strong>{b.area}</strong>
                       </div>
                       {b.genderPreference && b.genderPreference !== 'Bebas' && (
-                        <div className="text-[11px] text-[#082A4F] font-bold">
+                        <div className="text-[11px] text-[#4B2B18] font-bold">
                           Preferensi Terapis: {b.genderPreference}
                         </div>
                       )}
@@ -654,7 +654,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                     <button
                       type="button"
                       onClick={() => onOpenBookingDetail(b)}
-                      className="flex-1 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-[#082A4F] transition flex items-center justify-center gap-1 cursor-pointer"
+                      className="flex-1 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-[#4B2B18] transition flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>Detail</span>
@@ -668,7 +668,7 @@ export const SupervisorOperationsTable: React.FC<SupervisorOperationsTableProps>
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                           !isPaid
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                            : 'bg-[#082A4F] text-white hover:bg-[#0E3D73] shadow-xs'
+                            : 'bg-[#8B5A36] text-white hover:bg-[#94603B] shadow-xs'
                         }`}
                       >
                         <UserCheck className="w-3.5 h-3.5 text-[#D4AF37]" />
