@@ -132,7 +132,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
   return (
     <div className="space-y-4">
       {/* Top Banner: Apa yang harus saya kerjakan sekarang? */}
-      <div className="bg-gradient-to-r from-[#082A4F] via-[#0D3B68] to-[#12487D] rounded-2xl p-4 sm:p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-[#8B5A36] via-[#94603B] to-[#94603B] rounded-2xl p-4 sm:p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#F5DF87] text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
@@ -175,7 +175,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
             onClick={() => setFilterType('ALL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-1.5 ${
               filterType === 'ALL'
-                ? 'bg-[#082A4F] text-white shadow-sm'
+                ? 'bg-[#8B5A36] text-white shadow-sm'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
@@ -270,7 +270,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
             placeholder="Cari kode, nama, nomor WA..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#082A4F] bg-slate-50/50"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#8B5A36] bg-slate-50/50"
           />
         </div>
       </div>
@@ -336,7 +336,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
                       </span>
 
                       {/* Booking Code */}
-                      <span className="font-mono font-bold text-xs text-[#082A4F] bg-slate-100 px-2 py-0.5 rounded">
+                      <span className="font-mono font-bold text-xs text-[#4B2B18] bg-slate-100 px-2 py-0.5 rounded">
                         {item.bookingCode}
                       </span>
 
@@ -357,7 +357,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
                     </div>
 
                     {/* Title */}
-                    <h4 className="text-sm sm:text-base font-bold text-slate-900 group-hover:text-[#082A4F] transition">
+                    <h4 className="text-sm sm:text-base font-bold text-slate-900 group-hover:text-[#4B2B18] transition">
                       {item.title}
                     </h4>
 
@@ -445,7 +445,7 @@ export const CssWorkQueueSection: React.FC<CssWorkQueueSectionProps> = ({
                           ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
                           : item.actionType === 'supervisor_escalate'
                           ? 'bg-red-600 hover:bg-red-700 shadow-red-200'
-                          : 'bg-[#082A4F] hover:bg-[#0D3B68]'
+                          : 'bg-[#8B5A36] hover:bg-[#94603B]'
                       }`}
                     >
                       <span>{item.actionLabel}</span>
