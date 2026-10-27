@@ -147,7 +147,7 @@ test('Manager can switch from Test back to manual; only the explicit real form s
     await page.locator('#payment-xendit-test').click();
     await page.getByRole('heading',{name:'Xendit — Uji Checkout Booking',exact:true}).waitFor();
     assert.equal(await page.locator('#btn-submit-booking').isDisabled(),true);
-    await page.getByText('Transfer BNI',{exact:true}).click();
+    await page.locator('#payment-manual').click();
     assert.equal(await page.locator('#btn-submit-booking').isEnabled(),true);
     assert.equal(await page.getByRole('heading',{name:'Xendit — Uji Checkout Booking',exact:true}).count(),0);
     assert.equal(await page.evaluate(()=>sessionStorage.getItem('senzu:xendit-booking-test:manager1')),null);
@@ -173,7 +173,23 @@ test('uncertain creation survives reload without a duplicate checkout and keeps 
 test('customer Live selection submits full net booking through server checkout without adding a conversion trigger', async()=>{
   const {context,page,state,errors}=await pageFixture('customer',false,true);
   try {
+    await page.locator('#payment-xendit-live').waitFor();
+    const options=page.locator('#payment-manual').locator('..');
+    assert.equal(await options.getByRole('button').count(),2);
+    assert.match(await options.innerText(),/Transfer Manual.*Upload Bukti Transfer.*Bayar Otomatis di Verifikasi/s);
+    assert.equal(await page.locator('#payment-manual').getAttribute('aria-pressed'),'true');
+    for(const width of [1440,390]) {
+      await page.setViewportSize({width,height:1000});
+      await options.scrollIntoViewIfNeeded();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      if(process.env.XENDIT_UI_SCREENSHOTS) {
+        await fs.mkdir(process.env.XENDIT_UI_SCREENSHOTS,{recursive:true});
+        await options.screenshot({path:path.join(process.env.XENDIT_UI_SCREENSHOTS,`payment-options-${width}.png`)});
+      }
+    }
+    assert.deepEqual(await page.evaluate(()=>[window.__fixture.bookings,window.__fixture.meta.length]),[0,0]);
     await page.locator('#payment-xendit-live').click();
+    assert.equal(await page.locator('#payment-manual').getAttribute('aria-pressed'),'false');
     await page.locator('#btn-submit-booking').click();await page.getByText('Live payment fixture opened',{exact:true}).waitFor();
     const [input]=await page.evaluate(()=>window.__fixture.bookingInputs);
     assert.equal(input.paymentMethod,'Xendit');assert.equal(input.totalAmount,280000);assert.ok(input.checkoutAttemptId);
@@ -190,9 +206,9 @@ test('available Live option does not replace the default manual booking flow or 
     assert.equal(await page.locator('#btn-submit-booking').isDisabled(),true);
     await page.locator('#payment-xendit-live').click();
     assert.equal(await page.locator('#btn-submit-booking').isEnabled(),true);
-    await page.getByText('Transfer BNI',{exact:true}).click();
+    await page.locator('#payment-manual').click();
     await page.locator('#btn-submit-booking').click();await page.getByText('Manual payment fixture opened',{exact:true}).waitFor();
-    assert.equal((await page.evaluate(()=>window.__fixture.bookingInputs))[0].paymentMethod,'Transfer BNI');
+    assert.equal((await page.evaluate(()=>window.__fixture.bookingInputs))[0].paymentMethod,'QRIS');
     assert.equal(state.calls.filter(c=>c.action==='checkout').length,0);assert.deepEqual(errors,[]);
   }finally{await context.close();}
 });
