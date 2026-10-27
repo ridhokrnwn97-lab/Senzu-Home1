@@ -6,9 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   ShieldCheck,
-  CreditCard,
-  QrCode,
-  Banknote,
+  Landmark,
   Copy,
   ExternalLink,
   ChevronRight,
@@ -1232,63 +1230,41 @@ export const BookingForm: React.FC<BookingFormProps> = ({
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  {
-                    id: 'QRIS',
-                    name: 'QRIS Senzu',
-                    desc: 'Scan semua E-Wallet & Mobile Banking',
-                    icon: QrCode,
-                  },
-                  {
-                    id: 'Transfer BNI',
-                    name: 'Transfer BNI',
-                    desc: 'Rekening Resmi PT KSBONE',
-                    icon: CreditCard,
-                  },
-                  {
-                    id: 'Transfer Bank Mandiri',
-                    name: 'Transfer Bank Mandiri',
-                    desc: 'Rekening Resmi PT KSBONE',
-                    icon: CreditCard,
-                  },
-                  {
-                    id: 'Transfer BRI',
-                    name: 'Transfer BRI',
-                    desc: 'Rekening Resmi PT KSBONE',
-                    icon: CreditCard,
-                  },
-                ].map((pm) => {
-                  const isSelected = !xenditTestSelected && paymentMethod === pm.id;
-                  const Icon = pm.icon;
-                  return (
-                    <div
-                      key={pm.id}
-                      onClick={() => { selectXenditTest(false); setPaymentMethod(pm.id as PaymentMethod); }}
-                      className={`p-3.5 min-h-[64px] rounded-2xl border-2 cursor-pointer transition flex items-center gap-3 active:scale-[0.98] ${
-                        isSelected
-                          ? 'border-[#8B5A36] bg-[#8B5A36]/5 shadow-sm ring-1 ring-[#8B5A36]'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                          isSelected ? 'bg-[#8B5A36] text-white' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-[#4B2B18]">{pm.name}</div>
-                        <div className="text-[11px] text-slate-500">{pm.desc}</div>
-                      </div>
-                    </div>
-                  );
-                })}
+                <button
+                  type="button"
+                  id="payment-manual"
+                  aria-pressed={!xenditTestSelected && paymentMethod !== 'Xendit'}
+                  onClick={() => {
+                    selectXenditTest(false);
+                    if (paymentMethod === 'Xendit') setPaymentMethod('QRIS');
+                  }}
+                  className={`p-3.5 min-h-[64px] rounded-2xl border-2 text-left transition flex items-center gap-3 active:scale-[0.98] ${
+                    !xenditTestSelected && paymentMethod !== 'Xendit'
+                      ? 'border-[#8B5A36] bg-[#8B5A36]/5 shadow-sm ring-1 ring-[#8B5A36]'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <span className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    !xenditTestSelected && paymentMethod !== 'Xendit' ? 'bg-[#8B5A36] text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    <Landmark className="w-5 h-5" />
+                  </span>
+                  <span>
+                    <span className="block text-xs font-bold text-[#4B2B18]">Transfer Manual</span>
+                    <span className="block text-[11px] text-[#4B2B18]">(Upload Bukti Transfer)</span>
+                    <span className="block text-[11px] text-slate-500">QRIS Senzu · BNI · Mandiri · BRI</span>
+                  </span>
+                </button>
                 {liveAvailable && pricingBreakdown.finalAmount >= 10000 && <button type="button" id="payment-xendit-live" aria-pressed={!xenditTestSelected && paymentMethod === 'Xendit'}
                   onClick={() => { selectXenditTest(false); setPaymentMethod('Xendit'); }}
-                  className={`rounded-2xl border-2 p-3.5 text-left ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'border-[#8B5A36] bg-[#8B5A36]/5' : 'border-slate-200 bg-white'}`}>
-                  <span className="block text-xs font-bold text-[#4B2B18]">Bayar Online — Xendit</span>
-                  <span className="text-[11px] text-slate-500">QRIS & Virtual Account · Bayar 100% di awal</span>
+                  className={`rounded-2xl border-2 p-3.5 text-left flex items-center gap-3 ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'border-[#8B5A36] bg-[#8B5A36]/5' : 'border-slate-200 bg-white'}`}>
+                  <span className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${!xenditTestSelected && paymentMethod === 'Xendit' ? 'bg-[#8B5A36] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <ShieldCheck className="w-5 h-5" />
+                  </span>
+                  <span>
+                    <span className="block text-xs font-bold text-[#4B2B18]">Bayar Otomatis di Verifikasi</span>
+                    <span className="block text-[11px] text-slate-500">QRIS & Virtual Account · Xendit</span>
+                  </span>
                 </button>}
                 {canTestXendit && <button type="button" id="payment-xendit-test" aria-pressed={xenditTestSelected}
                   onClick={() => selectXenditTest(true)}
