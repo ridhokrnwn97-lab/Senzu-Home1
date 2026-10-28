@@ -64,6 +64,7 @@ async function fixture(query = '') {
     if (action === 'activate') { result.enabled = true; result.activatedAt = '2026-10-22T04:00:00Z'; result.taxPolicy = 'no_extra_tax'; state.status = structuredClone(result); }
     if (action === 'activateFees') { result.feesEnabled = true; result.feesActivatedAt ||= '2026-10-22T12:00:00Z'; result.feePolicy = 'expense_including_vat'; state.status = structuredClone(result); }
     if (action === 'pauseFees') { result.feesEnabled = false; state.status = structuredClone(result); }
+    if (action === 'configureManual') {result.manual={enabled:true,activatedAt:'2026-10-27T07:00:00Z',accounts:Object.fromEntries(Object.entries(payload.accounts).map(([key,code])=>[key,{code,name:key==='MANDIRI'?'Bank Mandiri':key==='BRI'?'Bank BRI':'Bank BNI'}]))};state.status=structuredClone(result);}
     if (action === 'pause') { result.enabled = false; state.status = structuredClone(result); }
     if (state.delay && ['preview', 'netPreview'].includes(action)) await state.delay;
     if (state.html) await route.fulfill({ status: 502, contentType: 'text/html', body: '<html>private provider error</html>' }).catch(() => {});
@@ -91,10 +92,10 @@ test('mount only reads status; historical preview has no activation, financial w
 test('activation requires preview plus both confirmations and server enablement', async () => {
   const f = await fixture(); try {
     await ready(f.page); const activate = f.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' });
-    await f.page.getByRole('checkbox').nth(0).check(); await f.page.getByRole('checkbox').nth(1).check(); assert.equal(await activate.isDisabled(), true);
-    await preview(f.page); assert.equal(await f.page.getByRole('checkbox').nth(0).isChecked(), false);
-    await f.page.getByRole('checkbox').nth(0).check(); assert.equal(await activate.isDisabled(), true);
-    await f.page.getByRole('checkbox').nth(1).check(); assert.equal(await activate.isEnabled(), true);
+    await f.page.getByRole('checkbox', { name: 'Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.', exact: true }).check(); await f.page.getByRole('checkbox', { name: 'Finance sudah memastikan transaksi ini dicatat tanpa tambahan pajak. Jika penjualan memerlukan pajak, aktivasi menunggu penyesuaian.', exact: true }).check(); assert.equal(await activate.isDisabled(), true);
+    await preview(f.page); assert.equal(await f.page.getByRole('checkbox', { name: 'Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.', exact: true }).isChecked(), false);
+    await f.page.getByRole('checkbox', { name: 'Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.', exact: true }).check(); assert.equal(await activate.isDisabled(), true);
+    await f.page.getByRole('checkbox', { name: 'Finance sudah memastikan transaksi ini dicatat tanpa tambahan pajak. Jika penjualan memerlukan pajak, aktivasi menunggu penyesuaian.', exact: true }).check(); assert.equal(await activate.isEnabled(), true);
     await activate.click(); await f.page.getByText('Aktif', { exact: true }).waitFor();
     assert.deepEqual(f.state.calls.at(-1).payload, { acknowledgement: 'NEW_LIVE_XENDIT_PAYMENTS_ONLY', taxPolicy: 'no_extra_tax' });
     await f.page.getByRole('button', { name: 'Jeda Pengiriman Accurate' }).click(); await f.page.getByText('Dijeda', { exact: true }).waitFor();
@@ -103,7 +104,7 @@ test('activation requires preview plus both confirmations and server enablement'
   const g = await fixture(); try {
     await ready(g.page); g.state.status.writesConfigured = false; await g.page.getByRole('button', { name: 'Muat Ulang Status Pencatatan' }).click();
     await g.page.getByText('Pengiriman dari server belum diizinkan.', { exact: true }).waitFor(); await preview(g.page);
-    await g.page.getByRole('checkbox').nth(0).check(); await g.page.getByRole('checkbox').nth(1).check(); assert.equal(await g.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' }).isDisabled(), true);
+    await g.page.getByRole('checkbox', { name: 'Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.', exact: true }).check(); await g.page.getByRole('checkbox', { name: 'Finance sudah memastikan transaksi ini dicatat tanpa tambahan pajak. Jika penjualan memerlukan pajak, aktivasi menunggu penyesuaian.', exact: true }).check(); assert.equal(await g.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' }).isDisabled(), true);
   } finally { await g.context.close(); }
 });
 test('non-managers never request private queue status', async () => {
@@ -126,7 +127,7 @@ test('late preview after account switch or logout cannot retain preview or conse
     await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX01'); await f.page.getByRole('button', { name: 'Pratinjau Tanpa Mencatat' }).click();
     await f.page.evaluate(() => window.__setAuth('manager2')); release(); await ready(f.page);
     assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), ''); assert.equal(await f.page.getByText(previewFixture.note, { exact: true }).count(), 0);
-    assert.equal(await f.page.getByRole('checkbox').nth(0).isChecked(), false);
+    assert.equal(await f.page.getByRole('checkbox', { name: 'Saya memahami bahwa aktivasi membuat uang muka, penerimaan, dan faktur untuk booking baru melalui Xendit Live.', exact: true }).isChecked(), false);
     await f.page.evaluate(() => window.__setAuth(null)); assert.equal(await f.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' }).isDisabled(), true);
     assert.deepEqual(f.errors, []); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
   } finally { release?.(); await f.context.close(); }
@@ -206,7 +207,7 @@ test('late net results after account switch or logout are discarded and reads ar
       await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX01');
       await f.page.getByRole('button', { name: 'Pratinjau Biaya & Neto Xendit' }).evaluate(button => { button.click(); button.click(); });
       await f.page.getByText('Memeriksa data…', { exact: true }).waitFor();
-      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); if (nextUser) await ready(f.page);
+      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); await f.page.waitForFunction(()=>document.querySelector('input[aria-label="Booking untuk pratinjau Accurate"]')?.value===''); if (nextUser) await ready(f.page);
       assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), '');
       assert.equal(await f.page.getByRole('status', { name: 'Hasil biaya dan neto Xendit' }).count(), 0);
       assert.ok(f.state.calls.filter(c => c.action === 'netPreview').length <= 1); assert.equal(f.state.calls.some(c => ['activate', 'retry', 'run'].includes(c.action)), false);
@@ -259,7 +260,7 @@ test('late diagnostics cannot survive account switch or logout', async () => {
     const f = await fixture(); let release; try {
       await ready(f.page); f.state.net = structuredClone(stateDiagnosticFixture); f.state.delay = new Promise(r => release = r);
       await netPreview(f.page); await f.page.getByText('Memeriksa data…', { exact: true }).waitFor();
-      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); if (nextUser) await ready(f.page);
+      await f.page.evaluate(uid => window.__setAuth(uid), nextUser); release(); await f.page.waitForFunction(()=>document.querySelector('input[aria-label="Booking untuk pratinjau Accurate"]')?.value===''); if (nextUser) await ready(f.page);
       assert.equal(await f.page.getByRole('alert', { name: 'Pemeriksaan status API Xendit' }).count(), 0);
       assert.equal(await f.page.getByLabel('Booking untuk pratinjau Accurate').inputValue(), ''); assert.deepEqual(await f.page.evaluate(() => window.__events), []);
     } finally { release?.(); await f.context.close(); }
@@ -301,3 +302,19 @@ test('fee journal status is distinct from gross documents and historical exclusi
   }finally{await f.context.close();}
 });
 
+
+
+test('manual mappings use approved BNI/QRIS, Mandiri and BRI codes; require confirmation and preserve account-switch isolation',async()=>{
+  const f=await fixture();try{
+    await ready(f.page);const activate=f.page.getByRole('button',{name:'Periksa Akun & Aktifkan Manual',exact:true});
+    assert.equal(await activate.isDisabled(),true);
+    f.state.status.enabled=true;f.state.status.activatedAt='2026-10-22T04:00:00Z';f.state.status.taxPolicy='no_extra_tax';
+    await f.page.getByRole('button',{name:'Muat Ulang Status Pencatatan',exact:true}).click();await ready(f.page);
+    assert.equal(await activate.isDisabled(),true);
+    const ack=f.page.getByRole('checkbox',{name:/Finance sudah memastikan akun penerimaan/});await ack.check();await activate.click();await ready(f.page);
+    const call=f.state.calls.find(c=>c.action==='configureManual');assert.deepEqual(call.payload,{accounts:{BNI:'110204',MANDIRI:'110203',BRI:'110205',QRIS:'110204'},acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'});
+    assert.equal(await ack.isChecked(),false);assert.equal(await f.page.getByText('BNI: 110204 — Bank BNI',{exact:true}).count(),1);
+    await ack.check();await f.page.evaluate(()=>window.__setAuth('manager2'));await f.page.waitForFunction(()=>[...document.querySelectorAll('input[type=checkbox]')].every(e=>!e.checked));await ready(f.page);assert.equal(await ack.isChecked(),false);
+    assert.deepEqual(await f.page.evaluate(()=>window.__events),[]);assert.deepEqual(f.errors,[]);
+  }finally{await f.context.close();}
+});
