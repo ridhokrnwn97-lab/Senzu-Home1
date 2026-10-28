@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
+import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_MANUAL_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
   type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetResult } from './accurateSyncContracts';
 
 async function request(action: string, body: Record<string, unknown>, signal?: AbortSignal) {
@@ -17,7 +17,7 @@ async function request(action: string, body: Record<string, unknown>, signal?: A
     'Permintaan Accurate belum berhasil.' + (typeof value?.code === 'string' && /^[A-Z_]{1,60}$/.test(value.code) ? ` Kode: ${value.code}.` : ' Coba muat ulang.'));
   return value;
 }
-export async function accurateSyncAction(action: 'status' | 'activate' | 'activateFees' | 'pauseFees' | 'pause' | 'run' | 'retry', bookingId?: string, signal?: AbortSignal): Promise<AccurateSyncStatus> {
+export async function accurateSyncAction(action: 'status' | 'activate' | 'activateFees' | 'pauseFees' | 'pauseManual' | 'pause' | 'run' | 'retry', bookingId?: string, signal?: AbortSignal): Promise<AccurateSyncStatus> {
   const body = action === 'activateFees' ? { acknowledgement: ACCURATE_FEE_ACK, feePolicy: 'expense_including_vat' } : action === 'activate' ? { acknowledgement: ACCURATE_SYNC_ACK, taxPolicy: 'no_extra_tax' } : action === 'retry' ? { bookingId } : {};
   const v = await request(action, body, signal);
   if (v.mode !== 'posting_v1' || v.databaseId !== ACCURATE_SYNC_DATABASE_ID ||
@@ -27,6 +27,11 @@ export async function accurateSyncAction(action: 'status' | 'activate' | 'activa
       !(v.feesActivatedAt === undefined || v.feesActivatedAt === null || typeof v.feesActivatedAt === 'string' && Number.isFinite(Date.parse(v.feesActivatedAt))) ||
       ![undefined, null, 'expense_including_vat'].includes(v.feePolicy) ||
       (v.feesEnabled === true && (!v.feesActivatedAt || v.feePolicy !== 'expense_including_vat')) ||
+      !(v.manual === undefined || v.manual === null || typeof v.manual.enabled === 'boolean' &&
+        typeof v.manual.activatedAt === 'string' && Number.isFinite(Date.parse(v.manual.activatedAt)) &&
+        v.manual.accounts && typeof v.manual.accounts === 'object' && !Array.isArray(v.manual.accounts) &&
+        Object.entries(v.manual.accounts).every(([key,row]: [string,any]) => ['BNI','MANDIRI','BRI','QRIS'].includes(key) &&
+          row && typeof row.code === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(row.code) && row.code !== '110103' && typeof row.name === 'string' && row.name.trim())) ||
       ![null, 'no_extra_tax'].includes(v.taxPolicy) || !Array.isArray(v.jobs) || v.jobs.length > 20 ||
       v.jobs.some((j: any) => !/^[a-f0-9]{64}$/.test(j?.id || '') || typeof j.bookingCode !== 'string' || !/^SH-\d{6}-[A-Z0-9]{5,20}$/.test(j.bookingCode) ||
         !Number.isSafeInteger(j.amount) || j.amount < 10000 || j.amount > 10000000 || !['queued', 'processing', 'waiting_service', 'waiting_fee', 'retry', 'review', 'complete'].includes(j.state) ||
@@ -54,4 +59,9 @@ export async function accurateXenditNetPreview(bookingId: string, signal?: Abort
   const v = await request('netPreview', { bookingId }, signal);
   if (!(isAccurateXenditNetPreview(v) || isAccurateXenditStateDiagnostic(v)) || bookingId !== `bk_${v.bookingCode}`) throw new Error('Respons pratinjau neto Xendit tidak valid.');
   return v;
+}
+
+export async function configureAccurateManual(accounts: Record<string, string>, signal?: AbortSignal): Promise<AccurateSyncStatus> {
+  await request('configureManual', { accounts, acknowledgement: ACCURATE_MANUAL_ACK }, signal);
+  return accurateSyncAction('status', undefined, signal);
 }
