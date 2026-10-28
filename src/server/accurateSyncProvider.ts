@@ -130,6 +130,14 @@ export function createAccurateSyncProvider(deps: Dependencies) {
         }
       }
     }
+    async function manualAccount(code: string, expectedName?: string) {
+      if (!/^[A-Za-z0-9._-]{1,40}$/.test(code) || code === '110103') throw syncFailure('SYNC_MANUAL_ACCOUNT_INVALID', true);
+      const data = await get('glaccount/detail.do', { no: code });
+      if (!data || !positiveId(data.id) || data.no !== code || data.suspended === true || data.accountType !== 'CASH_BANK' ||
+          (data.currency?.code || data.currencyCode) !== 'IDR' || typeof data.name !== 'string' || !data.name.trim() ||
+          expectedName !== undefined && data.name !== expectedName) throw syncFailure('SYNC_MANUAL_ACCOUNT_INVALID', true);
+      return { code, name: data.name };
+    }
     async function feeMasters() {
       for (const code of ['600031', '110103']) {
         const expected = ACCURATE_MASTERS.find(v => v.kind === 'account' && v.code === code);
@@ -152,7 +160,7 @@ export function createAccurateSyncProvider(deps: Dependencies) {
       const path = kind === 'down_payment' ? 'sales-invoice/create-down-payment.do' : `${resource(kind)}/save.do`;
       return request(`${origin}/accurate/api/${path}`, 'POST', payload);
     }
-    return { lookup, masters, feeMasters, save };
+    return { lookup, masters, manualAccount, feeMasters, save };
   }
   return { connect };
 }

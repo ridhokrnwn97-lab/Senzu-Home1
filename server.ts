@@ -1900,10 +1900,24 @@ async function startServer() {
           throw { status: 400, message: `Pembayaran dalam status ${payment.status} tidak dapat diverifikasi.` };
         }
 
+        // Recheck the staff grant inside the same payment/queue transaction.
+        const currentRole = (await t.get(adminDb.collection('staff_roles').doc(staffAuthUid))).data();
+        if (!currentRole?.isActive || currentRole.role !== verifiedByRole ||
+            (currentRole.staffId || currentRole.authUserId || staffAuthUid) !== verifiedByStaffId) {
+          throw { status: 403, message: 'Otorisasi staf berubah. Muat ulang sebelum memverifikasi.' };
+        }
+        await accurateSync.stageManualPaid(t, {
+          booking: { ...booking, id: bookingSnap.id, paymentStatus: 'PAID' },
+          payment: { ...payment, id: paymentSnap.id, status: 'paid', verifiedBy: verifiedByStaffId,
+            verifiedByRole, verifiedByAuthUid: staffAuthUid, verifiedAt: now, paidAt: payment.paidAt || now },
+          bookingCreatedAt: bookingSnap.createTime?.toMillis() || NaN,
+        });
+
         // 1. Authoritative Payment Update inside transaction
         t.update(paymentRef, {
           status: 'paid',
           verifiedBy: verifiedByStaffId,
+          verifiedByAuthUid: staffAuthUid,
           verifiedByName: verifiedByName,
           verifiedByRole: verifiedByRole,
           verifiedAt: now,
@@ -1967,6 +1981,8 @@ async function startServer() {
           payment: { id: paymentSnap.id, ...payment, status: 'paid', verifiedAt: now }
         };
       });
+
+      accurateSync.wake();
 
       // Loyalty: payment is often confirmed *after* the treatment is completed, so this path must credit too.
       // Idempotent and detached: it can never change or delay the verification response.

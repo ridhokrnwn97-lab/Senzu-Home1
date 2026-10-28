@@ -922,3 +922,84 @@ test('pausing fees after a verified journal does not block subsequent completion
   await f.service.pauseFees(req());Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`),{status:'Completed',completedAt:new Date(f.clock()).toISOString()});
   await f.retryFee();assert.equal(f.job(f.v).state,'complete');assert.equal(f.feePosts().length,1);assert.ok(f.job(f.v).documents.invoice.id);
 });
+
+const manualCodes = { BNI: '110204', MANDIRI: '110203', BRI: '110205', QRIS: '110204' };
+async function manualFixture(channel = 'MANDIRI', suffix = 'MAN01', options = {}) {
+  const f = fixture(); f.activateControl();
+  for(const [code,name] of [['110204','Bank BNI'],['110203','Bank Mandiri'],['110205','Bank BRI']])
+    f.masters.set(code,{id:Number(code),no:code,name,accountType:'CASH_BANK',currency:{code:'IDR'},suspended:false});
+  await f.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'}));
+  f.advance(1000);
+  const v=f.booking(suffix);
+  for(const key of ['gatewayProvider','gatewayEnvironment','gatewayReceiptId']) delete v.booking[key];
+  v.booking.paymentMethod='QRIS';
+  for(const key of ['gatewayEnvironment','providerReferenceId','gatewaySessionId','providerTransactionId']) delete v.payment[key];
+  Object.assign(v.payment,{paymentType:'manual',currency:'IDR',bankCode:channel,provider:channel==='QRIS'?'bni_merchant':'manual_senzu',
+    paymentMethod:channel==='QRIS'?'QRIS Senzu':`Transfer ${channel}`,accountNumberSnapshot:'official-fixture',accountHolderSnapshot:'PT KSBONE UNTUK KITA',
+    paymentProofUrl:'data:image/png;base64,fixture',createdAt:new Date(f.clock()).toISOString(),verifiedAt:new Date(f.clock()).toISOString(),
+    verifiedBy:'staff_css',verifiedByAuthUid:'css_uid',verifiedByRole:'css'});
+  if(options.guest){for(const row of [v.booking,v.payment]){delete row.customerAuthUid;delete row.authUserId;}}
+  f.db.seed(`bookings/${v.booking.id}`,v.booking);f.db.seed(`payments/${v.payment.id}`,v.payment);
+  const queue=()=>f.db.runTransaction(t=>f.service.stageManualPaid(t,{booking:v.booking,payment:v.payment,bookingCreatedAt:v.bookingCreatedAt}));
+  return Object.assign(f,{v,manualQueue:queue});
+}
+test('manual BNI, Mandiri, BRI and QRIS post to configured bank once, never Xendit or fee APIs; completion applies down payment',async()=>{
+  for(const channel of Object.keys(manualCodes)){
+    const f=await manualFixture(channel);await f.manualQueue();await f.manualQueue();await f.service.runOnce();
+    assert.equal(f.job(f.v).state,'waiting_service');
+    const receipt=f.posts('sales-receipt')[0].payload;
+    assert.equal(receipt.bankNo,manualCodes[channel]);assert.equal(receipt.chequeAmount,160000);assert.equal(receipt.paymentMethod,undefined);
+    f.advance(360000);Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`),{status:'Completed',completedAt:new Date(f.clock()).toISOString()});
+    await f.service.runOnce();assert.equal(f.job(f.v).state,'complete');
+    assert.equal(f.posts('sales-receipt').length,1);assert.equal(f.posts('create-down-payment').length,1);
+    assert.equal(f.posts('journal-voucher').length,0);assert.ok(f.calls.every(c=>c.url.hostname.endsWith('accurate.id')));
+    const n=f.posts().length;await f.service.retry(req({bookingId:f.v.booking.id}));assert.equal(f.posts().length,n);
+  }
+});
+test('manual activation rejects foreign roles, invalid accounts, Xendit clearing and non-IDR; verifies mapping before saving',async()=>{
+  for(const code of ['110103','missing','110301']){const f=fixture();f.activateControl();await assert.rejects(f.service.configureManual(req({accounts:{BNI:code},acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'})));assert.equal(f.db.data.get('accurate_sync_private/control').manual,undefined);assert.equal(f.posts().length,0);}
+  const f=await manualFixture();f.masters.get('110204').currency.code='USD';
+  await assert.rejects(f.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'})));
+  for(const role of ['css','supervisor','therapist']){staff(f.db,role,role);await assert.rejects(f.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'},role)));}
+});
+test('manual source changes, refund, missing proof, wrong amount or foreign owner require review without posting',async()=>{
+  for(const mutate of [v=>v.payment.amount++,v=>v.payment.status='pending_manual_verification',v=>v.payment.paymentProofUrl='',v=>v.payment.correctedAt='changed',v=>v.payment.customerAuthUid='other',v=>v.payment.verifiedByRole='therapist']){
+    const f=await manualFixture();mutate(f.v);f.db.seed(`payments/${f.v.payment.id}`,f.v.payment);await f.manualQueue();await f.service.runOnce();
+    assert.equal(f.job(f.v).state,'review');assert.equal(f.posts().length,0);
+  }
+  const f=await manualFixture();await f.manualQueue();f.db.data.get(`payments/${f.v.payment.id}`).accountNumberSnapshot='changed';await f.service.runOnce();assert.equal(f.job(f.v).state,'review');assert.equal(f.posts().length,0);
+});
+test('manual guest, delayed staff verification, rollback, missing mappings and pause/resume remain durable',async()=>{
+  const g=await manualFixture('BNI','GUEST',{guest:true});await g.manualQueue();await g.service.runOnce();assert.equal(g.job(g.v).state,'waiting_service');
+  const f=await manualFixture();f.db.failCommit=true;await assert.rejects(f.manualQueue());assert.equal(f.job(f.v),undefined);await f.manualQueue();
+  await f.service.pauseManual(req());await f.service.runOnce();assert.equal(f.posts().length,0);
+  await f.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'}));f.advance(61000);await f.service.runOnce();assert.equal(f.job(f.v).state,'waiting_service');
+  const missing=await manualFixture('BRI');delete missing.db.data.get('accurate_sync_private/control').manual.accounts.BRI;
+  await missing.manualQueue();assert.equal(missing.job(missing.v).issue,'SYNC_MANUAL_ACCOUNT_UNMAPPED');
+  await missing.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'}));await missing.service.retry(req({bookingId:missing.v.booking.id}));assert.equal(missing.job(missing.v).state,'waiting_service');
+});
+test('manual lost receipt response reconciles by number without a second POST; historical and unactivated payments stay excluded',async()=>{
+  const f=await manualFixture();await f.manualQueue();f.lose('receipt');await f.service.runOnce();assert.equal(f.job(f.v).state,'review');
+  await f.service.retry(req({bookingId:f.v.booking.id}));assert.equal(f.job(f.v).state,'waiting_service');assert.equal(f.posts('sales-receipt').length,1);
+  const old=await manualFixture();old.v.bookingCreatedAt=0;await old.manualQueue();assert.equal(old.job(old.v),undefined);
+  const inert=await manualFixture();delete inert.db.data.get('accurate_sync_private/control').manual;await inert.manualQueue();assert.equal(inert.job(inert.v),undefined);
+});
+
+test('actual staff verify handler atomically stages manual accounting; repeat verification never stages twice or emits Meta',async()=>{
+  let handlerText;
+  function find(n){if(ts.isCallExpression(n)&&n.expression.getText(ast)==='app.post'&&n.arguments[0]?.text==='/api/payments/:paymentId/verify')handlerText=n.arguments[1].getText(ast);ts.forEachChild(n,find);}find(ast);assert.ok(handlerText);
+  const {assertManualPayment,assertPaymentLink}=await import('../src/server/paymentAcceptance.ts');
+  const buildHandler=new Function('adminDb','adminAuth','ensureServerAuthenticated','assertManualPayment','assertPaymentLink','accurateSync','loyaltyAccounts','emitStructuredLog',transformSync(`return ${handlerText}`,{loader:'ts'}).code);
+  for(const rollback of [false,true]){
+    const f=await manualFixture();const id=f.v.booking.id,pid=f.v.payment.id;
+    f.db.data.get(`payments/${pid}`).status='pending_manual_verification';f.db.data.get(`bookings/${id}`).paymentStatus='pending_manual_verification';
+    let staged=0;const sync={stageManualPaid:async(t,v)=>{staged++;await f.service.stageManualPaid(t,v);},wake:()=>{}};
+    const handler=buildHandler(f.db,{verifyIdToken:async()=>({uid:'manager'})},async()=>{},assertManualPayment,assertPaymentLink,sync,{creditBookingLoyalty:async()=>{}},()=>{});
+    const response=()=>({statusCode:200,status(n){this.statusCode=n;return this;},json(v){this.body=v;return this;}});
+    f.db.failCommit=rollback;const res=response();await handler({params:{paymentId:pid},body:{bookingId:id},headers:{authorization:'Bearer fixture'}},res);
+    if(rollback){assert.equal(res.statusCode,500);assert.equal(f.job(f.v),undefined);assert.equal(f.db.data.get(`payments/${pid}`).status,'pending_manual_verification');}
+    else {assert.equal(res.body.success,true);assert.equal(f.db.data.get(`payments/${pid}`).status,'paid');assert.ok(f.job(f.v));
+      const again=response();await handler({params:{paymentId:pid},body:{bookingId:id},headers:{authorization:'Bearer fixture'}},again);assert.equal(again.body.isIdempotent,true);assert.equal(staged,1);}
+  }
+  assert.equal(/trackMeta|fbq\(/.test(handlerText),false);
+});

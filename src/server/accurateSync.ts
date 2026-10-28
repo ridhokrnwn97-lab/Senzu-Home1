@@ -1,11 +1,12 @@
 import type { Express, Request } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, isAccurateXenditNetPreview, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
+import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_MANUAL_ACK, isAccurateXenditNetPreview, ACCURATE_SYNC_DATABASE_ID as TARGET, ACCURATE_SYNC_NOTES, ACCURATE_NET_PREVIEW_ERRORS,
   type AccurateSyncJobState, type AccurateSyncJobView, type AccurateSyncPreview, type AccurateSyncStatus, type AccurateXenditNetResult } from '../lib/accurateSyncContracts.ts';
 import { createProcessingFeeSync, PROCESSING_SYNC_ERRORS } from './accurateProcessingFees.ts';
 import { PROCESSING_ERRORS } from './xenditProcessingFees.ts';
 import { FEE_POLICY, feeNumber, feePlan, matchesFeeJournal } from './accurateFeePosting.ts';
+import { isManualSource, MANUAL_CHANNELS, manualSourceSeal, validateManualSource, type AccurateManualPaidEvent } from './accurateManualSource.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
 import { readXenditNetPreview } from './xenditNetPreview.ts';
 import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
@@ -27,6 +28,11 @@ const providerDate = (value: unknown) => typeof value === 'string' ? /^\d{2}\/\d
 const numbers = (id: string) => ({ downPaymentNumber: `SHDP-${id.slice(0, 24)}`, receiptNumber: `SHRC-${id.slice(0, 24)}`, invoiceNumber: `SHIV-${id.slice(0, 24)}` });
 const MESSAGES: Record<string, string> = {
   ...ACCURATE_NET_PREVIEW_ERRORS, ...PROCESSING_ERRORS, ...PROCESSING_SYNC_ERRORS,
+  SYNC_MANUAL_APPROVAL_REQUIRED: 'Pemetaan akun dan konfirmasi pembayaran manual baru diperlukan.',
+  SYNC_MANUAL_ACCOUNT_INVALID: 'Akun penerimaan harus Kas/Bank IDR aktif, sesuai pemetaan Finance, dan bukan Saldo Xendit.',
+  SYNC_MANUAL_ACCOUNT_UNMAPPED: 'Akun penerimaan metode manual ini belum dipetakan. Lengkapi pemetaan lalu periksa ulang antrean.',
+  SYNC_MANUAL_SOURCE_INVALID: 'Bukti, nominal, kepemilikan, atau verifikasi staf pembayaran manual perlu diperiksa.',
+  SYNC_MANUAL_PAUSED: 'Pengiriman pembayaran manual dijeda. Antrean tetap disimpan.',
   FEE_APPROVAL_REQUIRED: 'Konfirmasi Finance bahwa biaya dan PPN biaya dibebankan sebagai biaya diperlukan.',
   FEE_POSTING_PAUSED: 'Pengiriman jurnal biaya dijeda. Antrean biaya tetap disimpan.',
   FEE_EVIDENCE_CHANGED: 'Rincian biaya Xendit berubah. Finance perlu memeriksa jurnal sebelum melanjutkan.',
@@ -59,6 +65,12 @@ type Dependencies = {
   env?: NodeJS.ProcessEnv; fetch?: typeof fetch; clock?: () => number; pause?: (ms: number) => Promise<void>;
 };
 export type AccuratePaidEvent = { booking: any; payment: any; intent: any; receipt: any; bookingCreatedAt: number };
+type SyncSource = AccuratePaidEvent | AccurateManualPaidEvent;
+const sourceIdentity = (v: SyncSource) => isManualSource(v)
+  ? { quoteHash: manualSourceSeal(v.booking, v.payment), referenceId: v.payment.id,
+      ownerHash: hash([TARGET, v.booking.customerAuthUid || v.booking.authUserId || `manual:${v.booking.id}`]) }
+  : { quoteHash: v.intent.quoteHash, referenceId: v.intent.referenceId, ownerHash: hash([TARGET, v.booking.customerAuthUid]) };
+const paymentDateSource = (v: SyncSource) => isManualSource(v) ? v.payment.verifiedAt : v.payment.paidAt;
 function control(value: any) {
   if (!value) return null;
   if (value.schemaVersion !== 1 || value.databaseId !== TARGET || value.taxPolicy !== 'no_extra_tax' ||
@@ -66,6 +78,10 @@ function control(value: any) {
   if (value.feesActivatedAt !== undefined && (typeof value.feesEnabled !== 'boolean' || value.feePolicy !== FEE_POLICY ||
       !Number.isFinite(stampTime(value.feesActivatedAt)) || stampTime(value.feesActivatedAt) < stampTime(value.activatedAt))) throw syncFailure('SYNC_CONTROL_INVALID', true);
   if (value.feesActivatedAt === undefined && (value.feesEnabled !== undefined || value.feePolicy !== undefined)) throw syncFailure('SYNC_CONTROL_INVALID', true);
+  if (value.manual !== undefined && (!value.manual || typeof value.manual.enabled !== 'boolean' ||
+      !Number.isFinite(stampTime(value.manual.activatedAt)) || !value.manual.accounts || typeof value.manual.accounts !== 'object' ||
+      Array.isArray(value.manual.accounts) || Object.entries(value.manual.accounts).some(([key, row]: [string, any]) =>
+        !MANUAL_CHANNELS.includes(key as any) || !row || !/^[A-Za-z0-9._-]{1,40}$/.test(row.code) || row.code === '110103' || typeof row.name !== 'string' || !row.name.trim()))) throw syncFailure('SYNC_CONTROL_INVALID', true);
   return value;
 }
 function terms(booking: any, payment: any) {
@@ -82,7 +98,8 @@ function terms(booking: any, payment: any) {
       servicePrice + visitFee - discount !== amount || payment.amount !== amount) throw syncFailure('SYNC_SOURCE_INVALID', true);
   return { itemCode, servicePrice, visitFee, discount, amount };
 }
-function core(v: AccuratePaidEvent) {
+function core(v: SyncSource) {
+  if (isManualSource(v)) { validateManualSource(v); return terms(v.booking, v.payment); }
   const { booking: b, payment: p, intent: i, receipt: r } = v;
   if (!b || !p || !i || !r || !safeId(b.id) || !/^SH-\d{6}-[A-Z0-9]{5,20}$/.test(b.bookingCode || '') ||
       b.paymentMethod !== 'Xendit' || b.gatewayProvider !== 'xendit' || b.gatewayEnvironment !== 'live' ||
@@ -172,9 +189,39 @@ export function createAccurateSync(deps: Dependencies) {
       ...(c.feesActivatedAt && v.bookingCreatedAt > stampTime(c.feesActivatedAt) && stampTime(v.intent.createdAt) > stampTime(c.feesActivatedAt)
         ? { feePolicy: FEE_POLICY, feesActivatedAt: c.feesActivatedAt } : {}) });
   }
-  async function source(t: Transaction, bookingId: string): Promise<AccuratePaidEvent> {
+  async function stageManualPaid(t: Transaction, value: Omit<AccurateManualPaidEvent, 'kind' | 'receipt'>) {
+    const c = control((await t.get(ref())).data());
+    if (!c?.manual || !Number.isFinite(value.bookingCreatedAt) || value.bookingCreatedAt <= stampTime(c.manual.activatedAt) ||
+        !Number.isFinite(stampTime(value.payment.createdAt)) || stampTime(value.payment.createdAt) <= stampTime(c.manual.activatedAt)) return;
+    const id = jobId(value.booking.id), jr = db!.collection(JOBS).doc(id), rr = db!.collection(CONTROL).doc(`manual_${id}`);
+    const existing = await t.get(jr), prior = await t.get(rr);
+    if (existing.exists || prior.exists) return; // Never introduce a second job for the same booking.
+    const receipt = { schemaVersion: 1, bookingId: value.booking.id, paymentId: value.payment.id,
+      verifiedAt: value.payment.verifiedAt, actorUid: value.payment.verifiedByAuthUid, seal: manualSourceSeal(value.booking, value.payment) };
+    const v: AccurateManualPaidEvent = { ...value, kind: 'manual', receipt };
+    let commercial: ReturnType<typeof terms> | null = null, issue = '';
+    try { commercial = core(v); if (!commercial.itemCode) issue = 'SYNC_SERVICE_UNMAPPED'; }
+    catch (e: any) { issue = MESSAGES[e.code] ? e.code : 'SYNC_MANUAL_SOURCE_INVALID'; }
+    const account = c.manual.accounts[value.payment.bankCode];
+    if (!issue && !account) issue = 'SYNC_MANUAL_ACCOUNT_UNMAPPED';
+    t.create(rr, receipt);
+    t.create(jr, { schemaVersion: 1, databaseId: TARGET, sourceType: 'manual', bookingId: value.booking.id,
+      bookingCode: value.booking.bookingCode, paymentId: value.payment.id, ...sourceIdentity(v),
+      amount: value.payment.amount, commercial, manualAccount: account || null,
+      state: issue ? 'review' : 'queued', issue, createdAt: now(), updatedAt: now(),
+      wakeAt: issue ? PARKED : clock(), documents: {}, attempts: 0 });
+  }
+  async function source(t: Transaction, bookingId: string): Promise<SyncSource> {
     const bs = await t.get(db!.collection('bookings').doc(bookingId)), b = bs.data();
-    if (!b || b.id !== bookingId || !safeId(b.gatewayReceiptId)) throw syncFailure('SYNC_SOURCE_INVALID', true);
+    if (!b || b.id !== bookingId) throw syncFailure('SYNC_SOURCE_INVALID', true);
+    const manualReceipt = await t.get(db!.collection(CONTROL).doc(`manual_${jobId(bookingId)}`));
+    if (manualReceipt.exists) {
+      const receipt = manualReceipt.data()!;
+      if (!safeId(receipt.paymentId)) throw syncFailure('SYNC_MANUAL_SOURCE_INVALID', true);
+      const ps = await t.get(db!.collection('payments').doc(receipt.paymentId));
+      return { kind: 'manual', booking: b, payment: ps.data(), receipt, bookingCreatedAt: bs.createTime?.toMillis() || NaN };
+    }
+    if (!safeId(b.gatewayReceiptId)) throw syncFailure('SYNC_SOURCE_INVALID', true);
     const ps = await t.get(db!.collection('payments').doc(`PAY-${bookingId}`)), p = ps.data();
     if (!p || !/^shl_[a-f0-9]{48}$/.test(p.providerReferenceId || '')) throw syncFailure('SYNC_SOURCE_INVALID', true);
     const [is, rs] = await Promise.all([t.get(db!.collection('xendit_live_sessions').doc(p.providerReferenceId)),
@@ -192,6 +239,7 @@ export function createAccurateSync(deps: Dependencies) {
     const c = control(cs.data());
     await db!.runTransaction(t => deps.authorizeManager(t, uid));
     return { mode: 'posting_v1', databaseId: TARGET, writesConfigured: configured(), schedulerConfigured: schedulerConfigured(),
+      manual: c?.manual || null,
       feesEnabled: c?.feesEnabled === true, feesActivatedAt: c?.feesActivatedAt || null, feePolicy: c?.feePolicy || null,
       enabled: c?.enabled === true, activatedAt: c?.activatedAt || null, taxPolicy: c?.taxPolicy || null,
       jobs: latest.docs.map(d => jobView(d.id, d.data())) };
@@ -202,11 +250,13 @@ export function createAccurateSync(deps: Dependencies) {
     if (!safeId(req.body.bookingId)) throw fail(400, 'INVALID_SYNC_REQUEST');
     rate(`preview:${uid}`, 3);
     const { v, c } = await db!.runTransaction(async t => ({ v: await source(t, req.body.bookingId), c: control((await t.get(ref())).data()) }));
-    const commercial = core(v), at = c ? stampTime(c.activatedAt) : clock();
-    const historical = v.bookingCreatedAt <= at || stampTime(v.intent.createdAt) <= at;
+    const commercial = core(v), at = isManualSource(v) ? c?.manual ? stampTime(c.manual.activatedAt) : clock() : c ? stampTime(c.activatedAt) : clock();
+    const historical = v.bookingCreatedAt <= at || stampTime(isManualSource(v) ? v.payment.createdAt : v.intent.createdAt) <= at;
     const blocked = ['cancelled', 'canceled', 'refunded', 'expired', 'rescheduled', 'rejected'].includes(String(v.booking.status).toLowerCase());
     // Preview checks vendor mappings but never calls save/create or creates a job.
     const api = await provider.connect(clock() + 45000); await api.masters(commercial.itemCode || undefined);
+    if (isManualSource(v)) { const account = c?.manual?.accounts[v.payment.bankCode];
+      if (!account) throw syncFailure('SYNC_MANUAL_ACCOUNT_UNMAPPED', true); await api.manualAccount(account.code, account.name); }
     await db!.runTransaction(t => deps.authorizeManager(t, uid));
     return { bookingCode: v.booking.bookingCode, ...commercial, historical,
       eligible: !historical && !blocked && Boolean(commercial.itemCode),
@@ -219,7 +269,7 @@ export function createAccurateSync(deps: Dependencies) {
     rate(`netPreview:${uid}`, 3);
     const readSource = async (t: Transaction) => {
       await deps.authorizeManager(t, uid);
-      const v = await source(t, bookingId); core(v);
+      const v = await source(t, bookingId); if (isManualSource(v)) throw fail(409, 'SYNC_SOURCE_INVALID'); core(v);
       if (['cancelled', 'canceled', 'refunded', 'expired', 'rescheduled', 'rejected'].includes(String(v.booking.status).toLowerCase())) {
         throw fail(409, 'SYNC_SOURCE_CHANGED');
       }
@@ -245,6 +295,31 @@ export function createAccurateSync(deps: Dependencies) {
         activatedAt: c?.activatedAt || now(), updatedAt: now(), updatedBy: uid }, { merge: true });
     });
     wake(); return statusValue(uid);
+  }
+  async function configureManual(req: Request) {
+    const uid = await actor(req, ['accounts', 'acknowledgement']); rate(`configureManual:${uid}`, 2);
+    const input = req.body.accounts;
+    if (req.body.acknowledgement !== ACCURATE_MANUAL_ACK || !input || typeof input !== 'object' || Array.isArray(input) ||
+        !Object.keys(input).length || Object.keys(input).some(key => !MANUAL_CHANNELS.includes(key as any)) ||
+        Object.values(input).some(code => typeof code !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/.test(code) || code === '110103')) throw fail(400, 'SYNC_MANUAL_APPROVAL_REQUIRED');
+    if (!configured()) throw fail(503, 'SYNC_NOT_CONFIGURED');
+    const api = await provider.connect(clock() + 45000); await api.masters();
+    const accounts: Record<string, {code: string; name: string}> = {};
+    for (const [key, code] of Object.entries(input)) accounts[key] = await api.manualAccount(code as string);
+    await db!.runTransaction(async t => {
+      await deps.authorizeManager(t, uid); const c = control((await t.get(ref())).data());
+      if (!c?.enabled) throw fail(409, 'SYNC_PAUSED');
+      t.update(ref(), { manual: { enabled: true, activatedAt: c.manual?.activatedAt || now(), accounts }, updatedAt: now(), updatedBy: uid });
+    });
+    wake(); return statusValue(uid);
+  }
+  async function pauseManual(req: Request) {
+    const uid = await actor(req, []);
+    await db!.runTransaction(async t => {
+      await deps.authorizeManager(t, uid); const c = control((await t.get(ref())).data());
+      if (c?.manual) t.update(ref(), { 'manual.enabled': false, updatedAt: now(), updatedBy: uid });
+    });
+    return statusValue(uid);
   }
   async function activateFees(req: Request) {
     const uid = await actor(req, ['acknowledgement', 'feePolicy']); rate(`activateFees:${uid}`, 2);
@@ -285,9 +360,16 @@ export function createAccurateSync(deps: Dependencies) {
       const jr = db!.collection(JOBS).doc(jobId(req.body.bookingId)), snap = await t.get(jr), job = snap.data();
       if (!job || job.bookingId !== req.body.bookingId || job.databaseId !== TARGET) throw fail(404, 'SYNC_JOB_MISSING');
       if (job.state === 'processing') throw fail(409, 'SYNC_BUSY');
+      let manualAccount;
+      if (job.sourceType === 'manual' && !job.manualAccount) {
+        const c = control((await t.get(ref())).data()), v = await source(t, job.bookingId);
+        if (!isManualSource(v)) throw fail(409, 'SYNC_MANUAL_SOURCE_INVALID');
+        const channel = validateManualSource(v); manualAccount = c?.manual?.accounts[channel];
+        if (!manualAccount) throw fail(409, 'SYNC_MANUAL_ACCOUNT_UNMAPPED');
+      }
       // Operation receipts are immutable here. An uncertain POST can ONLY be
       // reconciled by number; this endpoint never resets it for another POST.
-      if (job.state !== 'complete') t.update(jr, { state: 'retry', wakeAt: clock(), updatedAt: now(), issue: '' });
+      if (job.state !== 'complete') t.update(jr, { ...(manualAccount ? { manualAccount } : {}), state: 'retry', wakeAt: clock(), updatedAt: now(), issue: '' });
     });
     await runOnce(); return statusValue(uid);
   }
@@ -304,7 +386,10 @@ export function createAccurateSync(deps: Dependencies) {
       if (rows.empty) return null;
       const snap = rows.docs[0], job = snap.data();
       if (job.schemaVersion !== 1 || job.databaseId !== TARGET || !safeId(job.bookingId) || snap.id !== jobId(job.bookingId)) throw syncFailure('SYNC_CONTROL_INVALID', true);
-      t.update(ref(), { leaseToken: token, leaseUntil: clock() + 90000 });
+      if (job.sourceType === 'manual' && !c.manual?.enabled) {
+        t.update(snap.ref, { state: 'retry', issue: 'SYNC_MANUAL_PAUSED', wakeAt: clock() + 60000, updatedAt: now() }); return null;
+      }
+      t.update(ref(), { leaseToken: token, leaseUntil: clock() + 90000, leaseSource: job.sourceType === 'manual' ? 'manual' : 'xendit' });
       t.update(snap.ref, { state: 'processing', attempts: (job.attempts || 0) + 1, wakeAt: clock() + 100000, updatedAt: now() });
       return { id: snap.id, token, job, ref: snap.ref };
     });
@@ -312,6 +397,7 @@ export function createAccurateSync(deps: Dependencies) {
   async function leased(t: Transaction, token: string) {
     const c = control((await t.get(ref())).data());
     if (!configured() || !c?.enabled) throw syncFailure('SYNC_PAUSED');
+    if (c.leaseSource === 'manual' && !c.manual?.enabled) throw syncFailure('SYNC_MANUAL_PAUSED');
     if (c.leaseToken !== token || c.leaseUntil <= clock()) throw syncFailure('SYNC_BUSY');
     return c;
   }
@@ -324,8 +410,9 @@ export function createAccurateSync(deps: Dependencies) {
       async function fresh() {
         return db!.runTransaction(async t => {
           await leased(t, a.token); const v = await source(t, a.job.bookingId); const commercial = core(v);
-          if (v.intent.quoteHash !== a.job.quoteHash || v.payment.id !== a.job.paymentId || v.intent.referenceId !== a.job.referenceId ||
-              commercial.amount !== a.job.amount || hash([TARGET, v.booking.customerAuthUid]) !== a.job.ownerHash ||
+          const identity = sourceIdentity(v);
+          if (isManualSource(v) !== (a.job.sourceType === 'manual') || identity.quoteHash !== a.job.quoteHash || v.payment.id !== a.job.paymentId || identity.referenceId !== a.job.referenceId ||
+              commercial.amount !== a.job.amount || identity.ownerHash !== a.job.ownerHash ||
               JSON.stringify(commercial) !== JSON.stringify(a.job.commercial) ||
               ['cancelled', 'canceled', 'refunded', 'expired', 'rescheduled', 'rejected'].includes(String(v.booking.status).toLowerCase())) throw syncFailure('SYNC_SOURCE_CHANGED', true);
           if (!commercial.itemCode) throw syncFailure('SYNC_SERVICE_UNMAPPED', true);
@@ -334,6 +421,12 @@ export function createAccurateSync(deps: Dependencies) {
       }
       const v = await fresh(), commercial = core(v), docs = numbers(a.id);
       const api = await provider.connect(deadline); await api.masters(commercial.itemCode!);
+      const bankNo = isManualSource(v) ? a.job.manualAccount?.code : '110103';
+      if (isManualSource(v)) {
+        if (!bankNo) throw syncFailure('SYNC_MANUAL_ACCOUNT_UNMAPPED', true);
+        if (a.job.feePolicy !== undefined) throw syncFailure('SYNC_CONTROL_INVALID', true);
+        await api.manualAccount(bankNo, a.job.manualAccount.name);
+      }
       async function ensure(kind: AccurateDocumentKind, number: string, payload: Record<string, any>, validate: (d: any) => boolean, guard?: () => Promise<void>) {
         const operationId = hash([TARGET, kind, number]), opRef = db!.collection(OPS).doc(operationId);
         const fingerprint = hash(kind === 'customer' ? { ...payload, name: null, transDate: null } : payload);
@@ -378,7 +471,7 @@ export function createAccurateSync(deps: Dependencies) {
       // changes never edit an existing customer or change its identity.
       const customerName = String(v.booking.customerName || 'Pelanggan Senzu Home').normalize('NFKC').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 120) || 'Pelanggan Senzu Home';
       const customerPayload = { name: customerName, customerNo, number: customerNo,
-        transDate: wibDate(v.payment.paidAt), currencyCode: 'IDR', notes: customerMarker,
+        transDate: wibDate(paymentDateSource(v)), currencyCode: 'IDR', notes: customerMarker,
         customerReceivableAccountListNo: ['110301'], customerDownPaymentAccountListNo: ['210102'],
         salesAccountNo: '400005', salesDiscountAccountNo: '400004', itemDiscountAccountNo: '400004' };
       const listNo = (d: any, field: string) => {
@@ -387,7 +480,7 @@ export function createAccurateSync(deps: Dependencies) {
       };
       await ensure('customer', customerNo, customerPayload, d => matchesAccurateCustomerNo(customerNo, d.customerNo, d.no) && d.notes === customerMarker &&
         JSON.stringify(listNo(d, 'customerReceivableAccountList')) === '["110301"]' && JSON.stringify(listNo(d, 'customerDownPaymentAccountList')) === '["210102"]');
-      const paidDate = wibDate(v.payment.paidAt), description = (stage: string) => `SENZU_HOME_V1:${a.id}:${stage} | ${v.booking.bookingCode} | ${v.intent.paymentId}`;
+      const paidDate = wibDate(paymentDateSource(v)), description = (stage: string) => `SENZU_HOME_V1:${a.id}:${stage} | ${v.booking.bookingCode} | ${isManualSource(v) ? `MANUAL:${v.payment.id}` : v.intent.paymentId}`;
       const currency = (d: any) => (d.currency?.code || d.currencyCode) === 'IDR';
       const customerMatches = (d: any) =>
         (d.customer === undefined || d.customer === null || typeof d.customer === 'object' && !Array.isArray(d.customer)) &&
@@ -397,26 +490,27 @@ export function createAccurateSync(deps: Dependencies) {
       d => d.number === docs.downPaymentNumber && d.invoiceDp === true && d.totalAmount === a.job.amount && currency(d) &&
         customerMatches(d) && d.description === description('DP') && d.taxable === false && providerDate(d.transDate) === paidDate);
       const invoiceNumber = (row: any) => row?.invoice?.number || row?.invoiceNo || row?.invoiceNumber;
-      await ensure('receipt', docs.receiptNumber, { customerNo, number: docs.receiptNumber, bankNo: '110103', chequeAmount: a.job.amount,
-        transDate: paidDate, currencyCode: 'IDR', paymentMethod: 'PAYMENT_LINK', description: description('RC'),
+      await ensure('receipt', docs.receiptNumber, { customerNo, number: docs.receiptNumber, bankNo, chequeAmount: a.job.amount,
+        transDate: paidDate, currencyCode: 'IDR', ...(isManualSource(v) ? {} : { paymentMethod: 'PAYMENT_LINK' }), description: description('RC'),
         detailInvoice: [{ invoiceNo: docs.downPaymentNumber, paymentAmount: a.job.amount }] },
-      d => d.number === docs.receiptNumber && (d.bank?.no || d.bankNo) === '110103' && d.chequeAmount === a.job.amount &&
+      d => d.number === docs.receiptNumber && (d.bank?.no || d.bankNo) === bankNo && d.chequeAmount === a.job.amount &&
         currency(d) && customerMatches(d) && d.description === description('RC') && providerDate(d.transDate) === paidDate && Array.isArray(d.detailInvoice) &&
         d.detailInvoice.length === 1 && invoiceNumber(d.detailInvoice[0]) === docs.downPaymentNumber && d.detailInvoice[0].paymentAmount === a.job.amount);
       const latest = await fresh();
       const serviceCompleted = String(latest.booking.status).toLowerCase() === 'completed';
       if (serviceCompleted) {
         const completedAt = latest.booking.completedAt;
-        if (!Number.isFinite(stampTime(completedAt)) || stampTime(completedAt) < stampTime(v.payment.paidAt) || stampTime(completedAt) > clock() + 60000) throw syncFailure('SYNC_SOURCE_CHANGED', true);
+        if (!Number.isFinite(stampTime(completedAt)) || !isManualSource(v) && stampTime(completedAt) < stampTime(v.payment.paidAt) || stampTime(completedAt) > clock() + 60000) throw syncFailure('SYNC_SOURCE_CHANGED', true);
+        const invoiceDate = isManualSource(v) && stampTime(completedAt) < stampTime(paymentDateSource(v)) ? paidDate : wibDate(completedAt);
         const item = { itemNo: commercial.itemCode, quantity: 1, itemUnitName: 'Paket', unitPrice: commercial.servicePrice,
           useTax1: false, useTax2: false, useTax3: false };
         const expenses = commercial.visitFee ? [{ accountNo: '400005', expenseAmount: commercial.visitFee, expenseName: 'Biaya kunjungan Senzu Home' }] : [];
-        await ensure('invoice', docs.invoiceNumber, { customerNo, number: docs.invoiceNumber, transDate: wibDate(completedAt),
+        await ensure('invoice', docs.invoiceNumber, { customerNo, number: docs.invoiceNumber, transDate: invoiceDate,
           currencyCode: 'IDR', invoiceDp: false, taxable: false, inclusiveTax: false, cashDiscount: commercial.discount,
           description: description('IV'), detailItem: [item], detailExpense: expenses,
           detailDownPayment: [{ invoiceNumber: docs.downPaymentNumber, paymentAmount: a.job.amount }] },
         d => d.number === docs.invoiceNumber && d.invoiceDp === false && d.totalAmount === a.job.amount && currency(d) && customerMatches(d) &&
-          d.description === description('IV') && providerDate(d.transDate) === wibDate(completedAt) && d.taxable === false && (d.cashDiscount || 0) === commercial.discount &&
+          d.description === description('IV') && providerDate(d.transDate) === invoiceDate && d.taxable === false && (d.cashDiscount || 0) === commercial.discount &&
           Array.isArray(d.detailItem) && d.detailItem.length === 1 && (d.detailItem[0].item?.no || d.detailItem[0].itemNo) === commercial.itemCode &&
           d.detailItem[0].quantity === 1 && d.detailItem[0].unitPrice === commercial.servicePrice &&
           Array.isArray(d.detailExpense) && d.detailExpense.length === expenses.length && (!expenses.length ||
@@ -426,7 +520,7 @@ export function createAccurateSync(deps: Dependencies) {
       }
       let feePending = false, feeIssue = '';
       if (a.job.feePolicy !== undefined && a.job.feePolicy !== FEE_POLICY) throw syncFailure('SYNC_CONTROL_INVALID', true);
-      if (a.job.feePolicy === FEE_POLICY) {
+      if (a.job.feePolicy === FEE_POLICY && !isManualSource(v)) {
         const c = await db!.runTransaction(t => leased(t, a.token));
         if (a.job.feesActivatedAt !== c.feesActivatedAt || v.bookingCreatedAt <= stampTime(c.feesActivatedAt) ||
             stampTime(v.intent.createdAt) <= stampTime(c.feesActivatedAt)) throw syncFailure('SYNC_CONTROL_INVALID', true);
@@ -449,7 +543,7 @@ export function createAccurateSync(deps: Dependencies) {
               x.intent.paymentId, x.intent.sessionId, x.intent.quoteHash, x.payment.amount]);
             const guard = async () => {
               const current = await fresh();
-              if (feeSource(current) !== feeSource(v)) throw syncFailure('SYNC_SOURCE_CHANGED', true);
+              if (isManualSource(current) || feeSource(current) !== feeSource(v)) throw syncFailure('SYNC_SOURCE_CHANGED', true);
               await db!.runTransaction(async t => { const c = await leased(t, a.token);
                 if (!c.feesEnabled) throw syncFailure('FEE_POSTING_PAUSED'); });
             };
@@ -503,12 +597,12 @@ export function createAccurateSync(deps: Dependencies) {
     const gross = await runOnce(), daily = await processing.runOnce();
     return daily.processingProcessed || 'processingScanned' in daily ? { ...gross, ...daily } : gross;
   }
-  return { processingStatus, processingPreview, activateProcessing, pauseProcessing, reconcileProcessing, runProcessing, stagePaid, status, preview, netPreview, activate, activateFees, pauseFees, pause, retry, run, runOnce, scheduled, wake };
+  return { configureManual, pauseManual, stageManualPaid, processingStatus, processingPreview, activateProcessing, pauseProcessing, reconcileProcessing, runProcessing, stagePaid, status, preview, netPreview, activate, activateFees, pauseFees, pause, retry, run, runOnce, scheduled, wake };
 }
 
 export function registerAccurateSync(app: Express, deps: Dependencies) {
   const service = createAccurateSync(deps);
-  for (const action of ['status', 'preview', 'netPreview', 'activate', 'activateFees', 'pauseFees', 'pause', 'retry', 'run', 'scheduled', 'processingStatus', 'processingPreview', 'activateProcessing', 'pauseProcessing', 'reconcileProcessing', 'runProcessing'] as const) {
+  for (const action of ['status', 'preview', 'netPreview', 'configureManual', 'pauseManual', 'activate', 'activateFees', 'pauseFees', 'pause', 'retry', 'run', 'scheduled', 'processingStatus', 'processingPreview', 'activateProcessing', 'pauseProcessing', 'reconcileProcessing', 'runProcessing'] as const) {
     app.post(`/api/integrations/accurate/sync/${action}`, async (req, res) => {
       res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
       try { res.json({ success: true, ...await service[action](req) }); }
@@ -519,8 +613,8 @@ export function registerAccurateSync(app: Express, deps: Dependencies) {
       }
     });
   }
-  // Durable jobs survive restarts. Live onPaid wakes the worker; Test/manual
-  // requests do not trigger this integration. Cloud Run can suspend background
+  // Durable jobs survive restarts. Live onPaid and staff-verified manual payments
+  // wake the same worker. Test requests never trigger this integration. Cloud Run can suspend background
   // CPU, so the scheduler is necessary for unattended retries/completion checks.
   const timer = setInterval(() => service.wake(), 30000); timer.unref?.();
   return { ...service, stop: () => clearInterval(timer) };
