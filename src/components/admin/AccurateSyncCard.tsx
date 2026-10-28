@@ -5,7 +5,7 @@ import { auth } from '../../lib/firebase';
 import type { StaffUser } from '../../types';
 import { ACCURATE_NET_PREVIEW_ERRORS, XENDIT_STATE_EXPECTED, xenditObservedStateLabel,
   type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetPreview, type AccurateXenditStateDiagnostic } from '../../lib/accurateSyncContracts';
-import { accurateSyncAction, accurateSyncPreview, accurateXenditNetPreview } from '../../lib/accurateSyncService';
+import { configureAccurateManual, accurateSyncAction, accurateSyncPreview, accurateXenditNetPreview } from '../../lib/accurateSyncService';
 
 const money = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 const feeMoney = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n);
@@ -16,13 +16,15 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   const [netPreview, setNetPreview] = useState<AccurateXenditNetPreview | null>(null);
   const [stateDiagnostic, setStateDiagnostic] = useState<AccurateXenditStateDiagnostic | null>(null);
   const [booking, setBooking] = useState(''), [ack, setAck] = useState(false), [tax, setTax] = useState(false);
+  const [manualAccounts, setManualAccounts] = useState({ BNI: '110204', MANDIRI: '110203', BRI: '110205', QRIS: '110204' });
+  const [manualAck, setManualAck] = useState(false);
   const [feeAck, setFeeAck] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const generation = useRef(0), flight = useRef(false), controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const off = onAuthStateChanged(auth, user => {
       const version = ++generation.current; controller.current?.abort(); controller.current = null;
-      flight.current = false; setBusy(false); setStatus(null); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setBooking(''); setAck(false); setTax(false); setFeeAck(false); setError('');
+      flight.current = false; setBusy(false); setStatus(null); setManualAccounts({ BNI: '110204', MANDIRI: '110203', BRI: '110205', QRIS: '110204' }); setManualAck(false); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setBooking(''); setAck(false); setTax(false); setFeeAck(false); setError('');
       if (!user || !allowed) return;
       const c = new AbortController(); controller.current = c; flight.current = true; setBusy(true);
       accurateSyncAction('status', undefined, c.signal).then(v => { if (generation.current === version) setStatus(v); })
@@ -33,7 +35,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   }, [currentUser.uid, currentUser.role, allowed]);
   if (!allowed) return null;
   const normalized = booking.trim().startsWith('SH-') ? `bk_${booking.trim()}` : booking.trim();
-  const act = async (action: 'status' | 'preview' | 'netPreview' | 'activate' | 'activateFees' | 'pauseFees' | 'pause' | 'run' | 'retry') => {
+  const act = async (action: 'status' | 'preview' | 'netPreview' | 'activate' | 'activateFees' | 'pauseFees' | 'pauseManual' | 'pause' | 'run' | 'retry') => {
     if (flight.current) return;
     const version = generation.current, c = new AbortController(); controller.current = c;
     flight.current = true; setBusy(true); setError('');
@@ -64,13 +66,31 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
   return <section aria-label="Accurate Online — Pencatatan Transaksi" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
     <h3 className="text-lg font-bold text-[#4B2B18]">Accurate Online — Pencatatan Transaksi</h3>
     <p className="text-sm text-slate-600">Pembayaran Xendit Live masuk ke Uang Muka Penjualan dan Saldo Xendit. Saat treatment selesai, uang muka dipakai melunasi faktur layanan.</p>
-    <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Aktivasi membuat dokumen akuntansi pada PT KSBONE UNTUK KITA, database 2974047. Booking lama, pembayaran manual, dan simulasi Test tidak dimasukkan otomatis. Biaya transaksi Xendit dapat diaktifkan terpisah sebagai beban termasuk PPN. Processing fee harian, pencairan bank, pembatalan, dan refund tetap diperiksa terpisah.</p>
+    <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Aktivasi membuat dokumen akuntansi pada PT KSBONE UNTUK KITA, database 2974047. Booking lama dan simulasi Test tidak dimasukkan otomatis. Pembayaran manual dapat diaktifkan terpisah setelah pemetaan akun Finance. Biaya transaksi Xendit dapat diaktifkan terpisah sebagai beban termasuk PPN. Processing fee harian, pencairan bank, pembatalan, dan refund tetap diperiksa terpisah.</p>
     {status && <div className="space-y-1 text-sm text-slate-700">
       <p>Pengiriman: <strong>{status.enabled && status.writesConfigured ? 'Aktif' : status.activatedAt ? 'Dijeda' : 'Belum aktif'}</strong>.</p>
       <p>{status.writesConfigured ? 'Konfigurasi server mengizinkan pengiriman setelah aktivasi Manager.' : 'Pengiriman dari server belum diizinkan.'}</p>
       {status.activatedAt && <p>Booking yang dibuat sejak {new Date(status.activatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB dapat masuk antrean. Saat pengiriman dijeda, antrean baru tetap disimpan.</p>}
       <p>{status.schedulerConfigured ? 'Token pemicu berkala tersedia; pelaksanaan jadwal otomatis perlu diverifikasi.' : 'Pemicu berkala belum dikonfigurasi. Pengiriman dan pemeriksaan ulang tanpa aktivitas aplikasi belum terjamin.'}</p>
     </div>}
+    <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
+      <h4 className="font-semibold">Sinkronisasi pembayaran manual</h4>
+      <p>Setelah verifikasi staf: uang muka dan penerimaan bruto masuk ke akun yang dipetakan. Faktur dibuat setelah treatment selesai. Tanggal pencatatan penerimaan mengikuti tanggal verifikasi staf. Biaya QRIS tidak diperkirakan atau dipotong otomatis.</p>
+      <p>Status: {status?.manual?.enabled ? 'Aktif' : 'Belum aktif / dijeda'}. Hanya booking dan pembayaran baru setelah aktivasi manual yang disertakan.</p>
+      {status?.manual && Object.entries(status.manual.accounts).map(([key, row]) => <p key={key}>{key}: {row?.code} — {row?.name}</p>)}
+      {(['BNI', 'MANDIRI', 'BRI', 'QRIS'] as const).map(key => <label key={key} className="block">{key === 'QRIS' ? 'Kode akun penerimaan QRIS bruto (BNI)' : `Kode akun Kas/Bank ${key}`}
+        <input className="block w-full rounded-lg border p-2" value={manualAccounts[key]} disabled={busy} onChange={e => {setManualAck(false); setManualAccounts(v => ({...v, [key]: e.target.value.trim()}));}} />
+      </label>)}
+      <p>Isi kode akun Accurate, bukan nomor rekening. Isi kembali seluruh pemetaan yang ingin disimpan; kanal kosong belum dipetakan.</p>
+      <label className="flex gap-2"><input type="checkbox" checked={manualAck} disabled={busy} onChange={e => setManualAck(e.target.checked)} />Finance sudah memastikan akun penerimaan dan penampung QRIS bruto sesuai, serta kebijakan tanpa tambahan pajak tetap berlaku.</label>
+      <button type="button" className={button} disabled={busy || !status?.enabled || !manualAck || !Object.values(manualAccounts).some(Boolean)} onClick={async () => {
+        if(flight.current) return; const version=generation.current, c=new AbortController(); controller.current=c; flight.current=true; setBusy(true); setError('');
+        try { const value=await configureAccurateManual(Object.fromEntries(Object.entries(manualAccounts).filter(([,code])=>code)),c.signal); if(generation.current===version){setStatus(value);setManualAck(false);} }
+        catch(e:any){if(generation.current===version)setError(e.message);}
+        finally{if(generation.current===version){flight.current=false;setBusy(false);}}
+      }}>Periksa Akun &amp; Aktifkan Manual</button>
+      <button type="button" className={button} disabled={busy || !status?.manual?.enabled} onClick={() => act('pauseManual')}>Jeda Sinkronisasi Manual</button>
+    </div>
     <div className="flex flex-wrap gap-3">
       <button type="button" className={button} disabled={busy} onClick={() => act('status')}>Muat Ulang Status Pencatatan</button>
       <button type="button" className={button} disabled={busy || !status?.enabled || !status.writesConfigured} onClick={() => act('run')}>Proses Antrean Sekarang</button>
