@@ -1,5 +1,7 @@
 export const ACCURATE_SYNC_DATABASE_ID = 2974047;
 export const ACCURATE_FEE_ACK = 'NEW_LIVE_XENDIT_FEES_AS_EXPENSE_INCLUDING_VAT';
+export const ACCURATE_MANUAL_ACK = 'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY';
+export type AccurateManualConfig = { enabled: boolean; activatedAt: string; accounts: Partial<Record<'BNI' | 'MANDIRI' | 'BRI' | 'QRIS', { code: string; name: string }>> };
 export const ACCURATE_SYNC_ACK = 'NEW_LIVE_XENDIT_PAYMENTS_ONLY';
 export type AccurateSyncJobState = 'queued' | 'processing' | 'waiting_service' | 'waiting_fee' | 'retry' | 'review' | 'complete';
 export type AccurateSyncJobView = {
@@ -13,6 +15,7 @@ export type AccurateSyncStatus = {
   mode: 'posting_v1'; databaseId: number; writesConfigured: boolean; schedulerConfigured: boolean;
   enabled: boolean; activatedAt: string | null; taxPolicy: 'no_extra_tax' | null;
   jobs: AccurateSyncJobView[];
+  manual?: AccurateManualConfig | null;
   feesEnabled?: boolean; feesActivatedAt?: string | null; feePolicy?: 'expense_including_vat' | null;
 };
 export type AccurateSyncPreview = {
