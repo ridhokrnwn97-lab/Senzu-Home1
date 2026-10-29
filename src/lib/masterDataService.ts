@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
+import { filterDiscontinuedServices } from './services';
 import {
   CompanySettings,
   Branch,
@@ -564,6 +565,8 @@ export async function getMasterServices(): Promise<ServiceItem[]> {
         id: data.id || d.id,
       } as ServiceItem;
     });
+    // Filter out discontinued services (30-min and 60-min Signature)
+    const filtered = filterDiscontinuedServices(list);
     list.sort((a, b) => {
       // Sort by sortOrder if defined, then alphabetical
       const orderA = a.sortOrder ?? 999;
@@ -571,7 +574,7 @@ export async function getMasterServices(): Promise<ServiceItem[]> {
       if (orderA !== orderB) return orderA - orderB;
       return a.name.localeCompare(b.name);
     });
-    return list;
+    return filtered;
   } catch (err) {
     console.warn('Failed to load master services:', err);
     return [];
@@ -1606,7 +1609,7 @@ export async function saveTherapistMasterRecord(
     branchId: therapist.branchId || 'PLG001',
     branchName: therapist.branchName || 'Senzu Home Palembang R-01',
     specialties: therapist.specialties && therapist.specialties.length > 0 ? therapist.specialties : ['Reflexology Keluarga'],
-    serviceIds: therapist.serviceIds && therapist.serviceIds.length > 0 ? therapist.serviceIds : ['srv-sig-60', 'srv-sig-90'],
+    serviceIds: therapist.serviceIds && therapist.serviceIds.length > 0 ? therapist.serviceIds : ['srv-sig-90'],
     rating: therapist.rating || 5.0,
     totalCompleted: therapist.totalCompleted || 0,
     status: therapist.status || 'available',

@@ -158,7 +158,7 @@ export interface Therapist {
   branchName?: string;
   specialties: string[];
   skillIds?: string[]; // IDs of TherapistSkill master (Prompt 17A)
-  serviceIds?: string[]; // IDs of ServiceItem matching skill matrix (e.g. ['srv-sig-60', 'srv-sig-90'])
+  serviceIds?: string[]; // IDs of ServiceItem matching skill matrix (e.g. ['srv-sig-90', 'srv-sig-120'])
   rating: number;
   totalCompleted: number;
   status: 'available' | 'on_duty' | 'off' | 'busy' | 'break';

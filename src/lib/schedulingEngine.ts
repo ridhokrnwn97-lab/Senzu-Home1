@@ -220,7 +220,7 @@ export function evaluateTherapistEligibility(
   const qualifiedServices =
     therapist.serviceIds && therapist.serviceIds.length > 0
       ? therapist.serviceIds
-      : DEFAULT_SKILL_MATRIX[therapist.id] || ['srv-sig-60', 'srv-sig-90', 'srv-sig-120'];
+      : DEFAULT_SKILL_MATRIX[therapist.id] || ['srv-sig-90', 'srv-sig-120'];
 
   // Check 1: Direct serviceId match or 'all'
   let isSkillMatch =

@@ -8,8 +8,6 @@ export const ACCURATE_MASTERS = [
   { kind: 'account', code: '400005', name: 'Pendapatan Jasa Senzu Home', type: 'REVENUE' },
   { kind: 'account', code: '600031', name: 'Beban Administrasi Xendit - Senzu Home', type: 'EXPENSE' },
   { kind: 'account', code: '210102', name: 'Uang Muka Penjualan IDR', type: 'ACCOUNT_PAYABLE' },
-  { kind: 'item', code: 'SH-SIG-030', name: 'Senzu Home - Signature Treatment 30 Menit', type: 'SERVICE', price: 160000 },
-  { kind: 'item', code: 'SH-SIG-060', name: 'Senzu Home Signature 60 Menit', type: 'SERVICE', price: 225000 },
   { kind: 'item', code: 'SH-SIG-090', name: 'Senzu Home Signature 90 Menit', type: 'SERVICE', price: 325000 },
   { kind: 'item', code: 'SH-SIG-120', name: 'Senzu Home Signature 120 Menit', type: 'SERVICE', price: 425000 },
 ] as const;

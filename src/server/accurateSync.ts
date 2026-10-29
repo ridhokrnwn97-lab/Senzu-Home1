@@ -86,8 +86,6 @@ function control(value: any) {
 }
 function terms(booking: any, payment: any) {
   const durations: Record<number, [string, string[]]> = {
-    30: ['SH-SIG-030', ['Signature Treatment', 'Senzu Home - Signature Treatment 30 Menit']],
-    60: ['SH-SIG-060', ['Senzu Home Signature 60 Menit']],
     90: ['SH-SIG-090', ['Senzu Home Signature 90 Menit']],
     120: ['SH-SIG-120', ['Senzu Home Signature 120 Menit']],
   };

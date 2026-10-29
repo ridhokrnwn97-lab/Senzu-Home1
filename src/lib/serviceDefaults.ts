@@ -2,15 +2,6 @@ import type { ServiceItem } from '../types.ts';
 
 export const DEFAULT_SERVICES: ServiceItem[] = [
   {
-    id: 'srv-sig-60',
-    name: 'Senzu Home Signature 60 Menit',
-    duration: 60,
-    price: 225000,
-    description: 'Kombinasi reflexology titik saraf kaki, relaksasi punggung, leher, dan bahu dengan minyak aromaterapi premium.',
-    isPopular: false,
-    isActive: true,
-  },
-  {
     id: 'srv-sig-90',
     name: 'Senzu Home Signature 90 Menit',
     duration: 90,

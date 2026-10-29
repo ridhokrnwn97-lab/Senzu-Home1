@@ -3,6 +3,7 @@ import type { Firestore, DocumentReference } from 'firebase-admin/firestore';
 import { createHash, timingSafeEqual, randomInt } from 'node:crypto';
 import { resolveNotificationTargets } from '../lib/notificationTargets.ts';
 import { DEFAULT_SERVICES } from '../lib/serviceDefaults.ts';
+import { isDiscontinuedService, filterDiscontinuedServices } from '../lib/services';
 import { calculateHomeServiceFee,SENZU_BASE_LOCATION } from '../lib/distanceFeeService.ts';
 import { DEFAULT_NOTIFICATION_SETTINGS } from '../types/notification.ts';
 
@@ -141,6 +142,12 @@ export function registerSecurityRepairs(app: Express, db: Firestore, verify: (to
         const serviceSnap=await t.get(db.collection('services').doc(safeId(b.serviceId)));
         let service:any=serviceSnap.data();
         if(!service && !bs.exists){const catalog=await t.get(db.collection('services').limit(1));if(catalog.empty)service=DEFAULT_SERVICES.find(s=>s.id===b.serviceId);}
+
+        // REJECT discontinued signature services (30-min and 60-min removed from catalog)
+        if (isDiscontinuedService(b.serviceId)) {
+          throw securityError(409, 'SERVICE_DISCONTINUED', 'Layanan ini sudah dihapus dari katalog dan tidak dapat digunakan untuk pemesanan baru.');
+        }
+
         if(!bs.exists){
           if(!service || service.isActive===false || b.servicePrice!==service.price)throw securityError(409,'PRICE_MISMATCH','Harga layanan berubah. Muat ulang layanan.');
           if(!Number.isFinite(b.latitude) || !Number.isFinite(b.longitude) || Math.abs(b.latitude)>90 || Math.abs(b.longitude)>180)throw securityError(400,'INVALID_LOCATION','Lokasi tidak valid.');

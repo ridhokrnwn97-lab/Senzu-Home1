@@ -45,6 +45,7 @@ import {
   upsertCustomerFromBooking,
   normalizeIndonesianPhone,
 } from './crmService';
+import { filterDiscontinuedServices } from './services';
 import {
   processBookingLoyaltyEarning,
   redeemPointsForBooking,
@@ -102,15 +103,6 @@ export function calculateDistanceMeters(lat1: number, lon1: number, lat2: number
 
 export const DEFAULT_SERVICES: ServiceItem[] = [
   {
-    id: 'srv-sig-60',
-    name: 'Senzu Home Signature 60 Menit',
-    duration: 60,
-    price: 225000,
-    description: 'Kombinasi reflexology titik saraf kaki, relaksasi punggung, leher, dan bahu dengan minyak aromaterapi premium.',
-    isPopular: false,
-    isActive: true,
-  },
-  {
     id: 'srv-sig-90',
     name: 'Senzu Home Signature 90 Menit',
     duration: 90,
@@ -156,7 +148,7 @@ export const DEFAULT_THERAPISTS: Therapist[] = [
     email: 'rina@senzuhome.com',
     branchId: 'PLG001',
     branchName: 'Senzu Home Palembang R-01',
-    serviceIds: ['srv-sig-60', 'srv-sig-90', 'srv-sig-120'],
+    serviceIds: ['srv-sig-90', 'srv-sig-120'],
     specialties: ['Signature Reflexology', 'Deep Tissue', 'Aromatherapy'],
     rating: 4.95,
     totalCompleted: 142,
@@ -213,7 +205,7 @@ export const DEFAULT_THERAPISTS: Therapist[] = [
     email: 'fauzi@senzuhome.com',
     branchId: 'PLG001',
     branchName: 'Senzu Home Palembang R-01',
-    serviceIds: ['srv-sig-60', 'srv-fam-90', 'srv-dry-60'],
+    serviceIds: ['srv-fam-90', 'srv-dry-60'],
     specialties: ['Tradisional Palembang', 'Reflexology Kaki', 'Relaksasi'],
     rating: 4.85,
     totalCompleted: 76,
@@ -359,13 +351,15 @@ export async function getServices(): Promise<ServiceItem[]> {
     const snap = await getDocs(collection(db, 'services'));
     if (!snap.empty) {
       const list = snap.docs.map((d) => d.data() as ServiceItem);
+      // Filter out discontinued services (30-min and 60-min Signature) from Firestore data
+      const filtered = filterDiscontinuedServices(list);
       list.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('senzu_cached_services', JSON.stringify(list));
+          localStorage.setItem('senzu_cached_services', JSON.stringify(filtered));
         } catch {}
       }
-      return list;
+      return filtered;
     }
   } catch (err: any) {
     // If quota exceeded or offline, recover from local storage or defaults
@@ -381,7 +375,11 @@ export async function getServices(): Promise<ServiceItem[]> {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Filter out any discontinued services that may have been cached previously
+          const filtered = filterDiscontinuedServices(parsed);
+          if (filtered.length > 0) {
+            return filtered;
+          }
         }
       }
     } catch {}

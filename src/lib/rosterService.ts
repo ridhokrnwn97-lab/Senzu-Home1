@@ -48,10 +48,10 @@ export const DEFAULT_PALEMBANG_SHIFTS: Record<string, TherapistShiftConfig> = {
 };
 
 export const DEFAULT_SKILL_MATRIX: Record<string, string[]> = {
-  'th-rina': ['srv-sig-60', 'srv-sig-90', 'srv-sig-120'], // All services qualified
-  'th-siti': ['srv-sig-60', 'srv-sig-90'],                 // Signature 60 & 90
-  'th-budi': ['srv-sig-60', 'srv-sig-90', 'srv-sig-120'], // All services qualified
-  'th-fauzi': ['srv-sig-60', 'srv-sig-90'],                // Signature 60 & 90
+  'th-rina': ['srv-sig-90', 'srv-sig-120'], // All services qualified except 60-min
+  'th-siti': ['srv-sig-90'],                 // Signature 90 only
+  'th-budi': ['srv-sig-90', 'srv-sig-120'], // All services qualified except 60-min
+  'th-fauzi': ['srv-sig-90'],                // Signature 90 only
 };
 
 /**

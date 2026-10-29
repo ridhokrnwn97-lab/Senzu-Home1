@@ -219,7 +219,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
         const thRoster = rosterMap.get(th.id);
         const isOff = thRoster?.status === 'off' || thRoster?.status === 'leave' || thRoster?.status === 'unavailable';
         if (!isOff) {
-          const skills = th.serviceIds || DEFAULT_SKILL_MATRIX[th.id] || ['srv-sig-60', 'srv-sig-90'];
+          const skills = th.serviceIds || DEFAULT_SKILL_MATRIX[th.id] || ['srv-sig-90'];
           if (skills.includes(s.id) || skills.includes('all')) {
             count++;
           }
@@ -309,7 +309,7 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
     };
 
     setDrawerRoster({ ...existing });
-    const currentSkills = th.serviceIds || DEFAULT_SKILL_MATRIX[th.id] || ['srv-sig-60', 'srv-sig-90'];
+    const currentSkills = th.serviceIds || DEFAULT_SKILL_MATRIX[th.id] || ['srv-sig-90'];
     setDrawerSkills([...currentSkills]);
     setCopyToNext7Days(false);
   };
@@ -658,7 +658,6 @@ export const SupervisorRosterCalendarView: React.FC<SupervisorRosterCalendarView
           <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl">
             <span className="text-[10px] text-amber-800 block font-semibold uppercase">Cakupan Layanan</span>
             <div className="text-[10px] font-bold text-amber-900 mt-1 space-y-0.5">
-              <div>Sig 60m: {capacitySummary.serviceMap['srv-sig-60'] || 0} terapis</div>
               <div>Sig 90m: {capacitySummary.serviceMap['srv-sig-90'] || 0} terapis</div>
               <div>Sig 120m: {capacitySummary.serviceMap['srv-sig-120'] || 0} terapis</div>
             </div>

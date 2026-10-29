@@ -32,7 +32,7 @@ export const SenzuSplashScreen: React.FC<SenzuSplashScreenProps> = ({
           id="senzu-splash-screen"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.45, ease: 'easeInOut' } }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-[#5B351F] via-[#3D2315] to-[#3D2315] text-white p-6 select-none overflow-hidden"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#8B5A36] text-white p-6 select-none overflow-hidden"
           onClick={() => setIsVisible(false)} // Tap to skip instantly
         >
           {/* Subtle Ambient Zen Glow inspired by VIP Signature Room Warm Lighting */}
