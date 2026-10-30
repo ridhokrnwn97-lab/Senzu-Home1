@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Sparkles,
   Clock,
@@ -34,6 +34,7 @@ import {
 } from '../types';
 import { formatRupiah } from '../lib/utils';
 import { createBooking, calculateHomeServiceFee } from '../lib/dbService';
+import { getCustomerServices } from '../lib/customerServices';
 import { formatDistanceDisplay, SENZU_BASE_LOCATION } from '../lib/distanceFeeService';
 import { AddressAutocompleteMap } from './AddressAutocompleteMap';
 import { CustomerPaymentPage } from './CustomerPaymentPage';
@@ -79,7 +80,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   initialServiceId,
   initialPromoCode,
 }) => {
-  const safeServices = services || [];
+  const safeServices = useMemo(() => getCustomerServices(services), [services]);
   const { currentUser: staffUser } = useAuth();
   const canTestXendit = Boolean(staffUser && ['manager', 'admin'].includes(staffUser.role));
   const [xenditTestSelected, setXenditTestSelected] = useState(false);
@@ -105,7 +106,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
   // Form State
   const [selectedServiceId, setSelectedServiceId] = useState<string>(
-    initialServiceId || safeServices.find((s) => s.isPopular)?.id || safeServices[0]?.id || ''
+    safeServices.find((s) => s.id === initialServiceId)?.id || safeServices.find((s) => s.isPopular)?.id || safeServices[0]?.id || ''
   );
 
   // Apply initialServiceId only once per mount; later service-list changes may only repair an invalid id.
@@ -116,14 +117,21 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       setSelectedServiceId(initialServiceId);
       return;
     }
-    if (safeServices.length === 0) return;
-    initialServiceIdAppliedRef.current = true;
+    if (safeServices.length === 0) {
+      setSelectedServiceId('');
+      return;
+    }
+    if (!initialServiceIdAppliedRef.current) {
+      initialServiceIdAppliedRef.current = true;
+      setSelectedServiceId(safeServices.find((s) => s.isPopular)?.id || safeServices[0].id);
+      return;
+    }
     setSelectedServiceId((prev) => {
-      if (prev && safeServices.some((s) => s.id === prev)) return prev;
-      const popular = safeServices.find((s) => s.isPopular);
-      return popular ? popular.id : safeServices[0]?.id || '';
+      // A disabled selection requires a new explicit choice, not a silent price change.
+      if (!prev || safeServices.some((s) => s.id === prev)) return prev;
+      return '';
     });
-  }, [services, initialServiceId]);
+  }, [safeServices, initialServiceId]);
 
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsApp, setCustomerWhatsApp] = useState('');
@@ -197,11 +205,19 @@ export const BookingForm: React.FC<BookingFormProps> = ({
     return () => { cancelled = true; };
   }, [currentCustomer?.id, currentCustomer?.authUserId, firebaseUser?.uid]);
 
-  // Handle Repeat Booking prefill (services, address, notes, but NOT dates/time)
+  // Apply repeat details once; live catalog changes must not overwrite customer edits.
+  const appliedRepeatDataRef = React.useRef<Partial<Booking> | null>(null);
   useEffect(() => {
-    if (repeatData) {
-      if (repeatData.serviceId && services.some((s) => s.id === repeatData.serviceId)) {
+    if (!repeatData) {
+      appliedRepeatDataRef.current = null;
+      return;
+    }
+    if (repeatData !== appliedRepeatDataRef.current && safeServices.length > 0) {
+      appliedRepeatDataRef.current = repeatData;
+      if (repeatData.serviceId && safeServices.some((s) => s.id === repeatData.serviceId)) {
         setSelectedServiceId(repeatData.serviceId);
+      } else if (repeatData.serviceId) {
+        setSelectedServiceId('');
       }
       if (repeatData.customerName) setCustomerName(repeatData.customerName);
       if (repeatData.customerWhatsApp) setCustomerWhatsApp(repeatData.customerWhatsApp);
@@ -219,7 +235,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         );
       }
     }
-  }, [repeatData, services]);
+  }, [repeatData, safeServices]);
 
   const [savedCustomerAddresses, setSavedCustomerAddresses] = useState<CustomerSavedAddress[]>([]);
 
@@ -271,7 +287,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
 
-  const selectedService = services.find((s) => s.id === selectedServiceId) || services[0] || null;
+  const selectedService = safeServices.find((s) => s.id === selectedServiceId) || null;
   const servicePrice = selectedService ? selectedService.price : 0;
   // Account gender wins; guests pick in the form.
   const effectiveCustomerGender = currentCustomer?.gender || customerGender || undefined;
@@ -776,21 +792,16 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   };
 
   // Serene empty state if services are empty
-  if (services.length === 0) {
+  if (safeServices.length === 0 && !submittedBooking) {
     return (
       <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center max-w-xl mx-auto shadow-sm my-8">
         <div className="w-14 h-14 rounded-2xl bg-[#8B5A36]/10 text-[#4B2B18] flex items-center justify-center mx-auto mb-4">
           <Clock className="w-7 h-7 text-[#4B2B18]" />
         </div>
-        <h3 className="font-serif text-xl font-bold text-[#4B2B18]">Menyiapkan Menu Treatment</h3>
+        <h3 className="font-serif text-xl font-bold text-[#4B2B18]">Belum Ada Layanan yang Tersedia</h3>
         <p className="text-xs text-slate-500 mt-2">
-          Layanan home service Senzu sedang disinkronkan. Mohon tunggu sebentar.
+          Pilihan layanan belum tersedia. Silakan coba lagi nanti atau hubungi layanan pelanggan.
         </p>
-        <div className="mt-6 flex justify-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
       </div>
     );
   }
