@@ -185,6 +185,11 @@ service cloud.firestore {
       return catalog.get('price', null) is number && catalog.price >= 0 && data.servicePrice == catalog.price;
     }
 
+    function isBookableService(data) {
+      let catalog = get(/databases/$(database)/documents/services/$(data.serviceId)).data;
+      return catalog.get('isActive', false) == true && catalog.get('serviceType', '') != 'OUTLET';
+    }
+
     function hasNoClientVoucherBookingIntent(data) {
       // Keep scalar bindings simple: Rules expands expressions and has a strict evaluation budget.
       let price = data.get('servicePrice', -1);
@@ -585,6 +590,7 @@ service cloud.firestore {
       // Customer or guest can create a no-voucher booking with SAFE FIELDS ONLY
       // Voucher-bearing bookings must be committed via the authoritative server checkout transaction
       allow create: if request.resource.data.get('paymentMethod', '') != 'Xendit'
+        && isBookableService(request.resource.data)
         && !request.resource.data.keys().hasAny(['gatewayProvider', 'gatewayEnvironment', 'gatewayReceiptId', 'gatewayQuoteHash', 'gatewayReviewRequired', 'gatewayPaymentId'])
         && request.resource.data.get('paymentPolicyVersion', 0) == 2
         && request.resource.data.get('paymentDeadline', null) == null
