@@ -61,14 +61,13 @@ import {
 } from './types';
 import {
   initializeSeedData,
-  getServices,
+  subscribeToServices,
   getSettings,
   getTherapists,
   subscribeToAllBookings,
   subscribeToCustomerBookings,
   subscribeToTherapistBookings,
   getAllCustomers,
-  DEFAULT_SERVICES,
   DEFAULT_SETTINGS,
   DEFAULT_THERAPISTS,
 } from './lib/dbService';
@@ -192,12 +191,14 @@ function MainApp() {
     };
   }, []);
 
-  // Data state initialized with reliable defaults to prevent uninitialized access
-  const [services, setServices] = useState<ServiceItem[]>(DEFAULT_SERVICES);
+  // Service availability comes from the current Manager catalog, never seed/cache defaults.
+  const [services, setServices] = useState<ServiceItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [therapists, setTherapists] = useState<Therapist[]>(DEFAULT_THERAPISTS);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [customers, setCustomers] = useState<CustomerCRM[]>([]);
+
+  useEffect(() => subscribeToServices(setServices), []);
 
   // Centralized Official Senzu Customer Service WhatsApp Hook
   const {
@@ -263,8 +264,6 @@ function MainApp() {
         await initializeSeedData();
       } catch {}
 
-      const srv = await getServices();
-      setServices(srv.length > 0 ? srv : DEFAULT_SERVICES);
       const stg = await getSettings();
       setSettings(stg || DEFAULT_SETTINGS);
       const th = await getTherapists();
@@ -480,8 +479,6 @@ function MainApp() {
   };
 
   const handleRefreshSettings = async () => {
-    const srv = await getServices();
-    setServices(srv);
     const stg = await getSettings();
     setSettings(stg);
   };

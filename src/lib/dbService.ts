@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   setDoc,
   updateDoc,
   query,
@@ -354,40 +355,37 @@ export async function initializeSeedData(): Promise<void> {
 
 // ----------------- SERVICES & SETTINGS -----------------
 
+function servicesFromSnapshot(snapshot: { docs: { id: string; data(): unknown }[] }): ServiceItem[] {
+  return snapshot.docs.map(d => {
+    const service = d.data() as ServiceItem;
+    return { ...service, id: service.id || d.id };
+  }).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+}
+
 export async function getServices(): Promise<ServiceItem[]> {
   try {
-    const snap = await getDocs(collection(db, 'services'));
-    if (!snap.empty) {
-      const list = snap.docs.map((d) => d.data() as ServiceItem);
-      list.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('senzu_cached_services', JSON.stringify(list));
-        } catch {}
-      }
-      return list;
-    }
+    return servicesFromSnapshot(await getDocsFromServer(collection(db, 'services')));
   } catch (err: any) {
-    // If quota exceeded or offline, recover from local storage or defaults
     if (err?.code !== 'resource-exhausted') {
       console.warn('Get services notice:', err?.message || err);
     }
+    // An unavailable or empty catalog must not revive disabled cached/default services.
+    return [];
   }
+}
 
-  // Fallback to local cache if available
-  if (typeof window !== 'undefined') {
-    try {
-      const cached = localStorage.getItem('senzu_cached_services');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {}
-  }
-
-  return DEFAULT_SERVICES;
+export function subscribeToServices(onChange: (services: ServiceItem[]) => void): () => void {
+  return onSnapshot(collection(db, 'services'), { includeMetadataChanges: true }, snapshot => {
+    // Wait for the server even when IndexedDB already contains an older catalog.
+    if (snapshot.metadata.fromCache) {
+      onChange([]);
+      return;
+    }
+    if (!snapshot.metadata.hasPendingWrites) onChange(servicesFromSnapshot(snapshot));
+  }, error => {
+    console.warn('Service catalog subscription notice:', error.code);
+    onChange([]);
+  });
 }
 
 export async function saveService(service: ServiceItem): Promise<void> {
@@ -1697,7 +1695,14 @@ export async function createBooking(
   delete (newBooking as any).checkoutAttemptId;
   delete (newBooking as any).customerVoucherId;
 
-  await setDoc(doc(db, 'bookings', docId), cleanFirestoreData(newBooking));
+  await runTransaction(db, async transaction => {
+    const serviceSnapshot = await transaction.get(doc(db, 'services', data.serviceId));
+    const service = serviceSnapshot.data();
+    if (!serviceSnapshot.exists() || service?.isActive !== true || service.serviceType === 'OUTLET') {
+      throw Object.assign(new Error('Layanan ini sudah tidak tersedia. Silakan pilih layanan lain.'), { code: 'SERVICE_UNAVAILABLE' });
+    }
+    transaction.set(doc(db, 'bookings', docId), cleanFirestoreData(newBooking));
+  });
 
   // Initial history entry
   await addBookingStatusHistory(

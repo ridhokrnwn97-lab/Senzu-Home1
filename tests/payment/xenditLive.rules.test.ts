@@ -120,3 +120,33 @@ test('existing manual booking creation and operational updates retain their prio
   await assertFails(client('css').doc('bookings/manual_fixture').update({paymentMethod:'Xendit'}));
   await assertFails(client('manager').doc('bookings/manual_fixture').update({gatewayProvider:'xendit',gatewayEnvironment:'live'}));
 });
+test('rules reject new inactive, missing-status, missing and outlet-only services for guests, customers and operational staff',async()=>{
+  const variants:any[]=[{isActive:false},{},{isActive:null},{isActive:'true'},{isActive:true,serviceType:'OUTLET'}];
+  for (const [index, service] of variants.entries()) {
+    const serviceId=`unavailable_${index}`;
+    await db.collection('services').doc(serviceId).set({price:160000,...service});
+    for(const uid of [undefined,'alice','css','manager']) {
+      const b:any={serviceId,servicePrice:160000,homeServiceFee:0,totalAmount:160000,status:'Menunggu Pembayaran',paymentStatus:'UNPAID',
+        paymentMethod:'Transfer BNI',paymentPolicyVersion:2,paymentDeadline:null};
+      if(uid){b.customerAuthUid=uid;b.authUserId=uid;}
+      await assertFails(client(uid).doc(`bookings/unavailable_${index}_${uid||'guest'}`).set(b));
+      await assertFails(client(uid).doc(`bookings/missing_${index}_${uid||'guest'}`).set({...b,serviceId:'missing_service'}));
+    }
+  }
+});
+test('rules allow active Home Service, BOTH and legacy-type catalogs and preserve existing bookings after deactivation',async()=>{
+  for(const [index, type] of [undefined,'HOME_SERVICE','BOTH'].entries()) {
+    const serviceId=`available_${index}`;
+    await db.collection('services').doc(serviceId).set({price:160000,isActive:true,...(type?{serviceType:type}:{})});
+    for(const uid of [undefined,'alice','css','manager']) {
+      const b:any={serviceId,servicePrice:160000,homeServiceFee:0,totalAmount:160000,status:'Menunggu Pembayaran',paymentStatus:'UNPAID',
+        paymentMethod:'Transfer BNI',paymentPolicyVersion:2,paymentDeadline:null};
+      if(uid){b.customerAuthUid=uid;b.authUserId=uid;}
+      await assertSucceeds(client(uid).doc(`bookings/available_${index}_${uid||'guest'}`).set(b));
+    }
+    await db.collection('services').doc(serviceId).update({isActive:false});
+    await assertSucceeds(client('alice').doc(`bookings/available_${index}_alice`).get());
+    await assertSucceeds(client('alice').doc(`bookings/available_${index}_alice`).update({customerNotes:'Existing booking retained'}));
+    await assertSucceeds(client('css').doc(`bookings/available_${index}_alice`).update({status:'Confirmed'}));
+  }
+});

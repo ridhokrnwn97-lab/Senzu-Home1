@@ -8525,6 +8525,13 @@ async function startServer() {
           };
         }
         const serviceData = serviceSnap.data() || {};
+        if (serviceData.isActive !== true || serviceData.serviceType === 'OUTLET') {
+          return {
+            status: 409,
+            code: 'SERVICE_UNAVAILABLE',
+            error: 'Layanan ini sudah tidak tersedia. Silakan pilih layanan lain.',
+          };
+        }
         const authoritativeServicePrice = serviceData.price;
         if (!isFinitePositiveNumber(authoritativeServicePrice)) {
           return {

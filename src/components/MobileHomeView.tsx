@@ -33,6 +33,7 @@ import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { filterCustomerBookings, getActiveBooking, reconcileCustomerBookingsInFirestore } from '../lib/bookingPersistenceService';
 import { PendingPaymentCard } from './customer/PendingPaymentCard';
 import { ChatButtonWithBadge } from './chat/ChatButtonWithBadge';
+import { getCustomerServices } from '../lib/customerServices';
 
 export interface MobileHomeViewProps {
   services: ServiceItem[];
@@ -61,7 +62,7 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
   onOpenPayment,
   onOpenChat,
 }) => {
-  const safeServices = services || [];
+  const safeServices = useMemo(() => getCustomerServices(services), [services]);
   const { currentCustomer, isCustomerAuthenticated, firebaseUser, isCustomerPreviewMode } = useCustomerAuth();
   // Asynchronously loaded CRM & Loyalty state
   const [crmCustomer, setCrmCustomer] = useState<CustomerCRM | null>(null);

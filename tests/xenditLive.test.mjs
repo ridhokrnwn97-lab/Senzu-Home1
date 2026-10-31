@@ -312,6 +312,59 @@ test('actual manual no-voucher requests still use their existing path and cannot
   const f = actualCheckoutFixture(); const result = await f.submit({ paymentMethod: 'QRIS' });
   assert.equal(result.value.code, 'VOUCHER_REQUIRED'); assert.equal(f.db.writes.length, 0); assert.equal(f.routeCalls, 0);
 });
+test('new checkout rejects disabled, missing-status and outlet-only services before booking or benefit writes', async () => {
+  for (const service of [{ isActive: false }, { isActive: undefined }, { isActive: null }, { isActive: 'true' },
+    { isActive: true, serviceType: 'OUTLET' }]) {
+    for (const method of ['Xendit', 'Transfer BNI']) {
+      const f = actualCheckoutFixture();
+      Object.assign(f.db.data.get('services/service_fixture'), service);
+      const result = await f.submit(method === 'Xendit' ? {} : { paymentMethod: method, pointsRedeemed: 50, pointsDiscount: 5000 });
+      assert.equal(result.code, 409, JSON.stringify(result.value));
+      assert.equal(result.value.code, 'SERVICE_UNAVAILABLE');
+      assert.equal(f.db.writes.length, 0);
+      assert.equal(f.calls.length, 0);
+    }
+  }
+});
+test('catalog deactivation during checkout retry discards the earlier transaction writes', async () => {
+  const f = actualCheckoutFixture(), run = f.db.runTransaction.bind(f.db);
+  let attempts = 0;
+  f.db.retryOnce = true;
+  f.db.runTransaction = fn => run(async transaction => {
+    const result = await fn(transaction);
+    if (++attempts === 1) f.db.data.get('services/service_fixture').isActive = false;
+    return result;
+  });
+  const result = await f.submit();
+  assert.equal(attempts, 2);
+  assert.equal(result.value.code, 'SERVICE_UNAVAILABLE');
+  assert.equal(f.db.writes.length, 0);
+});
+test('existing checkout receipt remains recoverable after the service is deactivated', async () => {
+  const f = actualCheckoutFixture(), first = await f.submit();
+  assert.equal(first.code, 200);
+  const writes = f.db.writes.length;
+  f.db.data.get('services/service_fixture').isActive = false;
+  const replay = await f.submit();
+  assert.equal(replay.code, 200, JSON.stringify(replay.value));
+  assert.equal(replay.value.booking.id, first.value.booking.id);
+  assert.equal(f.db.writes.length, writes);
+  assert.equal(f.routeCalls, 1);
+});
+test('active BOTH service retains manual points checkout and its idempotent receipt', async () => {
+  const f = actualCheckoutFixture();
+  f.db.data.get('services/service_fixture').serviceType = 'BOTH';
+  f.db.seed('loyalty_accounts/alice', { customerId: 'alice', authUserId: 'alice', customerAuthUid: 'alice', pointsBalance: 500, currentTierId: 'member', lifetimePointsRedeemed: 0 });
+  const input = { paymentMethod: 'Transfer BNI', distanceKm: 12, distanceMeters: 12000, pointsRedeemed: 50, pointsDiscount: 5000, discountAmount: 5000, totalAmount: 185000 };
+  const first = await f.submit(input);
+  assert.equal(first.code, 200, JSON.stringify(first.value));
+  assert.equal(first.value.booking.totalAmount, 185000);
+  assert.equal(first.value.booking.paymentMethod, 'Transfer BNI');
+  assert.equal(f.db.data.get('loyalty_accounts/alice').pointsBalance, 450);
+  assert.equal((await f.submit(input)).code, 200);
+  assert.equal(f.db.data.get('loyalty_accounts/alice').pointsBalance, 450);
+  assert.equal(f.routeCalls, 0);
+});
 test('actual Live points checkout debits once and charges server-computed net amount on replay', async () => {
   const f = actualCheckoutFixture(); f.db.seed('loyalty_accounts/alice', { customerId: 'alice', authUserId: 'alice', customerAuthUid: 'alice', pointsBalance: 500, currentTierId: 'member', lifetimePointsRedeemed: 0 });
   const input = { pointsRedeemed: 50, pointsDiscount: 5000, discountAmount: 5000, totalAmount: 185000 };
