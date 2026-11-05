@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import type { Firestore } from 'firebase-admin/firestore';
 import { createHash } from 'node:crypto';
 import { OFFICIAL_SENZU_BANK_ACCOUNTS, OFFICIAL_SENZU_QRIS } from '../lib/paymentDefaults.ts';
+import { manualPaidMetaReceipt } from './metaManualPaid.ts';
 
 export const paymentError = (status: number, message: string) => Object.assign(new Error(message), { status });
 export function assertManualPayment(payment: any) {
@@ -189,9 +190,12 @@ export function registerPaymentAcceptance(app: Express, db: Firestore | null, ve
         const payments = await t.get(db.collection('payments').where('bookingId','==',bookingSnap.id));
         const records = payments.docs.map(d => ({ ...d.data(), id: d.id } as any));
         for (const record of records) assertPaymentLink(record, booking, staff ? undefined : identity.uid);
-        return records.find(p => p.status === 'paid') || records.find(p => p.status === 'pending_manual_verification') || records.sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] || null;
+        const payment = records.find(p => p.status === 'paid') || records.find(p => p.status === 'pending_manual_verification') || records.sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] || null;
+        return { payment, manualPaidLead: records.filter(p => p.status === 'paid').length === 1
+          ? manualPaidMetaReceipt({ ...booking, id: bookingSnap.id }, payment, identity.uid, roleSnap.exists) : null };
       });
-      res.json({ success: true, payment: result });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ success: true, ...result });
     } catch (error: any) {
       res.status(error.status || 500).json({ success: false, error: error.status ? error.message : 'Data pembayaran tidak dapat dimuat.' });
     }
