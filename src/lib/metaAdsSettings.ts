@@ -1,4 +1,6 @@
 export const META_ADS_TRIGGERS = {
+  payment_verified: 'Pembayaran terverifikasi (Manual & Xendit Live)',
+  manual_payment_verified: 'Pembayaran manual terverifikasi staf',
   xendit_live_paid: 'Pembayaran Xendit Live terverifikasi',
   booking_submitted: 'Konfirmasi & Ajukan Booking Senzu berhasil',
   payment_confirmation_or_proof: 'Konfirmasi pembayaran atau bukti pembayaran terkirim',
@@ -7,6 +9,7 @@ export const META_ADS_TRIGGERS = {
 } as const;
 
 export type MetaAdsTrigger = keyof typeof META_ADS_TRIGGERS;
+export const META_PAID_TRIGGERS: readonly MetaAdsTrigger[] = ['payment_verified', 'manual_payment_verified', 'xendit_live_paid'];
 export const META_STANDARD_EVENTS = [
   'AddPaymentInfo', 'AddToCart', 'AddToWishlist', 'CompleteRegistration', 'Contact',
   'CustomizeProduct', 'Donate', 'FindLocation', 'InitiateCheckout', 'Lead', 'PageView',
@@ -35,7 +38,7 @@ export function defaultMetaAdsSettings(): MetaAdsSettings {
     schemaVersion: 1, enabled: false, revision: 0, pixels: [],
     events: [
       { id: 'booking_add_to_cart', trigger: 'booking_submitted', kind: 'standard', eventName: 'AddToCart', pixelIds: 'all', enabled: true },
-      { id: 'payment_lead', trigger: 'xendit_live_paid', kind: 'standard', eventName: 'Lead', pixelIds: 'all', enabled: true },
+      { id: 'payment_lead', trigger: 'payment_verified', kind: 'standard', eventName: 'Lead', pixelIds: 'all', enabled: true },
     ],
   };
 }
@@ -73,8 +76,10 @@ export function validateMetaAdsSettings(value: unknown): MetaAdsSettings {
       return invalid('Periksa pemicu, nama peristiwa, dan target Pixel. Nama custom memakai huruf, angka, atau garis bawah (maksimal 40 karakter).');
     }
     eventIds.add(event.id);
-    // Upgrade saved Lead rules too, retaining opt-out and Pixel targets.
-    const trigger: MetaAdsTrigger = event.kind === 'standard' && event.eventName === 'Lead' ? 'xendit_live_paid' : event.trigger;
+    // Keep existing paid rules and opt-outs. Old early Lead rules remain Live-only
+    // until the Manager explicitly selects manual or both verified payment sources.
+    const trigger: MetaAdsTrigger = event.kind === 'standard' && event.eventName === 'Lead'
+      && !META_PAID_TRIGGERS.includes(event.trigger) ? 'xendit_live_paid' : event.trigger;
     return { id: event.id, trigger, kind: event.kind, eventName: event.eventName, pixelIds: event.pixelIds === 'all' ? 'all' as const : [...event.pixelIds], enabled: event.enabled };
   });
   return { schemaVersion: 1, enabled: data.enabled, revision: data.revision, pixels, events };

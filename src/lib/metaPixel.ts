@@ -64,7 +64,8 @@ function targets(settings: MetaAdsSettings, action: MetaAdsTrigger) {
   if (!settings.enabled) return [];
   for (const pixel of settings.pixels) if (pixel.enabled) {
     for (const event of settings.events) if (event.enabled
-      && (event.eventName !== 'Lead' || action === 'xendit_live_paid') && (event.trigger === action
+      && (event.eventName !== 'Lead' || ['xendit_live_paid', 'manual_payment_verified'].includes(action)) && (event.trigger === action
+      || (event.trigger === 'payment_verified' && ['xendit_live_paid', 'manual_payment_verified'].includes(action))
       || (event.trigger === 'payment_confirmation_or_proof' && ['payment_confirmation_clicked', 'payment_proof_submitted'].includes(action)))
       && (event.pixelIds === 'all' || event.pixelIds.includes(pixel.id))) {
       result.set(`${pixel.pixelId}:${event.kind}:${event.eventName}`, { pixelId: pixel.pixelId, kind: event.kind, eventName: event.eventName });
@@ -91,11 +92,11 @@ function remember(key: string): void {
 }
 
 /** Analytics is a non-blocking side effect; it never determines booking/payment success. */
-export async function trackMetaAdsAction(action: MetaAdsTrigger, context: { entityId: string; value?: number }): Promise<void> {
+export async function trackMetaAdsAction(action: MetaAdsTrigger, context: { entityId: string; value?: number; isCurrent?: () => boolean }): Promise<void> {
   try {
     if (!privacyAllowsTracking() || typeof context.entityId !== 'string' || !context.entityId || context.entityId.length > 200) return;
     const session = auth.currentUser;
-    const stable = () => auth.currentUser === session && privacyAllowsTracking();
+    const stable = () => auth.currentUser === session && privacyAllowsTracking() && context.isCurrent?.() !== false;
     const initial = await bounded(getMetaAdsSettings(), 5000);
     if (!stable() || !targets(initial, action).length) return;
     const fbq = await loadSdk();
@@ -105,7 +106,9 @@ export async function trackMetaAdsAction(action: MetaAdsTrigger, context: { enti
     if (!stable()) return;
     for (const target of targets(current, action)) {
       const buffer = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(
-        JSON.stringify([target.pixelId, target.kind, target.eventName, action.startsWith('payment_') ? 'payment' : action, context.entityId])
+        // Preserve existing Xendit Lead IDs when switching a rule to both sources.
+        JSON.stringify([target.pixelId, target.kind, target.eventName, target.eventName === 'Lead' ? 'xendit_live_paid'
+          : action.startsWith('payment_') ? 'payment' : action, context.entityId])
       ));
       const key = Array.from(new Uint8Array(buffer), n => n.toString(16).padStart(2, '0')).join('');
       if (!stable() || previouslySent(key)) continue;

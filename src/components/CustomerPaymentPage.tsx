@@ -45,6 +45,7 @@ import { useCustomerServiceWhatsApp } from '../lib/supportWhatsApp';
 import { CustomerRegisterModal } from './CustomerRegisterModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { trackMetaAdsAction } from '../lib/metaPixel';
+import { trackVerifiedManualPayment } from '../lib/manualPaidLead';
 
 import { XenditLivePaymentPage } from './customer/XenditLivePaymentPage';
 
@@ -119,10 +120,14 @@ const ManualCustomerPaymentPage: React.FC<CustomerPaymentPageProps> = ({
       if (cancelled) return;
       setActivePayment(payment);
       setSelectedMethod(preferred);
+      if (payment?.status === 'paid') void trackVerifiedManualPayment(booking.id, () => !cancelled);
 
       // Realtime subscription for customer page
       unsubscribe = subscribeToPaymentByBookingId(booking.id, (updatedPayment) => {
-        if (!cancelled) setActivePayment(updatedPayment);
+        if (!cancelled) {
+          setActivePayment(updatedPayment);
+          if (updatedPayment?.status === 'paid') void trackVerifiedManualPayment(booking.id, () => !cancelled);
+        }
       });
     };
 

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, RefreshCw, Radio } from 'lucide-react';
 import type { StaffUser } from '../../types';
 import { getMetaAdsSettings, saveMetaAdsSettings } from '../../lib/metaAdsService';
-import { defaultMetaAdsSettings, META_ADS_TRIGGERS, META_STANDARD_EVENTS, type MetaAdsSettings, type MetaAdsPixel, type MetaAdsEvent } from '../../lib/metaAdsSettings';
+import { defaultMetaAdsSettings, META_ADS_TRIGGERS, META_PAID_TRIGGERS, META_STANDARD_EVENTS, type MetaAdsSettings, type MetaAdsPixel, type MetaAdsEvent } from '../../lib/metaAdsSettings';
 
 const inputClass = 'w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100';
 const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-[#4B2B18] hover:bg-slate-50 disabled:opacity-50';
@@ -33,7 +33,8 @@ export function MetaAdsSettingsCard({ currentUser }: { currentUser: StaffUser })
     setMessage(''); setDraft(value => ({ ...value, events: value.events.map(event => {
       if (event.id !== id) return event;
       const next = { ...event, ...patch };
-      return next.kind === 'standard' && next.eventName === 'Lead' ? { ...next, trigger: 'xendit_live_paid' as const } : next;
+      return next.kind === 'standard' && next.eventName === 'Lead' && !META_PAID_TRIGGERS.includes(next.trigger)
+        ? { ...next, trigger: 'payment_verified' as const } : next;
     }) }));
   };
   const removePixel = (id: string) => {
@@ -109,7 +110,7 @@ export function MetaAdsSettingsCard({ currentUser }: { currentUser: StaffUser })
                   <button type="button" className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => { setMessage(''); setDraft(value => ({ ...value, events: value.events.filter(item => item.id !== rule.id) })); }} aria-label={`Hapus Peristiwa ${index + 1}`}><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pemicu<select disabled={rule.kind === 'standard' && rule.eventName === 'Lead'} className={inputClass} value={rule.trigger || 'booking_submitted'} onChange={event => updateEvent(rule.id, { trigger: event.target.value as MetaAdsEvent['trigger'] })}>{Object.entries(META_ADS_TRIGGERS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-600">Pemicu<select className={inputClass} value={rule.trigger || 'booking_submitted'} onChange={event => updateEvent(rule.id, { trigger: event.target.value as MetaAdsEvent['trigger'] })}>{Object.entries(META_ADS_TRIGGERS).filter(([value]) => rule.kind !== 'standard' || rule.eventName !== 'Lead' || META_PAID_TRIGGERS.includes(value as MetaAdsEvent['trigger'])).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label className="space-y-1 text-xs font-semibold text-slate-600">Jenis Peristiwa<select className={inputClass} value={rule.kind || 'standard'} onChange={event => updateEvent(rule.id, { kind: event.target.value as 'standard' | 'custom', eventName: event.target.value === 'standard' ? 'AddToCart' : 'SenzuEvent' })}><option value="standard">Standard Meta</option><option value="custom">Custom</option></select></label>
                   <label className="space-y-1 text-xs font-semibold text-slate-600">Nama Peristiwa{rule.kind === 'standard'
                     ? <select className={inputClass} value={rule.eventName ?? 'AddToCart'} onChange={event => updateEvent(rule.id, { eventName: event.target.value })}>{META_STANDARD_EVENTS.map(name => <option key={name} value={name}>{name}</option>)}</select>
@@ -119,7 +120,7 @@ export function MetaAdsSettingsCard({ currentUser }: { currentUser: StaffUser })
               </div>
             ))}
           </div>
-          <p className="text-xs leading-relaxed text-slate-500">Lead hanya dipicu setelah pembayaran Xendit Live terverifikasi oleh server, saat halaman pembayaran pelanggan terbuka. Aturan Lead lama otomatis mengikuti pemicu ini; klik WA, unggah bukti, dan Mode Tes tidak mengirim Lead. Pengiriman dicegah berulang per booking dan Pixel pada browser ini. Pixel harus aktif dan memiliki Pixel ID. Penerimaan peristiwa diperiksa di Meta Events Manager.</p>
+          <p className="text-xs leading-relaxed text-slate-500">Untuk Lead, pilih pembayaran manual terverifikasi staf, Xendit Live, atau keduanya. Lead dikirim saat halaman pembayaran pelanggan terbuka dan server telah memastikan pembayaran terverifikasi. Klik WA, pemilihan metode, unggah bukti, dan Mode Tes tidak mengirim Lead. Pengiriman dicegah berulang per booking dan Pixel pada browser ini. Jika pelanggan menutup halaman, Lead dapat dikirim ketika halaman pembayaran dibuka kembali. Pixel harus aktif dan memiliki Pixel ID. Penerimaan peristiwa diperiksa di Meta Events Manager.</p>
           <button type="submit" disabled={disabled} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#8B5A36] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {saving ? 'Menyimpan...' : 'Simpan Pengaturan Meta Pixel'}</button>
         </fieldset>
       </form>
