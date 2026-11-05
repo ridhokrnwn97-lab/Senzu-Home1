@@ -8,6 +8,7 @@ import {build} from 'esbuild';
 
 const result=await build({stdin:{contents:`
   export * from './src/lib/xenditLiveService';
+  export * from './src/lib/manualPaidLead';
   export * from './src/lib/metaAdsSettings';
   export * from './src/lib/metaPixel';`,resolveDir:process.cwd()},bundle:true,write:false,format:'cjs',platform:'browser',
   plugins:[{name:'fixtures',setup(b){
@@ -30,7 +31,8 @@ function fixture(){
   const fbq=(...args)=>calls.push(args);fbq.callMethod=fbq;
   const sandbox={fixture:f,module:{exports:{}},TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,
     window:{fbq},document:{},navigator:{},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},
-    fetch:async(_url,options)=>{assert.equal(options.headers.Authorization,'Bearer fixture_token');return{ok:true,json:async()=>({success:true,session:f.response})};}};
+    fetch:async(url,options)=>{assert.equal(options.headers.Authorization,'Bearer fixture_token');
+      return{ok:true,json:async()=>url==='/api/payments/lookup'?f.manualResponse:{success:true,session:f.response}};}};
   vm.runInNewContext(result.outputFiles[0].text,sandbox);
   return{api:sandbox.module.exports,f,calls,sandbox,leads:()=>calls.filter(c=>c[0]==='trackSingle'&&c[2]==='Lead')};
 }
@@ -40,7 +42,7 @@ test('saved/default Lead rules move to verified Live payment; preserve opt-out, 
   const normalized=api.validateMetaAdsSettings(f.settings);
   assert.equal(normalized.events[0].trigger,'xendit_live_paid');assert.equal(normalized.events[0].enabled,false);
   assert.deepEqual(Array.from(normalized.events[0].pixelIds),['pixel']);assert.equal(normalized.events[1].trigger,'booking_submitted');
-  assert.equal(api.defaultMetaAdsSettings().events[1].trigger,'xendit_live_paid');
+  assert.equal(api.defaultMetaAdsSettings().events[1].trigger,'payment_verified');
 });
 test('WA, proof and submitted booking cannot fire Lead; AddToCart still works',async()=>{
   const{api,leads,calls}=fixture();
@@ -75,4 +77,55 @@ test('account switch and analytics failure do not emit wrong-account Lead or blo
   const x=fixture();x.sandbox.fetch=async()=>{x.f.auth.currentUser={uid:'other'};return{ok:true,json:async()=>({success:true,session:paid()})};};
   await assert.rejects(x.api.readLivePayment('booking_fixture'));await flush();assert.equal(x.leads().length,0);
   const y=fixture();y.f.settings={};assert.equal((await y.api.readLivePayment('booking_fixture')).paymentStatus,'paid');await flush();assert.equal(y.leads().length,0);
+});
+
+const manualResponse=()=>({success:true,
+  payment:{id:'PAY-booking_fixture',bookingId:'booking_fixture',status:'paid',paymentType:'manual',amount:200000},
+  manualPaidLead:{schemaVersion:1,source:'staff_verified_manual',bookingId:'booking_fixture',paymentId:'PAY-booking_fixture',
+    amount:200000,currency:'IDR',verifiedAt:'2026-11-01T02:00:00.000Z'}});
+test('manual and combined Lead triggers survive saving; existing Live-only rules stay Live-only',()=>{
+  const{api,f}=fixture();
+  for(const trigger of ['manual_payment_verified','payment_verified','xendit_live_paid']){
+    f.settings.events[0].trigger=trigger;
+    assert.equal(api.validateMetaAdsSettings(f.settings).events[0].trigger,trigger);
+  }
+});
+test('manual Lead requires an authenticated server receipt; old backend, pending proof and failed lookup send nothing',async()=>{
+  for(const patch of [undefined,{success:true,payment:{status:'paid'}},{success:true,payment:{status:'pending_manual_verification'},manualPaidLead:null},
+    {success:false}, {...manualResponse(),manualPaidLead:{...manualResponse().manualPaidLead,bookingId:'foreign'}},
+    {...manualResponse(),payment:{...manualResponse().payment,amount:1}}]){
+    const{api,f,leads}=fixture();f.settings.events[0].trigger='payment_verified';f.manualResponse=patch;
+    await api.trackVerifiedManualPayment('booking_fixture');assert.equal(leads().length,0);
+  }
+});
+test('verified manual payment sends one Lead per Pixel and booking across repeat reads and both paid rules',async()=>{
+  const{api,f,leads}=fixture();f.settings.events[0].trigger='payment_verified';f.manualResponse=manualResponse();
+  f.settings.events.push({...f.settings.events[0],id:'manual_duplicate',trigger:'manual_payment_verified'});
+  await Promise.all([api.trackVerifiedManualPayment('booking_fixture'),api.trackVerifiedManualPayment('booking_fixture')]);
+  assert.equal(leads().length,1);assert.deepEqual(Object.keys(leads()[0][3]),[]);
+  await api.readLivePayment('booking_fixture');await flush();assert.equal(leads().length,1,'paid method/rule changes retain the existing dedup ID');
+  for(const action of ['booking_submitted','payment_proof_submitted','payment_confirmation_clicked','payment_verified']){
+    await api.trackMetaAdsAction(action,{entityId:'another_booking'});
+  }
+  assert.equal(leads().length,1,'combined trigger cannot be dispatched as an unverified action');
+});
+test('manual-only and Live-only Lead rules do not leak across payment sources',async()=>{
+  const x=fixture();x.f.manualResponse=manualResponse();
+  await x.api.trackVerifiedManualPayment('booking_fixture');assert.equal(x.leads().length,0);
+  x.f.settings.events[0].trigger='manual_payment_verified';
+  await x.api.readLivePayment('booking_fixture');await flush();assert.equal(x.leads().length,0);
+  await x.api.trackVerifiedManualPayment('booking_fixture');assert.equal(x.leads().length,1);
+});
+test('manual tracking respects privacy, disabled config, account switch, page unmount and lookup errors',async()=>{
+  for(const change of [x=>x.f.settings.enabled=false,x=>x.f.settings.pixels[0].enabled=false,
+    x=>x.f.settings.events[0].enabled=false,x=>x.sandbox.navigator.doNotTrack='1',
+    x=>x.sandbox.fetch=async()=>{x.f.auth.currentUser={uid:'other'};return{ok:true,json:async()=>manualResponse()};},
+    x=>x.sandbox.fetch=async()=>{throw new Error('offline');}]){
+    const x=fixture();x.f.settings.events[0].trigger='payment_verified';x.f.manualResponse=manualResponse();change(x);
+    await x.api.trackVerifiedManualPayment('booking_fixture');assert.equal(x.leads().length,0);
+  }
+  const y=fixture();y.f.settings.events[0].trigger='payment_verified';y.f.manualResponse=manualResponse();
+  await y.api.trackVerifiedManualPayment('booking_fixture',()=>false);assert.equal(y.leads().length,0);
+  let current=true;y.sandbox.fetch=async()=>{current=false;return{ok:true,json:async()=>manualResponse()};};
+  await y.api.trackVerifiedManualPayment('booking_fixture',()=>current);assert.equal(y.leads().length,0);
 });
