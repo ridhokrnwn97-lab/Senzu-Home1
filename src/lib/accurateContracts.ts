@@ -8,6 +8,10 @@ export const ACCURATE_HOME_MENU = [
   { code: 'SH-TJ-090', name: 'Senzu Home - Travel Journey 90 Menit', bookingName: 'Travel Journey', duration: 90, price: 140000 },
   { code: 'SH-FBH-090', name: 'Senzu Home - Full Body Healing 90 Menit', bookingName: 'Full Body Healing', duration: 90, price: 225000 },
   { code: 'SH-RBR-090', name: 'Senzu Home - Royal Body Recovery 90 Menit', bookingName: 'Royal Body Recovery', duration: 90, price: 220000 },
+  { code: 'SH-DSR-120', name: 'Senzu Home - Deep Sleep Relaxations 120 Menit', bookingName: 'Deep Sleep Relaxations', duration: 120, price: 315000 },
+  { code: 'SH-TJ-120', name: 'Senzu Home - Travel Journey 120 Menit', bookingName: 'Travel Journey', duration: 120, price: 190000 },
+  { code: 'SH-FBH-120', name: 'Senzu Home - Full Body Healing 120 Menit', bookingName: 'Full Body Healing', duration: 120, price: 300000 },
+  { code: 'SH-RBR-120', name: 'Senzu Home - Royal Body Recovery 120 Menit', bookingName: 'Royal Body Recovery', duration: 120, price: 320000 },
 ] as const;
 export const ACCURATE_MASTERS = [
   { kind: 'account', code: '110103', name: 'Saldo Xendit – Senzu Home', type: 'CASH_BANK' },
