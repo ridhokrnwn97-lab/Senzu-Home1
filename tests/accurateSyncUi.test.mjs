@@ -89,6 +89,29 @@ test('mount only reads status; historical preview has no activation, financial w
     assert.deepEqual(f.errors, []);
   } finally { await f.context.close(); }
 });
+test('the real preview client accepts all four Home item codes without activating sync or emitting Meta', async () => {
+  for (const [code, price] of [['SH-DSR-090', 200000], ['SH-TJ-090', 140000], ['SH-FBH-090', 225000], ['SH-RBR-090', 220000]]) {
+    const f = await fixture(); try {
+      await ready(f.page); Object.assign(f.state.preview, { itemCode: code, servicePrice: price, amount: price });
+      await preview(f.page); await f.page.getByText(`SH-261022-FIX01`, { exact: true }).waitFor();
+      assert.match(await f.page.getByRole('status').innerText(), new RegExp(code));
+      assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'preview']);
+      assert.deepEqual(await f.page.evaluate(() => window.__events), []); assert.deepEqual(f.errors, []);
+    } finally { await f.context.close(); }
+  }
+});
+test('the real preview client rejects account codes and unknown service codes', async () => {
+  for (const code of ['400005', 'SH-UNKNOWN-090']) {
+    const f = await fixture(); try {
+      await ready(f.page); f.state.preview.itemCode = code;
+      await f.page.getByLabel('Booking untuk pratinjau Accurate').fill('SH-261022-FIX01');
+      await f.page.getByRole('button', { name: 'Pratinjau Tanpa Mencatat' }).click();
+      await f.page.getByRole('alert').waitFor(); assert.equal(await f.page.getByRole('status').count(), 0);
+      assert.deepEqual(f.state.calls.map(c => c.action), ['status', 'preview']);
+      assert.deepEqual(await f.page.evaluate(() => window.__events), []);
+    } finally { await f.context.close(); }
+  }
+});
 test('activation requires preview plus both confirmations and server enablement', async () => {
   const f = await fixture(); try {
     await ready(f.page); const activate = f.page.getByRole('button', { name: 'Aktifkan Pencatatan Booking Baru' });
