@@ -78,10 +78,14 @@ const token = 'aat.' + 'A'.repeat(64) + '.offline_fixture', secret = 'fixture_si
 const req = (body = {}, uid = 'manager') => ({ body, headers: { authorization: `Bearer ${uid}` }, rawHeaders: ['Authorization', `Bearer ${uid}`], ip: 'fixture', socket: {} });
 const approve = { acknowledgement: ACCURATE_SYNC_ACK, taxPolicy: 'no_extra_tax' };
 const homeMenuCases = [
-  ['Deep Sleep Relaxations', 'SH-DSR-090', 200000],
-  ['Travel Journey', 'SH-TJ-090', 140000],
-  ['Full Body Healing', 'SH-FBH-090', 225000],
-  ['Royal Body Recovery', 'SH-RBR-090', 220000],
+  ['Deep Sleep Relaxations', 90, 'SH-DSR-090', 200000],
+  ['Travel Journey', 90, 'SH-TJ-090', 140000],
+  ['Full Body Healing', 90, 'SH-FBH-090', 225000],
+  ['Royal Body Recovery', 90, 'SH-RBR-090', 220000],
+  ['Deep Sleep Relaxations', 120, 'SH-DSR-120', 315000],
+  ['Travel Journey', 120, 'SH-TJ-120', 190000],
+  ['Full Body Healing', 120, 'SH-FBH-120', 300000],
+  ['Royal Body Recovery', 120, 'SH-RBR-120', 320000],
 ];
 function staff(db, uid = 'manager', role = 'manager') {
   db.seed(`staff_users/staff_${uid}`, { authUserId: uid, name: 'Fixture', role, isStaffMaster: true, sourceSystem: 'STAFF_MASTER_GOVERNANCE' });
@@ -299,10 +303,10 @@ test('unsupported services are retained for review without changing payment or c
   const f = fixture(); f.activateControl(); const v = f.booking('NEW01', { serviceName: 'Unmapped new service' }); await f.queue(v); await f.service.runOnce();
   assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, 'SYNC_SERVICE_UNMAPPED'); assert.equal(f.calls.length, 0);
 });
-test('all four new Home menus retain their own item, price and paid total through the Live lifecycle without replaying documents', async () => {
-  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
+test('all 90 and 120 minute Home menus retain their own item, price and paid total through the Live lifecycle without replaying documents', async () => {
+  for (const [index, [name, duration, code, price]] of homeMenuCases.entries()) {
     const f = fixture(); f.activateControl();
-    const v = f.booking(`HOMEL${index}`, { serviceName: name, serviceDuration: 90, servicePrice: price, totalAmount: price });
+    const v = f.booking(`HOMEL${index}`, { serviceName: name, serviceDuration: duration, servicePrice: price, totalAmount: price });
     await f.queue(v); await f.queue(v);
     await f.service.runOnce();
     assert.equal(f.job(v).state, 'waiting_service');
@@ -326,9 +330,9 @@ test('all four new Home menus retain their own item, price and paid total throug
   }
 });
 test('new Home mapping accepts the canonical item name but never infers an item from duration or an outlet name alone', async () => {
-  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
+  for (const [index, [name, duration, code, price]] of homeMenuCases.entries()) {
     const f = fixture(); f.activateControl();
-    const v = f.booking(`HOMEC${index}`, { serviceName: `Senzu Home - ${name} 90 Menit`, serviceDuration: 90, servicePrice: price, totalAmount: price });
+    const v = f.booking(`HOMEC${index}`, { serviceName: `Senzu Home - ${name} ${duration} Menit`, serviceDuration: duration, servicePrice: price, totalAmount: price });
     const result = await f.service.preview(req({ bookingId: v.booking.id }));
     assert.equal(result.itemCode, code); assert.equal(result.amount, price);
     assert.equal(f.posts().length, 0); assert.equal(f.job(v), undefined);
@@ -337,6 +341,8 @@ test('new Home mapping accepts the canonical item name but never infers an item 
     { serviceName: 'Deep Sleep Relaxations', serviceDuration: 60 },
     { serviceName: 'Deep Sleep Relaxation', serviceDuration: 90 },
     { serviceName: 'Unknown Home Menu', serviceDuration: 90 },
+    { serviceName: 'Senzu Home - Deep Sleep Relaxations 120 Menit', serviceDuration: 90 },
+    { serviceName: 'Senzu Home - Full Body Healing 90 Menit', serviceDuration: 120 },
   ].entries()) {
     const f = fixture(); f.activateControl(); const v = f.booking(`HOMEX${index}`, override);
     await f.queue(v); await f.service.runOnce();
@@ -358,15 +364,17 @@ test('old Signature item codes remain unchanged after adding the new Home menu',
   }
 });
 test('a missing Home item, outlet revenue account or changed Accurate catalog price stops posting for review', async () => {
-  for (const [index, [mutate, issue]] of [
-    [f => f.masters.delete('SH-TJ-090'), 'ACCURATE_MASTER_MISMATCH'],
-    [f => f.masters.get('SH-TJ-090').salesGlAccount.no = '400001', 'ACCURATE_ITEM_ACCOUNTS_UNVERIFIED'],
-    [f => f.masters.get('SH-TJ-090').unitPrice = 150000, 'ACCURATE_MASTER_MISMATCH'],
-  ].entries()) {
-    const f = fixture(); f.activateControl();
-    const v = f.booking(`MAST${index}`, { serviceName: 'Travel Journey', serviceDuration: 90, servicePrice: 140000, totalAmount: 140000 });
-    mutate(f); await f.queue(v); await f.service.runOnce();
-    assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, issue); assert.equal(f.posts().length, 0);
+  for (const [duration, code, price] of [[90, 'SH-TJ-090', 140000], [120, 'SH-TJ-120', 190000]]) {
+    for (const [index, [mutate, issue]] of [
+      [f => f.masters.delete(code), 'ACCURATE_MASTER_MISMATCH'],
+      [f => f.masters.get(code).salesGlAccount.no = '400001', 'ACCURATE_ITEM_ACCOUNTS_UNVERIFIED'],
+      [f => f.masters.get(code).unitPrice = price + 10000, 'ACCURATE_MASTER_MISMATCH'],
+    ].entries()) {
+      const f = fixture(); f.activateControl();
+      const v = f.booking(`MAST${duration}${index}`, { serviceName: 'Travel Journey', serviceDuration: duration, servicePrice: price, totalAmount: price });
+      mutate(f); await f.queue(v); await f.service.runOnce();
+      assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, issue); assert.equal(f.posts().length, 0);
+    }
   }
 });
 test('Test/manual/mismatched/refunded/corrected or changed records can never post', async () => {
@@ -1020,9 +1028,9 @@ async function manualFixture(channel = 'MANDIRI', suffix = 'MAN01', options = {}
   return Object.assign(f,{v,manualQueue:queue});
 }
 test('new Home menus also post verified manual payments to their mapped bank and invoice only on completion', async () => {
-  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
-    const channel = ['BNI', 'MANDIRI', 'BRI', 'QRIS'][index];
-    const f = await manualFixture(channel, `HOMEM${index}`, { booking: { serviceName: name, serviceDuration: 90, servicePrice: price, totalAmount: price } });
+  for (const [index, [name, duration, code, price]] of homeMenuCases.entries()) {
+    const channel = ['BNI', 'MANDIRI', 'BRI', 'QRIS'][index % 4];
+    const f = await manualFixture(channel, `HOMEM${index}`, { booking: { serviceName: name, serviceDuration: duration, servicePrice: price, totalAmount: price } });
     await f.manualQueue(); await f.manualQueue(); await f.service.runOnce();
     assert.equal(f.job(f.v).state, 'waiting_service');
     assert.equal(f.posts('create-down-payment')[0].payload.dpAmount, price);
