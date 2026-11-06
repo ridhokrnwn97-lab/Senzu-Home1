@@ -130,12 +130,12 @@ test('malformed Secrets and invalid database pin fail closed without API calls',
     await assert.rejects(f.service.check(req())); assert.equal(f.calls.length, 0);
   }
 });
-test('successful signed check verifies metadata and eight fixed masters with no financial or Firestore writes', async () => {
+test('successful signed check verifies metadata and all Senzu Home masters with no financial or Firestore writes', async () => {
   const f = fixture({ env: { ACCURATE_DATABASE_ID: '96400' } });
   const before = structuredClone([...f.db.data]); const result = await f.service.check(req());
   assert.equal(result.mastersMatch, true); assert.equal(result.connected, true); assert.equal(result.writesEnabled, false);
   assert.equal(result.databaseId, 96400); assert.equal(result.databaseIdPinned, true); assert.equal(result.access, 'administrator');
-  assert.equal(result.checks.length, 8); assert.equal(f.calls.length, 9);
+  assert.equal(result.checks.length, ACCURATE_MASTERS.length); assert.equal(f.calls.length, 1 + ACCURATE_MASTERS.length);
   assert.deepEqual([...f.db.data], before);
   for (const value of [token, secret, 'private@example.invalid']) assert.equal(JSON.stringify(result).includes(value), false);
 });
@@ -158,7 +158,7 @@ test('Staff Master permission revoked during network check blocks the returned p
     if (call.url.searchParams.get('no') === 'SH-SIG-120') f.db.data.get('staff_roles/manager1').isActive = false;
     return null;
   });
-  await assert.rejects(f.service.check(req())); assert.equal(f.calls.length, 9);
+  await assert.rejects(f.service.check(req())); assert.equal(f.calls.length, 1 + ACCURATE_MASTERS.length);
 });
 test('wrong type, price, names, suspension and missing masters cannot become a successful mapping', async () => {
   for (const change of [f => f.records.get('110103').accountType = 'EXPENSE',
@@ -187,7 +187,7 @@ test('untrusted metadata host and redirect targets never receive credentials', a
 test('official cloud host migration follows 308 with same path/query only, and loops are bounded', async () => {
   const f = fixture(); f.respond(call => call.url.hostname === 'odin.accurate.id' ? new Response(null, { status: 308,
     headers: { location: 'https://zeus.accurate.id' + call.url.pathname + call.url.search } }) : null);
-  assert.equal((await f.service.check(req())).mastersMatch, true); assert.equal(f.calls.length, 17);
+  assert.equal((await f.service.check(req())).mastersMatch, true); assert.equal(f.calls.length, 1 + 2 * ACCURATE_MASTERS.length);
   const g = fixture(); g.respond(call => call.url.hostname !== 'account.accurate.id' ? new Response(null, { status: 308,
     headers: { location: call.url.href } }) : null);
   await rejects(g.service.check(req()), 'ACCURATE_UNSAFE_REDIRECT'); assert.equal(g.calls.length, 4);

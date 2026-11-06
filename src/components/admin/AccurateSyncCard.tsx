@@ -98,7 +98,7 @@ export function AccurateSyncCard({ currentUser }: { currentUser: StaffUser }) {
     </div>
     <div className="space-y-3 rounded-xl border p-4 text-sm text-slate-700">
       <h4 className="font-semibold">Pratinjau booking dan periksa pemetaan</h4>
-      <p>Pratinjau hanya membaca data. Gunakan kode booking yang sudah dibayar melalui Xendit Live untuk memeriksa akun, layanan, dan rincian nominal.</p>
+      <p>Pratinjau hanya membaca data. Gunakan kode booking dengan pembayaran manual terverifikasi staf atau Xendit Live untuk memeriksa akun, layanan, dan rincian nominal.</p>
       <label className="block">Kode atau ID booking<input aria-label="Booking untuk pratinjau Accurate" value={booking} disabled={busy} onChange={e => { setBooking(e.target.value); setPreview(null); setNetPreview(null); setStateDiagnostic(null); setAck(false); setTax(false); setFeeAck(false); setError(''); }} placeholder="SH-261022-NUOUN atau bk_SH-…" className="mt-1 block min-h-[44px] w-full rounded-lg border p-2" /></label>
       <div className="flex flex-wrap gap-3">
         <button type="button" className={button} disabled={busy || !normalized} onClick={() => act('preview')}>Pratinjau Tanpa Mencatat</button>
