@@ -74,7 +74,7 @@ test('Manager mount reads configuration only; explicit check shows all Home mast
     await check.click(); await page.getByText('Koneksi berhasil. Seluruh master yang diperiksa cocok.', { exact: true }).waitFor();
     assert.equal(await page.locator('tbody tr').count(), ACCURATE_MASTERS.length); assert.equal(state.calls.filter(c => c.action === 'check').length, 1);
     const rows = await page.locator('tbody').innerText();
-    for (const code of ['SH-DSR-090', 'SH-TJ-090', 'SH-FBH-090', 'SH-RBR-090']) assert.ok(rows.includes(code));
+    for (const code of ['SH-DSR-090', 'SH-TJ-090', 'SH-FBH-090', 'SH-RBR-090', 'SH-DSR-120', 'SH-TJ-120', 'SH-FBH-120', 'SH-RBR-120']) assert.ok(rows.includes(code));
     await page.getByText('Panel ini hanya memeriksa koneksi.', { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__events), []); assert.deepEqual(errors, []);
   } finally { await context.close(); }
