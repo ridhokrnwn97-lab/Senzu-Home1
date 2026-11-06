@@ -8,6 +8,7 @@ import { PROCESSING_ERRORS } from './xenditProcessingFees.ts';
 import { FEE_POLICY, feeNumber, feePlan, matchesFeeJournal } from './accurateFeePosting.ts';
 import { isManualSource, MANUAL_CHANNELS, manualSourceSeal, validateManualSource, type AccurateManualPaidEvent } from './accurateManualSource.ts';
 import { liveQuoteSeal } from './xenditLiveQuote.ts';
+import { ACCURATE_HOME_MENU } from '../lib/accurateContracts.ts';
 import { readXenditNetPreview } from './xenditNetPreview.ts';
 import { createAccurateSyncProvider, matchesAccurateCustomerNo, normalizeAccurate, positiveId, syncCredentialsConfigured, syncFailure,
   type AccurateDocumentKind } from './accurateSyncProvider.ts';
@@ -92,7 +93,9 @@ function terms(booking: any, payment: any) {
     120: ['SH-SIG-120', ['Senzu Home Signature 120 Menit']],
   };
   const mapped = durations[booking.serviceDuration];
-  const itemCode = mapped?.[1].some(name => normalizeAccurate(name) === normalizeAccurate(booking.serviceName)) ? mapped[0] : null;
+  const menu = ACCURATE_HOME_MENU.find(row => row.duration === booking.serviceDuration &&
+    [row.bookingName, row.name].some(name => normalizeAccurate(name) === normalizeAccurate(booking.serviceName)));
+  const itemCode = menu?.code || (mapped?.[1].some(name => normalizeAccurate(name) === normalizeAccurate(booking.serviceName)) ? mapped[0] : null);
   const { servicePrice, homeServiceFee: visitFee, discountAmount: discount, totalAmount: amount } = booking;
   if (![servicePrice, visitFee, discount, amount].every(integer) || amount < 10000 || servicePrice <= 0 ||
       servicePrice + visitFee - discount !== amount || payment.amount !== amount) throw syncFailure('SYNC_SOURCE_INVALID', true);
