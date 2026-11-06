@@ -1,4 +1,5 @@
 import { auth } from './firebase';
+import { ACCURATE_MASTERS } from './accurateContracts';
 import { ACCURATE_SYNC_ACK, ACCURATE_FEE_ACK, ACCURATE_MANUAL_ACK, ACCURATE_SYNC_DATABASE_ID, ACCURATE_NET_PREVIEW_ERRORS, isAccurateXenditNetPreview, isAccurateXenditStateDiagnostic,
   type AccurateSyncStatus, type AccurateSyncPreview, type AccurateXenditNetResult } from './accurateSyncContracts';
 
@@ -49,7 +50,7 @@ export async function accurateSyncPreview(bookingId: string, signal?: AbortSigna
   const v = await request('preview', { bookingId }, signal);
   if (!/^SH-\d{6}-[A-Z0-9]{5,20}$/.test(v.bookingCode || '') || ['amount', 'servicePrice', 'visitFee', 'discount'].some(k => !Number.isSafeInteger(v[k]) || v[k] < 0 || v[k] > 10000000) ||
       v.servicePrice + v.visitFee - v.discount !== v.amount || typeof v.historical !== 'boolean' || typeof v.eligible !== 'boolean' ||
-      ![null, 'SH-SIG-030', 'SH-SIG-060', 'SH-SIG-090', 'SH-SIG-120'].includes(v.itemCode) || typeof v.note !== 'string' ||
+      !(v.itemCode === null || ACCURATE_MASTERS.some(row => row.kind === 'item' && row.code === v.itemCode)) || typeof v.note !== 'string' ||
       !/^SHDP-[a-f0-9]{24}$/.test(v.downPaymentNumber || '') || !/^SHRC-[a-f0-9]{24}$/.test(v.receiptNumber || '') || !/^SHIV-[a-f0-9]{24}$/.test(v.invoiceNumber || '')) {
     throw new Error('Respons pratinjau Accurate tidak valid.');
   }
