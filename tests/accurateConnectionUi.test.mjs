@@ -65,14 +65,16 @@ async function fixture(query = '') {
   const page = await context.newPage(); page.setDefaultTimeout(7000); const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin + '/' + query); return { page, context, state, errors };
 }
-test('Manager mount reads configuration only; explicit check shows eight masters and never fires Meta', async () => {
+test('Manager mount reads configuration only; explicit check shows all Home masters and never fires Meta', async () => {
   const { page, context, state, errors } = await fixture();
   try {
     const check = page.getByRole('button', { name: 'Periksa Koneksi dan Master', exact: true }); await check.waitFor();
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Periksa Koneksi dan Master')?.disabled);
     assert.deepEqual(state.calls.map(c => c.action), ['configuration']); assert.equal(await page.locator('input,textarea').count(), 0);
     await check.click(); await page.getByText('Koneksi berhasil. Seluruh master yang diperiksa cocok.', { exact: true }).waitFor();
-    assert.equal(await page.locator('tbody tr').count(), 8); assert.equal(state.calls.filter(c => c.action === 'check').length, 1);
+    assert.equal(await page.locator('tbody tr').count(), ACCURATE_MASTERS.length); assert.equal(state.calls.filter(c => c.action === 'check').length, 1);
+    const rows = await page.locator('tbody').innerText();
+    for (const code of ['SH-DSR-090', 'SH-TJ-090', 'SH-FBH-090', 'SH-RBR-090']) assert.ok(rows.includes(code));
     await page.getByText('Panel ini hanya memeriksa koneksi.', { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__events), []); assert.deepEqual(errors, []);
   } finally { await context.close(); }
