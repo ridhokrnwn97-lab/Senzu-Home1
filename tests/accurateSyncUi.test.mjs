@@ -89,8 +89,11 @@ test('mount only reads status; historical preview has no activation, financial w
     assert.deepEqual(f.errors, []);
   } finally { await f.context.close(); }
 });
-test('the real preview client accepts all four Home item codes without activating sync or emitting Meta', async () => {
-  for (const [code, price] of [['SH-DSR-090', 200000], ['SH-TJ-090', 140000], ['SH-FBH-090', 225000], ['SH-RBR-090', 220000]]) {
+test('the real preview client accepts all 90 and 120 minute Home item codes without activating sync or emitting Meta', async () => {
+  for (const [code, price] of [
+    ['SH-DSR-090', 200000], ['SH-TJ-090', 140000], ['SH-FBH-090', 225000], ['SH-RBR-090', 220000],
+    ['SH-DSR-120', 315000], ['SH-TJ-120', 190000], ['SH-FBH-120', 300000], ['SH-RBR-120', 320000],
+  ]) {
     const f = await fixture(); try {
       await ready(f.page); Object.assign(f.state.preview, { itemCode: code, servicePrice: price, amount: price });
       await preview(f.page); await f.page.getByText(`SH-261022-FIX01`, { exact: true }).waitFor();
