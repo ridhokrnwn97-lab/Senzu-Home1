@@ -77,6 +77,12 @@ class DB {
 const token = 'aat.' + 'A'.repeat(64) + '.offline_fixture', secret = 'fixture_signature_secret_not_real';
 const req = (body = {}, uid = 'manager') => ({ body, headers: { authorization: `Bearer ${uid}` }, rawHeaders: ['Authorization', `Bearer ${uid}`], ip: 'fixture', socket: {} });
 const approve = { acknowledgement: ACCURATE_SYNC_ACK, taxPolicy: 'no_extra_tax' };
+const homeMenuCases = [
+  ['Deep Sleep Relaxations', 'SH-DSR-090', 200000],
+  ['Travel Journey', 'SH-TJ-090', 140000],
+  ['Full Body Healing', 'SH-FBH-090', 225000],
+  ['Royal Body Recovery', 'SH-RBR-090', 220000],
+];
 function staff(db, uid = 'manager', role = 'manager') {
   db.seed(`staff_users/staff_${uid}`, { authUserId: uid, name: 'Fixture', role, isStaffMaster: true, sourceSystem: 'STAFF_MASTER_GOVERNANCE' });
   db.seed(`staff_roles/${uid}`, { authUserId: uid, staffId: `staff_${uid}`, role, isActive: true });
@@ -292,6 +298,76 @@ test('visit fee and combined discount reconcile to the locked paid total exactly
 test('unsupported services are retained for review without changing payment or contacting Accurate', async () => {
   const f = fixture(); f.activateControl(); const v = f.booking('NEW01', { serviceName: 'Unmapped new service' }); await f.queue(v); await f.service.runOnce();
   assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, 'SYNC_SERVICE_UNMAPPED'); assert.equal(f.calls.length, 0);
+});
+test('all four new Home menus retain their own item, price and paid total through the Live lifecycle without replaying documents', async () => {
+  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
+    const f = fixture(); f.activateControl();
+    const v = f.booking(`HOMEL${index}`, { serviceName: name, serviceDuration: 90, servicePrice: price, totalAmount: price });
+    await f.queue(v); await f.queue(v);
+    await f.service.runOnce();
+    assert.equal(f.job(v).state, 'waiting_service');
+    assert.equal(f.posts('create-down-payment')[0].payload.dpAmount, price);
+    assert.equal(f.posts('sales-receipt')[0].payload.chequeAmount, price);
+    assert.equal(f.posts('sales-receipt')[0].payload.bankNo, '110103');
+    assert.equal(f.posts('sales-invoice/save.do').length, 0);
+    f.advance(360000);
+    Object.assign(f.db.data.get(`bookings/${v.booking.id}`), { status: 'Completed', completedAt: new Date(f.clock()).toISOString() });
+    await f.service.runOnce();
+    assert.equal(f.job(v).state, 'complete');
+    const invoice = f.posts('sales-invoice/save.do')[0].payload;
+    assert.equal(invoice.detailItem[0].itemNo, code);
+    assert.equal(invoice.detailItem[0].unitPrice, price);
+    assert.equal(invoice.detailDownPayment[0].paymentAmount, price);
+    await f.service.retry(req({ bookingId: v.booking.id })); await f.service.runOnce();
+    assert.equal(f.posts('create-down-payment').length, 1);
+    assert.equal(f.posts('sales-receipt').length, 1);
+    assert.equal(f.posts('sales-invoice/save.do').length, 1);
+    assert.ok(f.db.writes.every(w => w.ref.name.startsWith('accurate_sync_')));
+  }
+});
+test('new Home mapping accepts the canonical item name but never infers an item from duration or an outlet name alone', async () => {
+  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
+    const f = fixture(); f.activateControl();
+    const v = f.booking(`HOMEC${index}`, { serviceName: `Senzu Home - ${name} 90 Menit`, serviceDuration: 90, servicePrice: price, totalAmount: price });
+    const result = await f.service.preview(req({ bookingId: v.booking.id }));
+    assert.equal(result.itemCode, code); assert.equal(result.amount, price);
+    assert.equal(f.posts().length, 0); assert.equal(f.job(v), undefined);
+  }
+  for (const [index, override] of [
+    { serviceName: 'Deep Sleep Relaxations', serviceDuration: 60 },
+    { serviceName: 'Deep Sleep Relaxation', serviceDuration: 90 },
+    { serviceName: 'Unknown Home Menu', serviceDuration: 90 },
+  ].entries()) {
+    const f = fixture(); f.activateControl(); const v = f.booking(`HOMEX${index}`, override);
+    await f.queue(v); await f.service.runOnce();
+    assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, 'SYNC_SERVICE_UNMAPPED');
+    assert.equal(f.calls.length, 0);
+  }
+});
+test('old Signature item codes remain unchanged after adding the new Home menu', async () => {
+  for (const [duration, name, code, price] of [
+    [30, 'Signature Treatment', 'SH-SIG-030', 160000],
+    [60, 'Senzu Home Signature 60 Menit', 'SH-SIG-060', 225000],
+    [90, 'Senzu Home Signature 90 Menit', 'SH-SIG-090', 325000],
+    [120, 'Senzu Home Signature 120 Menit', 'SH-SIG-120', 425000],
+  ]) {
+    const f = fixture(); f.activateControl();
+    const v = f.booking(`LEGACY${duration}`, { serviceName: name, serviceDuration: duration, servicePrice: price, totalAmount: price });
+    const result = await f.service.preview(req({ bookingId: v.booking.id }));
+    assert.equal(result.itemCode, code); assert.equal(result.amount, price); assert.equal(f.posts().length, 0);
+  }
+});
+test('a missing Home item, outlet revenue account or changed Accurate catalog price stops posting for review', async () => {
+  for (const [index, [mutate, issue]] of [
+    [f => f.masters.delete('SH-TJ-090'), 'ACCURATE_MASTER_MISMATCH'],
+    [f => f.masters.get('SH-TJ-090').salesGlAccount.no = '400001', 'ACCURATE_ITEM_ACCOUNTS_UNVERIFIED'],
+    [f => f.masters.get('SH-TJ-090').unitPrice = 150000, 'ACCURATE_MASTER_MISMATCH'],
+  ].entries()) {
+    const f = fixture(); f.activateControl();
+    const v = f.booking(`MAST${index}`, { serviceName: 'Travel Journey', serviceDuration: 90, servicePrice: 140000, totalAmount: 140000 });
+    mutate(f); await f.queue(v); await f.service.runOnce();
+    assert.equal(f.job(v).state, 'review'); assert.equal(f.job(v).issue, issue); assert.equal(f.posts().length, 0);
+  }
 });
 test('Test/manual/mismatched/refunded/corrected or changed records can never post', async () => {
   for (const change of [v => v.booking.gatewayEnvironment = 'test', v => v.booking.paymentMethod = 'Manual',
@@ -930,7 +1006,7 @@ async function manualFixture(channel = 'MANDIRI', suffix = 'MAN01', options = {}
     f.masters.set(code,{id:Number(code),no:code,name,accountType:'CASH_BANK',currency:{code:'IDR'},suspended:false});
   await f.service.configureManual(req({accounts:manualCodes,acknowledgement:'NEW_STAFF_VERIFIED_MANUAL_PAYMENTS_ONLY'}));
   f.advance(1000);
-  const v=f.booking(suffix);
+  const v=f.booking(suffix,options.booking);
   for(const key of ['gatewayProvider','gatewayEnvironment','gatewayReceiptId']) delete v.booking[key];
   v.booking.paymentMethod='QRIS';
   for(const key of ['gatewayEnvironment','providerReferenceId','gatewaySessionId','providerTransactionId']) delete v.payment[key];
@@ -943,6 +1019,29 @@ async function manualFixture(channel = 'MANDIRI', suffix = 'MAN01', options = {}
   const queue=()=>f.db.runTransaction(t=>f.service.stageManualPaid(t,{booking:v.booking,payment:v.payment,bookingCreatedAt:v.bookingCreatedAt}));
   return Object.assign(f,{v,manualQueue:queue});
 }
+test('new Home menus also post verified manual payments to their mapped bank and invoice only on completion', async () => {
+  for (const [index, [name, code, price]] of homeMenuCases.entries()) {
+    const channel = ['BNI', 'MANDIRI', 'BRI', 'QRIS'][index];
+    const f = await manualFixture(channel, `HOMEM${index}`, { booking: { serviceName: name, serviceDuration: 90, servicePrice: price, totalAmount: price } });
+    await f.manualQueue(); await f.manualQueue(); await f.service.runOnce();
+    assert.equal(f.job(f.v).state, 'waiting_service');
+    assert.equal(f.posts('create-down-payment')[0].payload.dpAmount, price);
+    assert.equal(f.posts('sales-receipt')[0].payload.bankNo, manualCodes[channel]);
+    assert.equal(f.posts('sales-receipt')[0].payload.chequeAmount, price);
+    assert.equal(f.posts('sales-invoice/save.do').length, 0);
+    f.advance(360000);
+    Object.assign(f.db.data.get(`bookings/${f.v.booking.id}`), { status: 'Completed', completedAt: new Date(f.clock()).toISOString() });
+    await f.service.runOnce(); assert.equal(f.job(f.v).state, 'complete');
+    const invoice = f.posts('sales-invoice/save.do')[0].payload;
+    assert.equal(invoice.detailItem[0].itemNo, code); assert.equal(invoice.detailItem[0].unitPrice, price);
+    assert.equal(invoice.detailDownPayment[0].paymentAmount, price);
+    await f.service.retry(req({ bookingId: f.v.booking.id }));
+    assert.equal(f.posts('sales-receipt').length, 1); assert.equal(f.posts('sales-invoice/save.do').length, 1);
+    assert.equal(f.posts('journal-voucher').length, 0);
+    assert.ok(f.calls.every(c => c.url.hostname.endsWith('accurate.id')));
+    assert.ok(f.db.writes.every(w => w.ref.name.startsWith('accurate_sync_')));
+  }
+});
 test('manual BNI, Mandiri, BRI and QRIS post to configured bank once, never Xendit or fee APIs; completion applies down payment',async()=>{
   for(const channel of Object.keys(manualCodes)){
     const f=await manualFixture(channel);await f.manualQueue();await f.manualQueue();await f.service.runOnce();
