@@ -3,8 +3,7 @@ import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   setLogLevel,
   Firestore,
 } from 'firebase/firestore';
@@ -14,18 +13,20 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 
 export const auth = getAuth(app);
 
+// Silence internal Firestore SDK console errors (such as multi-tab lease contention or idle stream disconnects)
+try {
+  setLogLevel('silent');
+} catch {}
+
 let dbInstance: Firestore;
 try {
-  // Use persistent local cache (IndexedDB) with multi-tab manager and auto-detect long polling
-  // This drastically reduces Firestore read quotas, caches data locally,
-  // prevents WebSocket connection drop errors in reverse proxy/sandbox environments,
-  // and allows the application to function smoothly even when quotas are exhausted or offline.
+  // Use in-memory local cache with auto-detect long polling to avoid IndexedDB
+  // primary lease contention ('Apply remote event', 'Backfill Indexes', 'Collect garbage')
+  // across preview iframes and multiple tabs while maintaining reliable connections.
   dbInstance = initializeFirestore(
     app,
     {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
+      localCache: memoryLocalCache(),
       experimentalAutoDetectLongPolling: true,
     },
     firebaseConfig.firestoreDatabaseId || '(default)'
@@ -36,11 +37,6 @@ try {
 }
 
 export const db = dbInstance;
-
-// Set Firestore SDK log level to error to prevent noisy gRPC idle stream warnings
-try {
-  setLogLevel('error');
-} catch {}
 
 export default app;
 
