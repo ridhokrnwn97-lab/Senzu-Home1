@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import {
   Map,
   AdvancedMarker,
@@ -58,237 +58,95 @@ class CustomerMapErrorBoundary extends Component<
   }
 }
 
-// Validators untuk respons Routes API (didefinisikan di luar komponen agar identitas stabil).
-// Seluruh titik harus valid: lat -90..90, lng -180..180, minimal 2 titik.
-// Jangan gunakan filter() — tolak keseluruhan path jika ada titik invalid.
-function isValidRoutePoint(p: unknown): p is { lat: number; lng: number } {
-  if (p == null || typeof p !== 'object' || Array.isArray(p)) return false;
-  const { lat, lng } = p as { lat: unknown; lng: unknown };
-  return (
-    typeof lat === 'number' &&
-    typeof lng === 'number' &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
-}
-
-function isValidRoutePath(path: unknown): path is { lat: number; lng: number }[] {
-  if (!Array.isArray(path) || path.length < 2) return false;
-  return path.every(isValidRoutePoint);
-}
-
-function isValidRouteMetrics(meters: unknown, millis: unknown): boolean {
-  return (
-    typeof meters === 'number' &&
-    Number.isFinite(meters) &&
-    meters > 0 &&
-    typeof millis === 'number' &&
-    Number.isFinite(millis) &&
-    millis > 0
-  );
-}
-
-// Inner live route polyline component using Google Maps Routes JavaScript SDK (Route.computeRoutes).
-// Gambar geometri jalan nyata dari routes[0].path; tidak mengganti rute dengan garis lurus dua titik.
+// Inner live route polyline component using modern Google Maps APIs (No legacy DirectionsService)
 function LiveRoutePolyline({
   origin,
   destination,
   onRouteCalculated,
-  onRouteStatus,
 }: {
   origin: { lat: number; lng: number };
   destination: { lat: number; lng: number };
-  onRouteCalculated: (result: { distanceText: string; durationText: string; distanceMeters: number } | null) => void;
-  onRouteStatus: (status: 'available' | 'stale' | 'unavailable' | null) => void;
+  onRouteCalculated: (result: { distanceText: string; durationText: string; distanceMeters: number }) => void;
 }) {
   const map = useMap();
   const routesLib = useMapsLibrary('routes');
   const polylineRef = useRef<google.maps.Polyline | null>(null);
 
-  const [routePath, setRoutePath] = useState<{ lat: number; lng: number }[] | null>(null);
-
-  // Rute terakhir yang berhasil dihitung, kunci hanya untuk destination yang sama.
-  const lastGoodRouteRef = useRef<{
-    path: { lat: number; lng: number }[];
-    meters: number;
-    millis: number;
-    destination: { lat: number; lng: number };
-  } | null>(null);
-
-  // Ref koordinat terbaru agar penjadwalan trailing selalu menggunakan koordinat
-  // paling baru, bukan tangkapan yang sudah ketinggalan waktu.
-  const originRef = useRef(origin);
-  const destinationRef = useRef(destination);
-  originRef.current = origin;
-  destinationRef.current = destination;
-
-  // Throttling + trailing scheduling agar perubahan koordinat yang dilewati
-  // karena interval minimum tetap diproses setelah jeda tercapai.
-  const routeRequestSeqRef = useRef<number>(0);
-  const lastRouteRequestAtRef = useRef<number>(0);
-  const routeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ROUTE_REQUEST_MIN_INTERVAL_MS = 30000;
-
-  const clearRouteTimeout = useCallback(() => {
-    if (routeTimeoutRef.current) {
-      clearTimeout(routeTimeoutRef.current);
-      routeTimeoutRef.current = null;
-    }
-  }, []);
-
-  const fireCompute = useCallback(
-    (seq: number, org: { lat: number; lng: number }, dst: { lat: number; lng: number }) => {
-      const RouteClass = (routesLib as any).Route;
-      if (typeof RouteClass?.computeRoutes !== 'function') return;
-
-      lastRouteRequestAtRef.current = Date.now();
-
-      // 1. Bentuk request sesuai dokumentasi SDK: origin/destination berupa
-      // LatLngLiteral {lat, lng}, tidak nested location.latLng.
-      RouteClass.computeRoutes({
-        origin: { lat: org.lat, lng: org.lng },
-        destination: { lat: dst.lat, lng: dst.lng },
-        travelMode: 'DRIVING',
-        fields: ['path', 'distanceMeters', 'durationMillis'],
-      })
-        .then((response: any) => {
-          // 10. Cegah respons API yang terlambat menimpa rute dari koordinat yang lebih baru.
-          if (seq !== routeRequestSeqRef.current) return;
-
-          const firstRoute = response?.routes?.[0];
-          const rawPath = firstRoute?.path;
-          const pathValid = isValidRoutePath(rawPath);
-          const meters = firstRoute?.distanceMeters;
-          const millis = firstRoute?.durationMillis;
-          const hasSameDestinationRoute =
-            lastGoodRouteRef.current &&
-            lastGoodRouteRef.current.destination.lat === dst.lat &&
-            lastGoodRouteRef.current.destination.lng === dst.lng;
-
-          // 4. Validasi data API: seluruh titik path wajib valid (minimal 2),
-          // metrik harus angka valid dan positif. Tolak keseluruhan path jika ada titik invalid.
-          // Jangan anggap nol/data tidak valid sebagai sukses.
-          if (pathValid && isValidRouteMetrics(meters, millis)) {
-            const path = rawPath as { lat: number; lng: number }[];
-            setRoutePath(path);
-            lastGoodRouteRef.current = { path, meters, millis, destination: dst };
-            onRouteStatus?.('available');
-
-            const distText = meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
-            const mins = Math.max(1, Math.round(millis / 60000));
-            onRouteCalculated({
-              distanceText: distText,
-              durationText: `${mins} mnt`,
-              distanceMeters: meters,
-            });
-          } else if (hasSameDestinationRoute) {
-            // Pembaruan gagal untuk destination yang sama: pertahankan rute terakhir,
-            // tetapi bedakan dengan status sukses segar.
-            onRouteStatus?.('stale');
-          } else {
-            onRouteStatus?.('unavailable');
-          }
-        })
-        .catch(() => {
-          if (seq !== routeRequestSeqRef.current) return;
-
-          const hasSameDestinationRoute =
-            lastGoodRouteRef.current &&
-            lastGoodRouteRef.current.destination.lat === destination.lat &&
-            lastGoodRouteRef.current.destination.lng === destination.lng;
-
-          if (hasSameDestinationRoute) {
-            onRouteStatus?.('stale');
-          } else {
-            onRouteStatus?.('unavailable');
-          }
-        });
-    },
-    [destination.lat, destination.lng, onRouteCalculated, onRouteStatus]
-  );
-
-  const compute = useCallback(() => {
-    const now = Date.now();
-    const seq = ++routeRequestSeqRef.current;
-    const elapsed = now - lastRouteRequestAtRef.current;
-
-    if (elapsed < ROUTE_REQUEST_MIN_INTERVAL_MS) {
-      // 2. Jeda throttle belum tercapai: jangan batalkan request yang sedang
-      // berjalan, jadwalkan eksekusi trailing dengan koordinat terbaru.
-      clearRouteTimeout();
-      routeTimeoutRef.current = setTimeout(() => {
-        // 5. Reset referensi timer setelah callback dijalankan.
-        routeTimeoutRef.current = null;
-        lastRouteRequestAtRef.current = Date.now();
-        fireCompute(seq, originRef.current, destinationRef.current);
-      }, ROUTE_REQUEST_MIN_INTERVAL_MS - elapsed);
-      return;
-    }
-
-    lastRouteRequestAtRef.current = now;
-    fireCompute(seq, originRef.current, destinationRef.current);
-  }, [fireCompute, clearRouteTimeout]);
-
-  useEffect(() => {
-    if (!map || !routesLib) return;
-    const RouteClass = (routesLib as any).Route;
-    if (typeof RouteClass?.computeRoutes !== 'function') return;
-
-    compute();
-    return () => {
-      // 2. Bersihkan timer trailing saat komponen dilepas.
-      clearRouteTimeout();
-    };
-  }, [map, routesLib, origin.lat, origin.lng, destination.lat, destination.lng, compute]);
-
-  // 3. Jika destination booking berubah, reset routePath, lastGoodRouteRef,
-  // routeStatus, dan routeInfo. Data booking lama tidak boleh tampil pada booking baru.
-  useEffect(() => {
-    lastGoodRouteRef.current = null;
-    setRoutePath(null);
-    onRouteStatus?.(null);
-    onRouteCalculated?.(null);
-  }, [destination.lat, destination.lng, onRouteStatus, onRouteCalculated]);
-
-  // 5. Lifecycle polyline:
-  // - Buat objek saat map tersedia (hanya sekali).
-  // - Pertahankan objek yang sama selama lifecycle map.
-  // - Perbarui geometri dengan setPath(), jangan buat ulang setiap routePath berubah.
-  // - Bersihkan dengan setMap(null) hanya pada unmount.
   useEffect(() => {
     if (!map) return;
-    if (typeof window === 'undefined' || !(window as any).google?.maps?.Polyline) return;
-    if (polylineRef.current) return;
 
-    const Polyline = (window as any).google.maps.Polyline;
-    polylineRef.current = new Polyline({
-      path: routePath ? routePath : [],
-      map,
-      geodesic: true,
-      strokeColor: '#8B5A36',
-      strokeWeight: 4,
-      strokeOpacity: 0.85,
+    // 1. Hitung perkiraan jarak dan waktu berkendara (estimasi kecepatan Palembang ~22 km/jam)
+    const rawDistKm = calculateDistanceKm(origin.lat, origin.lng, destination.lat, destination.lng);
+    const drivingDistKm = Math.max(0.2, Number((rawDistKm * 1.25).toFixed(1)));
+    const drivingMeters = Math.round(drivingDistKm * 1000);
+    const estimatedMinutes = Math.max(3, Math.round((drivingDistKm / 22) * 60));
+
+    onRouteCalculated({
+      distanceText: `${drivingDistKm} km`,
+      durationText: `${estimatedMinutes} mnt`,
+      distanceMeters: drivingMeters,
     });
-  }, [map]);
 
-  useEffect(() => {
-    if (!polylineRef.current) return;
-    polylineRef.current.setPath(routePath ? routePath : []);
-    polylineRef.current.setMap(map ? map : null);
-  }, [map, routePath]);
+    // 2. Gambar rute polyline tanpa memanggil legacy DirectionsService
+    try {
+      if (typeof window !== 'undefined' && (window as any).google?.maps?.Polyline) {
+        const path = [
+          { lat: origin.lat, lng: origin.lng },
+          { lat: destination.lat, lng: destination.lng },
+        ];
 
-  useEffect(() => {
+        if (!polylineRef.current) {
+          polylineRef.current = new (window as any).google.maps.Polyline({
+            path,
+            map,
+            geodesic: true,
+            strokeColor: '#8B5A36',
+            strokeWeight: 4,
+            strokeOpacity: 0.85,
+          });
+        } else {
+          polylineRef.current.setPath(path);
+          polylineRef.current.setMap(map);
+        }
+      }
+
+      // 3. Jika Routes API (New) computeRoutes tersedia di library routes
+      if (routesLib && (routesLib as any).Route?.computeRoutes) {
+        (routesLib as any).Route.computeRoutes({
+          origin: { location: { latLng: origin } },
+          destination: { location: { latLng: destination } },
+          travelMode: 'DRIVE',
+          fields: ['routes.distanceMeters', 'routes.durationMillis'],
+        })
+          .then((response: any) => {
+            const firstRoute = response?.routes?.[0];
+            if (firstRoute) {
+              const meters = firstRoute.distanceMeters ?? drivingMeters;
+              const millis = firstRoute.durationMillis ?? (estimatedMinutes * 60 * 1000);
+              const distText = meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
+              const mins = Math.max(1, Math.round(millis / 60000));
+              onRouteCalculated({
+                distanceText: distText,
+                durationText: `${mins} mnt`,
+                distanceMeters: meters,
+              });
+            }
+          })
+          .catch(() => {
+            // Abaikan jika Routes API belum diaktifkan di GCP; fallback haversine tetap aktif
+          });
+      }
+    } catch (err) {
+      console.warn('Route polyline notice:', err);
+    }
+
     return () => {
       if (polylineRef.current) {
         polylineRef.current.setMap(null);
         polylineRef.current = null;
       }
     };
-  }, []);
+  }, [routesLib, map, origin.lat, origin.lng, destination.lat, destination.lng, onRouteCalculated]);
 
   return null;
 }
@@ -307,7 +165,6 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
     durationText: string;
     distanceMeters: number;
   } | null>(null);
-  const [routeStatus, setRouteStatus] = useState<'available' | 'stale' | 'unavailable' | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
@@ -457,13 +314,13 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               <div>
                 <span className="text-[10px] text-slate-300 block uppercase">Estimasi Tiba</span>
                 <span className="text-sm font-bold text-[#FDF3CD]">
-                  {routeInfo?.durationText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : '–')}
+                  {routeInfo?.durationText || `~ ${Math.max(3, Math.round(straightDistKm * 3))} mnt`}
                 </span>
               </div>
               <div className="border-l border-white/20 pl-3">
                 <span className="text-[10px] text-slate-300 block uppercase">Jarak Tempuh</span>
                 <span className="text-sm font-bold text-white">
-                  {routeInfo?.distanceText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : '–')}
+                  {routeInfo?.distanceText || `${straightDistKm} KM`}
                 </span>
               </div>
             </div>
@@ -574,22 +431,9 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                   origin={effectiveTherapistPos}
                   destination={customerPos}
                   onRouteCalculated={setRouteInfo}
-                  onRouteStatus={setRouteStatus}
                 />
               )}
             </Map>
-
-            {/* Status rute jalan */}
-            {isOnTheWay && hasCustomerCoords && routeStatus === 'unavailable' && (
-              <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl text-center max-w-xs mx-auto">
-                Data rute jalan tidak tersedia untuk tujuan ini.
-              </div>
-            )}
-            {isOnTheWay && hasCustomerCoords && routeStatus === 'stale' && (
-              <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl text-center max-w-xs mx-auto">
-                Menampilkan rute dari pembaruan terakhir (data tidak terbaru).
-              </div>
-            )}
 
             {/* Floating Map Legend Overlay */}
             <div className="absolute bottom-2.5 left-2.5 bg-white/95 backdrop-blur-xs px-3 py-1.5 rounded-xl shadow-md border border-slate-200 text-[10px] text-slate-700 flex items-center gap-3 pointer-events-none">

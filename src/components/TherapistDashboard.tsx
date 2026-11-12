@@ -104,30 +104,6 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const wakeLockRef = useRef<any>(null);
-  // forceSyncRef dipanggil oleh pemulihan visibilitas (visibilitychange/pageshow/focus)
-  // untuk segera mengambil posisi terbaru setelah aplikasi kembali aktif dari latar belakang.
-  const forceSyncRef = useRef<(() => void) | null>(null);
-  // isSendingRef mencegah penulisan paralel ke Firestore (satu mekanisme untuk semua pengiriman,
-  // termasuk force sync; force tidak boleh melewati pemeriksaan ini).
-  const isSendingRef = useRef(false);
-  // pendingLocationRef menyimpan posisi GPS terbaru yang belum terkirim, terikat pada
-  // generation token booking yang membuatnya. Data booking lama tidak boleh bocor ke booking baru.
-  const pendingLocationRef = useRef<{ pos: GeolocationPosition; generation: number } | null>(null);
-  // trackingGenerationRef berlaku sebagai identitas unik siklus tracking aktif.
-  // Semua callback async (Firestore .then/.catch, timer, retry) harus memeriksa token ini
-  // sebelum mengubah state atau memproses antrean.
-  const trackingGenerationRef = useRef<number>(0);
-  // retryTimerRef menyimpan ID timer retry agar dapat dibersihkan saat effect
-  // tracking mengalami cleanup (misal saat pergantian booking).
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // retryPosRef menyimpan identitas posisi yang sedang di-retry (generation + timestamp)
-  // agar posisi yang lebih baru dapat membatalkan retry posisi lama.
-  const retryPosRef = useRef<{ pos: GeolocationPosition; generation: number; timestamp: number } | null>(null);
-  // lastProcessedTimestampRef mencegah penulisan posisi yang lebih lama setelah posisi
-  // yang lebih baru sudah berhasil ditulis ke Firestore.
-  const lastProcessedTimestampRef = useRef<number>(0);
-  const lastResumeAtRef = useRef<number>(0);
-  const RESUME_COOLDOWN_MS = 3000;
 
   // Centralized Official Senzu Customer Service / Supervisor WhatsApp
   const {
@@ -476,65 +452,20 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
     const bookingCode = currentJob.bookingCode;
     const therapistName = therapistInfo?.name || currentUser?.name || 'Terapis Senzu';
 
-    let lastLat: number | null = null;
-    let lastLng: number | null = null;
+    let lastLat = 0;
+    let lastLng = 0;
     let lastSentMillis = 0;
-    // retryRef mencegah loop tanpa batas: gagal berulang tidak akan membuat
-    // aplikasi terus-menerus mengirim request ke Firestore.
-    const retryRef = useRef<number>(0);
-    const MAX_RETRIES = 3;
 
-    // Generasi siklus tracking aktif. Diambil saat effect berjalan untuk booking
-    // ini, sehingga callback dari booking lama tidak akan menimpa state booking baru.
-    const generation = ++trackingGenerationRef.current;
-
-    const processPendingLocation = () => {
-      const pending = pendingLocationRef.current;
-      if (!pending) return;
-      // B1: Pending location terikat pada generation booking yang membuatnya.
-      // Callback dari booking lama tidak boleh memproses antrean booking baru.
-      if (pending.generation !== trackingGenerationRef.current) {
-        pendingLocationRef.current = null;
-        return;
-      }
-      // B6: Jangan kirim posisi yang lebih lama dari yang sudah berhasil ditulis.
-      if (pending.pos.timestamp <= lastProcessedTimestampRef.current) {
-        pendingLocationRef.current = null;
-        return;
-      }
-      pendingLocationRef.current = null;
-      // Kirim ulang posisi terbaru yang menunggu. Force hanya melewati throttle waktu,
-      // tidak melewati concurrency guard.
-      sendCurrentPosition(pending.pos, true, pending.generation);
-    };
-
-    const sendCurrentPosition = (
-      pos: GeolocationPosition,
-      force = false,
-      expectedGeneration?: number
-    ) => {
+    const sendCurrentPosition = (pos: GeolocationPosition) => {
       const { latitude, longitude, accuracy, heading, speed } = pos.coords;
-      const posGeneration = expectedGeneration ?? trackingGenerationRef.current;
 
-      // B1: Cegah callback dari siklus tracking yang sudah tidak aktif. Pemeriksaan
-      // ini harus dilakukan sebelum pemeriksaan antrean, sebelum mengakuisisi lock,
-      // dan sebelum memanggil saveTherapistLocation().
-      if (posGeneration !== trackingGenerationRef.current) {
+      // Filter out invalid/bad GPS points (0,0 or undefined)
+      if (!latitude || !longitude || (latitude === 0 && longitude === 0)) {
         return;
       }
 
-      // Validasi koordinat dengan Number.isFinite: titik koordinat nol tetap dianggap
-      // valid asalkan merupakan bilangan hingga (tidak undefined/NaN).
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        return;
-      }
-
-      // B6: Jangan proses posisi yang lebih lama dari yang sudah berhasil ditulis ke Firestore.
-      if (pos.timestamp <= lastProcessedTimestampRef.current) {
-        return;
-      }
-
-      // Update state lokal segera untuk responsivitas visual (status GPS, bukan status sinkronisasi).
+      const now = Date.now();
+      // Update local visual state immediately for responsiveness
       const nowStr = new Date().toLocaleTimeString('id-ID', {
         timeZone: 'Asia/Jakarta',
         hour: '2-digit',
@@ -549,70 +480,17 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
         lastSentTime: nowStr,
       });
 
-      const now = Date.now();
-
-      // B5: Jika ada retry yang dijadwalkan untuk posisi lama, dan posisi baru
-      // memiliki timestamp yang lebih baru, batalkan retry posisi lama sehingga
-      // koordinat kedaluwarsa tidak dikirim setelah posisi terbaru.
-      const retryPending = retryPosRef.current;
-      if (retryPending && pos.timestamp > retryPending.timestamp) {
-        if (retryTimerRef.current) {
-          clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = null;
-        }
-        retryPosRef.current = null;
-        retryRef.current = 0; // Reset counter untuk rangkaian posisi baru
-      }
-
-      // B6: Pilih posisi terbaru sebelum write ke Firestore.
-      // Pending dari generation berbeda dibuang.
-      // Pending yang lebih baru daripada posisi saat ini diprioritaskan.
-      // Pending yang lebih lama atau timestamp sama dibuang.
-      const pendingQueue = pendingLocationRef.current;
-      if (pendingQueue) {
-        if (pendingQueue.generation !== posGeneration) {
-          pendingLocationRef.current = null;
-        } else if (pendingQueue.pos.timestamp > pos.timestamp) {
-          // Pending lebih baru: prioritaskan pending, tidak perlu memproses posisi saat ini.
-          pendingLocationRef.current = null;
-          sendCurrentPosition(pendingQueue.pos, force, pendingQueue.generation);
-          return;
-        } else {
-          // Pending lebih lama atau sama timestamp: buang pending, gunakan posisi saat ini.
-          pendingLocationRef.current = null;
-        }
-      }
-
-      // Semua pengiriman (termasuk force sync) tunduk pada satu concurrency guard.
-      // Jangan biarkan force=true melewati pemeriksaan penulisan paralel.
-      if (isSendingRef.current) {
-        // B3: Simpan posisi terbaru (bandingkan timestamp) agar tidak dibuang.
-        const pending = pendingLocationRef.current;
-        if (!pending || pos.timestamp > pending.pos.timestamp) {
-          pendingLocationRef.current = { pos, generation: posGeneration };
-        }
+      // Throttle Firestore writes: Require at least 40 seconds between writes,
+      // or at least 25 seconds if significant movement (> 50m) occurred
+      const distanceMoved = lastLat && lastLng ? calculateDistanceMeters(lastLat, lastLng, latitude, longitude) : 999;
+      const minInterval = distanceMoved > 50 ? 25000 : 45000;
+      if (now - lastSentMillis < minInterval) {
         return;
       }
 
-      if (!force) {
-        // Throttle penulisan Firestore: minimal 45 detik antar tulisan,
-        // atau 25 detik jika pergerakan signifikan (> 50m).
-        const distanceMoved =
-          lastLat != null && lastLng != null
-            ? calculateDistanceMeters(lastLat, lastLng, latitude, longitude)
-            : 999;
-        const minInterval = distanceMoved > 50 ? 25000 : 45000;
-        if (now - lastSentMillis < minInterval) {
-          // B3: Simpan posisi terbaru (bandingkan timestamp) untuk dikirim setelah jeda throttle tercapai.
-          const pending = pendingLocationRef.current;
-          if (!pending || pos.timestamp > pending.pos.timestamp) {
-            pendingLocationRef.current = { pos, generation: posGeneration };
-          }
-          return;
-        }
-      }
-
-      isSendingRef.current = true;
+      lastLat = latitude;
+      lastLng = longitude;
+      lastSentMillis = now;
 
       saveTherapistLocation({
         therapistId: currentTherapistId || 'th-active',
@@ -627,125 +505,11 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
         timestamp: new Date().toISOString(),
         updatedAtMillis: Date.now(),
         isTrackingActive: true,
-      })
-        .then(() => {
-          // B1: Hanya ubah state jika masih berasal dari siklus tracking aktif
-          // dan booking yang sama.
-          if (posGeneration !== trackingGenerationRef.current) {
-            isSendingRef.current = false;
-            return;
-          }
-          // B4: Tandai throttle sebagai tercapai hanya setelah Firestore mengonfirmasi
-          // keberhasilan. Jangan memperbarui sebelum konfirmasi.
-          lastLat = latitude;
-          lastLng = longitude;
-          lastSentMillis = Date.now();
-          lastProcessedTimestampRef.current = Math.max(lastProcessedTimestampRef.current, pos.timestamp); // Catat timestamp terakhir yang berhasil ditulis
-          retryRef.current = 0;
-          retryPosRef.current = null; // Posisi berhasil terkirim, hapus konteks retry
-          isSendingRef.current = false;
-          // Setelah penulisan selesai, kirim posisi terbaru yang menunggu.
-          processPendingLocation();
-        })
-        .catch((err) => {
-          // B1: Hanya proses jika masih dari siklus tracking aktif dan booking sama.
-          if (posGeneration !== trackingGenerationRef.current) {
-            isSendingRef.current = false;
-            return;
-          }
-          // B2: Gagal menulis ke Firestore tidak boleh menimbulkan status lokasi palsu,
-          // dan tidak boleh mengonsumsi slot throttle sebagai keberhasilan.
-          console.warn('Therapist location sync notice:', err);
-          // Lepaskan lock segera setelah operasi Firestore selesai.
-          isSendingRef.current = false;
-
-          const pending = pendingLocationRef.current;
-          if (pending && pending.pos.timestamp > pos.timestamp) {
-            // Pending location lebih baru dari posisi yang gagal. Batalkan retry
-            // posisi lama sehingga koordinat kedaluwarsa tidak dikirim.
-            if (retryTimerRef.current) {
-              clearTimeout(retryTimerRef.current);
-              retryTimerRef.current = null;
-            }
-            retryPosRef.current = null;
-            retryRef.current = 0; // Reset counter untuk rangkaian posisi baru
-            pendingLocationRef.current = null;
-            // Kirim posisi pending yang lebih baru langsung; jangan melalui
-            // processPendingLocation karena antrean sudah dikosongkan di atas.
-            sendCurrentPosition(pending.pos, true, pending.generation);
-            return;
-          }
-
-          // Tidak ada pending yang lebih baru. Discard pending yang lebih lama
-          // (jika ada) dan retry posisi yang gagal.
-          pendingLocationRef.current = null;
-
-          retryRef.current++;
-          if (retryRef.current <= MAX_RETRIES) {
-            // Bersihkan timer retry lama agar tidak ada timer ganda.
-            if (retryTimerRef.current) {
-              clearTimeout(retryTimerRef.current);
-              retryTimerRef.current = null;
-            }
-            retryPosRef.current = { pos, generation: posGeneration, timestamp: pos.timestamp };
-            const backoffMs = Math.min(1000 * Math.pow(2, retryRef.current - 1), 30000);
-            retryTimerRef.current = setTimeout(() => {
-              if (posGeneration !== trackingGenerationRef.current) return;
-              retryTimerRef.current = null;
-              retryPosRef.current = null;
-              sendCurrentPosition(pos, false, posGeneration);
-            }, backoffMs);
-          } else {
-            retryRef.current = 0;
-            retryPosRef.current = null;
-          }
-        });
+      });
     };
-
-    // Pemaksa sinkronisasi lokasi saat pulih dari latar belakang (misal setelah
-    // membuka Google Maps). Force sync boleh melewati throttle waktu, tetapi tidak
-    // boleh melewati concurrency guard. Pakai maximumAge: 0 agar selalu ambil fix GPS terbaru.
-    const doForceSync = async () => {
-      if (!navigator.geolocation) return;
-      try {
-        // B5: Sederhana - hanya minta Wake Lock jika belum ada yang aktif.
-        if (!wakeLockRef.current) {
-          await requestWakeLock();
-        }
-      } catch {
-        // Wake lock gagal tidak membatalkan alur force sync.
-      }
-      // Tangkap generation saat doForceSync mulai, bukan ketika promise selesai.
-      const forceGen = trackingGenerationRef.current;
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0,
-          });
-        });
-        // Jika generation sudah berubah (booking pindah), hentikan proses tanpa
-        // memanggil sendCurrentPosition() dan tanpa melakukan penulisan Firestore.
-        if (forceGen !== trackingGenerationRef.current) {
-          return;
-        }
-        sendCurrentPosition(pos, true, forceGen);
-      } catch (err) {
-        // Callback error: cek generation agar callback lama tidak mengubah state
-        // booking aktif.
-        if (trackingGenerationRef.current !== forceGen) {
-          return;
-        }
-        // Kegagalan GPS saat pemulihan tidak boleh menghasilkan status lokasi
-        // yang tampak valid; biarkan state terakhir tetap apa adanya.
-        console.warn('Therapist resume GPS sync notice:', err);
-      }
-    };
-    forceSyncRef.current = doForceSync;
 
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => sendCurrentPosition(pos, false, generation),
+      sendCurrentPosition,
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
           setLocationPermissionDenied(true);
@@ -756,7 +520,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
 
     const intervalId = setInterval(() => {
       navigator.geolocation.getCurrentPosition(
-        (pos) => sendCurrentPosition(pos, false, generation),
+        sendCurrentPosition,
         () => {},
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
       );
@@ -774,62 +538,9 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
         delete (window as any).__senzuTherapistWatchId;
         delete (window as any).__senzuTherapistIntervalId;
       }
-      // Bersihkan timer retry jika masih menunggu eksekusi.
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
-      retryPosRef.current = null;
-      forceSyncRef.current = null;
-      // Bersihkan antrean pending saat booking/status berubah agar data lokasi
-      // booking lama tidak dikirim ke dokumen booking baru.
-      pendingLocationRef.current = null;
       releaseWakeLock();
     };
   }, [currentJob, currentTherapistId, therapistInfo, currentUser]);
-
-  // Pemulihan tracking ketika halaman kembali aktif dari latar belakang
-  // (contoh: terapis membuka Google Maps di tab lain lalu kembali ke Senzu Home).
-  // Browser umumnya menangguhkan timer/geolocation/watchPosition di latar belakang,
-  // sehingga posisi tidak terbarui sampai tab kembali ke foreground.
-  useEffect(() => {
-    const handleResume = () => {
-      const now = Date.now();
-      // Cegah pemanggilan ganda jika beberapa event resume terjadi berdekatan (req 4).
-      if (now - lastResumeAtRef.current < RESUME_COOLDOWN_MS) {
-        return;
-      }
-      lastResumeAtRef.current = now;
-      forceSyncRef.current?.();
-      requestWakeLock();
-    };
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        handleResume();
-      }
-    };
-
-    // pageshow dengan persisted=true terjadi saat pulih dari back-forward cache,
-    // tempat visibilitychange tidak selalu memicu.
-    const onPageShow = (event: Event) => {
-      if ((event as any).persisted) {
-        handleResume();
-      }
-    };
-
-    const onFocus = () => handleResume();
-
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('pageshow', onPageShow);
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
 
   // Handle next status transition
   const handleNextStatus = async (
@@ -1389,8 +1100,6 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                     </strong>
                     <p className="mt-0.5 text-amber-800 leading-relaxed text-[11px]">
                       Untuk tracking optimal, biarkan layar Senzu Home tetap menyala saat berkendara.
-                      Jika tab ditinggalkan (misal membuka Google Maps), lokasi akan
-                      disinkronkan ulang otomatis saat Anda kembali ke halaman ini.
                       {liveLocation ? ` Sinyal: ±${liveLocation.accuracy}m (${liveLocation.lastSentTime})` : ' Mendeteksi titik GPS...'}
                     </p>
                   </div>
