@@ -6,3 +6,4 @@ coverage/
 .env*
 !.env.example
 src/server/serviceAccountKey.json
+/firebase-service-account.json
