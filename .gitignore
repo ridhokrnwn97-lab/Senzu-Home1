@@ -7,3 +7,5 @@ coverage/
 !.env.example
 src/server/serviceAccountKey.json
 /firebase-service-account.json
+service_account_credentials.json
+dist/
