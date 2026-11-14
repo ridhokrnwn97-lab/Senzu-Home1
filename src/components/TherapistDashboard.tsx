@@ -123,6 +123,9 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
   // retryPosRef menyimpan identitas posisi yang sedang di-retry (generation + timestamp)
   // agar posisi yang lebih baru dapat membatalkan retry posisi lama.
   const retryPosRef = useRef<{ pos: GeolocationPosition; generation: number; timestamp: number } | null>(null);
+  // retryRef mencegah loop tanpa batas: gagal berulang tidak akan membuat
+  // aplikasi terus-menerus mengirim request ke Firestore.
+  const retryRef = useRef<number>(0);
   // lastProcessedTimestampRef mencegah penulisan posisi yang lebih lama setelah posisi
   // yang lebih baru sudah berhasil ditulis ke Firestore.
   const lastProcessedTimestampRef = useRef<number>(0);
@@ -479,14 +482,13 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
     let lastLat: number | null = null;
     let lastLng: number | null = null;
     let lastSentMillis = 0;
-    // retryRef mencegah loop tanpa batas: gagal berulang tidak akan membuat
-    // aplikasi terus-menerus mengirim request ke Firestore.
-    const retryRef = useRef<number>(0);
     const MAX_RETRIES = 3;
 
     // Generasi siklus tracking aktif. Diambil saat effect berjalan untuk booking
     // ini, sehingga callback dari booking lama tidak akan menimpa state booking baru.
     const generation = ++trackingGenerationRef.current;
+    // Siklus tracking baru dimulai: reset counter retry agar tidak mewarisi hitungan siklus lama.
+    retryRef.current = 0;
 
     const processPendingLocation = () => {
       const pending = pendingLocationRef.current;
