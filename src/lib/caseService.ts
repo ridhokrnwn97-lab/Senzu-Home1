@@ -97,7 +97,7 @@ export async function checkDuplicateActiveCase(
     );
     const snap = await getDocs(q);
     for (const docSnap of snap.docs) {
-      const c = docSnap.data() as UnifiedCase;
+      const c = normalizeCaseRecord(docSnap.id, docSnap.data());
       if ((c.category || '').toLowerCase().trim() === (category || '').toLowerCase().trim()) {
         return c;
       }
@@ -1206,6 +1206,103 @@ export async function reopenCase(params: {
   });
 }
 
+const VALID_CASE_STATUSES = new Set<CaseStatus>([
+  'OPEN',
+  'IN_PROGRESS',
+  'WAITING_CUSTOMER',
+  'WAITING_SUPERVISOR',
+  'WAITING_MANAGER',
+  'WAITING_PAYMENT_REVIEW',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+]);
+
+function normalizeCaseRecord(docId: string, raw: unknown): UnifiedCase {
+  const data = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {};
+  const rawSeverity = String(data.severity || data.priority || 'MEDIUM').trim().toUpperCase();
+  const severity: CaseSeverity =
+    rawSeverity === 'CRITICAL'
+      ? 'CRITICAL'
+      : rawSeverity === 'HIGH'
+        ? 'HIGH'
+        : rawSeverity === 'LOW'
+          ? 'LOW'
+          : 'MEDIUM';
+
+  const rawPriority = String(data.priority || data.severity || 'NORMAL').trim().toUpperCase();
+  const priority: CasePriority =
+    rawPriority === 'CRITICAL'
+      ? 'CRITICAL'
+      : rawPriority === 'HIGH'
+        ? 'HIGH'
+        : rawPriority === 'LOW'
+          ? 'LOW'
+          : 'NORMAL';
+
+  const rawStatus = String(data.status || 'OPEN').trim().toUpperCase() as CaseStatus;
+  const status: CaseStatus = VALID_CASE_STATUSES.has(rawStatus) ? rawStatus : 'OPEN';
+
+  const createdAt =
+    typeof data.createdAt === 'string' && data.createdAt
+      ? data.createdAt
+      : typeof data.reportedAt === 'string' && data.reportedAt
+        ? data.reportedAt
+        : new Date().toISOString();
+
+  const reportedAt =
+    typeof data.reportedAt === 'string' && data.reportedAt ? data.reportedAt : createdAt;
+
+  return {
+    ...(data as UnifiedCase),
+    id: (typeof data.id === 'string' && data.id) || docId,
+    caseCode:
+      (typeof data.caseCode === 'string' && data.caseCode) ||
+      (typeof data.caseNumber === 'string' && data.caseNumber) ||
+      docId,
+    caseType:
+      data.caseType ||
+      (data.category === 'ACCOUNT_DELETION' ? 'CUSTOMER_REQUEST' : 'COMPLAINT'),
+    bookingId: typeof data.bookingId === 'string' ? data.bookingId : '',
+    bookingCode:
+      (typeof data.bookingCode === 'string' && data.bookingCode) || '-',
+    customerId: typeof data.customerId === 'string' ? data.customerId : '',
+    customerName:
+      (typeof data.customerName === 'string' && data.customerName) || 'Pelanggan Senzu',
+    customerPhone:
+      (typeof data.customerPhone === 'string' && data.customerPhone) ||
+      (typeof data.phone === 'string' && data.phone) ||
+      '',
+    branchId:
+      (typeof data.branchId === 'string' && data.branchId) || 'branch_palembang_pusat',
+    source: data.source || 'Customer App',
+    category:
+      (typeof data.category === 'string' && data.category) || 'Lainnya',
+    severity,
+    priority,
+    status,
+    assignedRole: data.assignedRole || 'CSS',
+    reportedBy:
+      (typeof data.reportedBy === 'string' && data.reportedBy) ||
+      (typeof data.customerId === 'string' && data.customerId) ||
+      'system',
+    reportedByName:
+      (typeof data.reportedByName === 'string' && data.reportedByName) ||
+      (typeof data.customerName === 'string' && data.customerName) ||
+      'Sistem',
+    reportedAt,
+    summary:
+      (typeof data.summary === 'string' && data.summary) ||
+      (typeof data.title === 'string' && data.title) ||
+      (typeof data.category === 'string' && data.category) ||
+      'Laporan Kasus',
+    description: typeof data.description === 'string' ? data.description : '',
+    createdAt,
+    updatedAt:
+      (typeof data.updatedAt === 'string' && data.updatedAt) || createdAt,
+  };
+}
+
 /**
  * Realtime subscriber for all cases
  */
@@ -1218,7 +1315,7 @@ export function subscribeToCases(callback: (cases: UnifiedCase[]) => void): () =
       q,
       (snapshot) => {
         if (disposed) return;
-        const list = snapshot.docs.map((d) => d.data() as UnifiedCase);
+        const list = snapshot.docs.map((d) => normalizeCaseRecord(d.id, d.data()));
         callback(list);
       },
       (err: any) => {
@@ -1242,7 +1339,7 @@ export function subscribeToCases(callback: (cases: UnifiedCase[]) => void): () =
               qSimple,
               (snapSimple) => {
                 if (disposed) return;
-                const list = snapSimple.docs.map((d) => d.data() as UnifiedCase);
+                const list = snapSimple.docs.map((d) => normalizeCaseRecord(d.id, d.data()));
                 list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                 callback(list);
               },
@@ -1283,7 +1380,7 @@ export async function getCaseById(caseId: string): Promise<UnifiedCase | null> {
   const ref = doc(db, CASES_COLLECTION, caseId);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
-  return snap.data() as UnifiedCase;
+  return normalizeCaseRecord(snap.id, snap.data());
 }
 
 /**
@@ -1293,7 +1390,7 @@ export async function getCasesByBookingId(bookingId: string): Promise<UnifiedCas
   try {
     const q = query(collection(db, CASES_COLLECTION), where('bookingId', '==', bookingId));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as UnifiedCase);
+    return snap.docs.map((d) => normalizeCaseRecord(d.id, d.data()));
   } catch (err) {
     console.warn('Failed to query cases by bookingId:', err);
     return [];
@@ -1307,7 +1404,7 @@ export async function getCasesForCustomer(customerId: string): Promise<UnifiedCa
   try {
     const q = query(collection(db, CASES_COLLECTION), where('customerId', '==', customerId));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as UnifiedCase);
+    return snap.docs.map((d) => normalizeCaseRecord(d.id, d.data()));
   } catch (err) {
     console.warn('Failed to query cases for customer:', err);
     return [];
@@ -1321,7 +1418,7 @@ export async function getCasesForTherapist(therapistId: string): Promise<Unified
   try {
     const q = query(collection(db, CASES_COLLECTION), where('therapistId', '==', therapistId));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as UnifiedCase);
+    return snap.docs.map((d) => normalizeCaseRecord(d.id, d.data()));
   } catch (err) {
     console.warn('Failed to query cases for therapist:', err);
     return [];
