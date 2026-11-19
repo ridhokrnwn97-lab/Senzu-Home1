@@ -34,6 +34,7 @@ import { LoyaltyAdminView } from './components/LoyaltyAdminView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { ManagerPortal } from './components/manager/ManagerPortal';
 import { PaymentReconciliationView } from './components/PaymentReconciliationView';
+import { FatDashboard } from './components/fat/FatDashboard';
 import { GoogleMapsProvider } from './components/GoogleMapsProvider';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
 import { CustomerPortalModal } from './components/CustomerPortalModal';
@@ -250,7 +251,9 @@ function MainApp() {
       if (live && auth.currentUser === session && auth.currentUser?.uid === uid) setUnreadNotifCount(notifs.filter(n => !n.read).length);
     };
     const unsubscribe = currentUser
-      ? subscribeToRoleNotifications(currentUser.role as any, currentUser.uid || uid, receive)
+      ? currentUser.role === 'fat'
+        ? () => {} // FAT has no notification access in the notification backend.
+        : subscribeToRoleNotifications(currentUser.role as any, currentUser.uid || uid, receive)
       : subscribeToCustomerNotifications({ customerAuthUid: uid }, receive);
     return () => { live = false; unsubscribe(); setUnreadNotifCount(0); };
   }, [currentUser, firebaseUser?.uid, currentCustomer?.id]);
@@ -260,6 +263,15 @@ function MainApp() {
     let unsubscribeBookings: (() => void) | undefined;
 
     const loadData = async () => {
+      // FAT dashboard uses backend read-only projections only (no direct Firestore operational data/master seeding).
+      if (currentUser && currentUser.role === 'fat') {
+        setBookings([]);
+        setCustomers([]);
+        setTherapists([]);
+        setSettings(DEFAULT_SETTINGS);
+        return;
+      }
+
       try {
         await initializeSeedData();
       } catch {}
@@ -324,6 +336,7 @@ function MainApp() {
       else if (normRole === 'supervisor') setActiveStaffTab('supervisor');
       else if (normRole === 'therapist') setActiveStaffTab('therapist');
       else if (normRole === 'manager' || normRole === 'admin') setActiveStaffTab('management');
+      else if (normRole === 'fat') setActiveStaffTab('fat');
     }
   }, [currentUser, isPasswordChangeRequired]);
 
@@ -559,6 +572,7 @@ function MainApp() {
             else if (staff.role === 'supervisor') setActiveStaffTab('supervisor');
             else if (staff.role === 'therapist') setActiveStaffTab('therapist');
             else if (staff.role === 'manager' || staff.role === 'admin') setActiveStaffTab('management');
+            else if (staff.role === 'fat') setActiveStaffTab('fat');
           }}
           initialEmail={initialLoginEmail}
         />
@@ -932,6 +946,28 @@ function MainApp() {
                 type="button"
                 onClick={() => setIsLoginOpen(true)}
                 className="px-4 py-2 bg-[#8B5A36] text-white text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Login Staff
+              </button>
+            </div>
+          )
+        )}
+
+        {/* FAT DASHBOARD (read-only) */}
+        {activeStaffTab === 'fat' && (
+          currentUser && currentUser.role === 'fat' ? (
+            <FatDashboard currentUser={currentUser} />
+          ) : (
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-4 max-w-md mx-auto my-12">
+              <ShieldCheck className="w-12 h-12 text-amber-500 mx-auto" />
+              <h3 className="font-bold text-[#4B2B18] text-lg">Akses FAT Dibatasi</h3>
+              <p className="text-xs text-slate-500">
+                Dashboard Finance, Accounting, and Tax hanya untuk staf FAT Senzu Home.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsLoginOpen(true)}
+                className="px-4 py-2 bg-[#8B5A36] text-white text-xs font-bold rounded-xl"
               >
                 Login Staff
               </button>

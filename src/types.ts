@@ -54,7 +54,7 @@ export type PaymentMethod = ActivePaymentMethodName | HistoricalPaymentMethodNam
 
 export type GenderPreference = 'Bebas' | 'Perempuan' | 'Laki-laki';
 
-export type UserRole = 'css' | 'supervisor' | 'therapist' | 'manager' | 'admin';
+export type UserRole = 'css' | 'supervisor' | 'therapist' | 'manager' | 'admin' | 'fat';
 
 export interface ServiceItem {
   id: string;

@@ -1,5 +1,6 @@
 export type PaymentStatusCode =
   | 'unpaid'
+  | 'pending_payment'
   | 'pending_manual_verification'
   | 'paid'
   | 'payment_rejected'

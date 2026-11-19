@@ -232,7 +232,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* RIGHT ACTIONS - MOBILE COMPACT (Target 56-72px, uncluttered) */}
           <div className="flex md:hidden items-center gap-1.5">
-            {/* Notification Bell with Realtime Badge */}
+            {/* Notification Bell with Realtime Badge (hidden for FAT: no notification access) */}
+            {currentUser?.role !== 'fat' && (
             <button
               id="btn-mobile-nav-notif"
               type="button"
@@ -248,6 +249,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               )}
             </button>
+            )}
 
             {/* Profile / Akun Button */}
             {currentUser ? (
@@ -474,7 +476,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* 4. Notification Bell with Realtime Badge */}
+            {/* 4. Notification Bell with Realtime Badge (hidden for FAT: no notification access) */}
+            {currentUser?.role !== 'fat' && (
             <button
               id="btn-nav-notif"
               type="button"
@@ -490,6 +493,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               )}
             </button>
+            )}
 
             {/* 5. Staff Login / Staff Profile */}
             {currentUser ? (

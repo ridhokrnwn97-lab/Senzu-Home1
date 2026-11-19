@@ -5,6 +5,12 @@ import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
+import {
+  parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
+  summarizeFatRefundAnomalies, summarizeFatPaymentReconciliation,
+  computeFatAnomalyScope,
+  type FatRefundRow,
+} from './src/server/fatMetrics.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
 import { DEFAULT_NOTIFICATION_SETTINGS } from './src/types/notification.ts';
@@ -1154,7 +1160,7 @@ async function startServer() {
         throw deny(403, 'STAFF_INACTIVE', 'Status aktif staf belum dapat diverifikasi.');
       }
       const canonicalRole = staff.role || 'staff';
-      if (!['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff'].includes(canonicalRole)) {
+      if (!['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff', 'fat'].includes(canonicalRole)) {
         throw deny(403, 'STAFF_ROLE_INVALID', 'Role staf belum dapat diverifikasi. Hubungi Manager.');
       }
       const now = new Date().toISOString();
@@ -1793,6 +1799,31 @@ async function startServer() {
       if (!adminAuth) throw Object.assign(new Error('Auth unavailable'), { code: 'auth/internal-error' });
       return adminAuth.verifyIdToken(token);
     },
+    authorizeReadOnly: async (transaction, uid) => {
+      const [roleSnap, canonical, legacy, direct] = await Promise.all([
+        transaction.get(adminDb.collection('staff_roles').doc(uid)),
+        transaction.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').doc(uid)),
+      ]);
+      const matches = new Map<string, any>();
+      for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+      const role = roleSnap.data() || {};
+      for (const linked of [role.staffId, role.staffUserId]) {
+        if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !matches.has(linked)) {
+          const snap = await transaction.get(adminDb.collection('staff_users').doc(linked));
+          if (snap.exists) matches.set(snap.id, snap);
+        }
+      }
+      const staff = [...matches.values()][0]?.data() || {};
+      const disabled = (r: any) => r?.isActive === false || ['inactive', 'disabled', 'archived', 'dinonaktifkan'].includes(String(r?.status || '').toLowerCase());
+      const roleName = String(role.role || staff.role || '').toLowerCase();
+      const allowed = ['manager', 'admin', 'fat'].includes(roleName);
+      if (!roleSnap.exists || role.isActive !== true || disabled(role) || matches.size !== 1 || disabled(staff) || !allowed) {
+        throw Object.assign(new Error('Akses baca FAT/Manager/Admin aktif dan valid diperlukan.'), { status: 403, code: 'MANAGER_ROLE_REQUIRED' });
+      }
+      return { ok: true };
+    },
     authorizeManager: async (transaction, uid) => {
       const [roleSnap, canonical, legacy, direct] = await Promise.all([
         transaction.get(adminDb.collection('staff_roles').doc(uid)),
@@ -1815,6 +1846,249 @@ async function startServer() {
       });
       return result;
     },
+  });
+
+
+  // FAT read-only dashboard APIs (Finance/Accounting/Tax support). Fail-closed, projections only.
+  const setFatNoStore = (res: express.Response) => {
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+  };
+  async function authorizeReadActor(req: express.Request, allowedRoles: string[]): Promise<{ uid: string } | { error: { status: number; code: string; message: string } }> {
+    if (!adminAuth || !adminDb) return { error: { status: 503, code: 'SERVICE_UNAVAILABLE', message: 'Layanan data belum tersedia.' } };
+    const authHeader = String(req.headers?.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) {
+      return { error: { status: 401, code: authHeader ? 'INVALID_AUTH_HEADER' : 'AUTH_REQUIRED', message: 'Sesi autentikasi tidak valid. Silakan masuk kembali.' } };
+    }
+    const token = authHeader.slice(7).trim();
+    const verified = await verifyFirebaseIdToken(token).catch(() => null);
+    if (!verified?.uid || !/^[A-Za-z0-9_-]{1,128}$/.test(verified.uid)) {
+      return { error: { status: 401, code: 'AUTH_INVALID', message: 'Sesi login tidak valid. Silakan masuk kembali.' } };
+    }
+    const uid = verified.uid;
+    let ok = false;
+    try {
+      ok = await adminDb.runTransaction(async (t: any) => {
+        const [roleSnap, canonical, legacy, direct] = await Promise.all([
+          t.get(adminDb.collection('staff_roles').doc(uid)),
+          t.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+          t.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+          t.get(adminDb.collection('staff_users').doc(uid)),
+        ]);
+        const matches = new Map<string, any>();
+        for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+        const role = roleSnap.data() || {};
+        for (const linked of [role.staffId, role.staffUserId]) {
+          if (typeof linked === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(linked) && !matches.has(linked)) {
+            const snap = await t.get(adminDb.collection('staff_users').doc(linked));
+            if (snap.exists) matches.set(snap.id, snap);
+          }
+        }
+        const staff = [...matches.values()][0]?.data() || {};
+        const disabled = (r: any) => r?.isActive === false || ['inactive', 'disabled', 'archived', 'dinonaktifkan'].includes(String(r?.status || '').toLowerCase());
+        const roleName = String(role.role || staff.role || '').toLowerCase();
+        if (!roleSnap.exists || role.isActive !== true || disabled(role) || matches.size !== 1 || disabled(staff) || !allowedRoles.includes(roleName)) return false;
+        return true;
+      });
+    } catch {
+      return { error: { status: 503, code: 'SERVICE_UNAVAILABLE', message: 'Layanan otorisasi sedang tidak tersedia. Coba kembali.' } };
+    }
+    if (!ok) return { error: { status: 403, code: 'ROLE_REQUIRED', message: 'Akses peran aktif dan valid diperlukan.' } };
+    return { uid };
+  }
+  const asIso = (v: any) => typeof v === 'string' && v ? v : (v?.toDate ? v.toDate().toISOString() : '');
+  const FAT_LIST_LIMIT = 1000;
+
+  app.get('/api/fat/overview', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const [paymentsSnap, casesSnap, completionEventsSnap, completionGuardsSnap] = await Promise.all([
+        adminDb.collection('payments').select('status', 'amount').get(),
+        adminDb.collection('cases').select('caseId', 'recovery').get(),
+        adminDb.collection('payment_status_history').where('eventType', '==', 'refund_processed').select('caseId').limit(FAT_LIST_LIMIT + 1).get(),
+        adminDb.collection('payment_governance_receipts').where('action', '==', 'manual_refund_completion_guard').select('caseId').limit(FAT_LIST_LIMIT + 1).get(),
+      ]);
+      let txCount = 0, paidCount = 0, paidAmount = 0, pendingCount = 0, pendingAmount = 0, rejectedCount = 0, rejectedAmount = 0, unpaidCount = 0, expiredCount = 0, refundedPaymentCount = 0, cancelledCount = 0, cancelledAmount = 0, unknownCount = 0, unknownAmount = 0, classifiedCount = 0, failedCount = 0;
+      paymentsSnap.docs.forEach((d: any) => {
+        const p = d.data() || {};
+        txCount += 1;
+        const amt = parseFatAmount(p.amount);
+        if (!amt.valid) { failedCount += 1; return; }
+        const value = amt.value ?? 0;
+        const cat = fatStatusCategory(p.status);
+        if (cat === 'unknown') { unknownCount += 1; unknownAmount += value; return; }
+        classifiedCount += 1;
+        if (cat === 'paid') { paidCount += 1; paidAmount += value; }
+        else if (cat === 'pending') { pendingCount += 1; pendingAmount += value; }
+        else if (cat === 'rejected') { rejectedCount += 1; rejectedAmount += value; }
+        else if (cat === 'expired') { expiredCount += 1; }
+        else if (cat === 'refunded') { refundedPaymentCount += 1; }
+        else if (cat === 'unpaid') { unpaidCount += 1; }
+        else if (cat === 'cancelled') { cancelledCount += 1; cancelledAmount += value; }
+      });
+      const refundRows = casesSnap.docs
+        .map((d: any) => projectFatRefund(d.data() || {}, d.id))
+        .filter((row: FatRefundRow | null): row is FatRefundRow => row !== null);
+      const refundSummary = summarizeFatRefunds(refundRows);
+      const refundAnomalies = summarizeFatRefundAnomalies({
+        rows: refundRows,
+        completionEventCaseIds: completionEventsSnap.docs.map((d: any) => String((d.data() || {}).caseId || '')),
+        completionGuardCaseIds: completionGuardsSnap.docs.map((d: any) => String((d.data() || {}).caseId || '')),
+      });
+      const anomalyScope = computeFatAnomalyScope({
+        eventsCount: completionEventsSnap.docs.length,
+        guardsCount: completionGuardsSnap.docs.length,
+        limit: FAT_LIST_LIMIT,
+      });
+      const nowIso = new Date().toISOString();
+      return res.json({
+        success: true,
+        period: { type: 'all_time', label: 'Sepanjang waktu (akumulasi seluruh data yang tersedia saat ini)', timezone: 'Asia/Jakarta', generatedAt: nowIso },
+        payments: { transactionCount: txCount, paid: { count: paidCount, amount: paidAmount }, pending: { count: pendingCount, amount: pendingAmount }, rejected: { count: rejectedCount, amount: rejectedAmount }, unpaid: { count: unpaidCount }, expired: { count: expiredCount }, refundedOrPartiallyRefundedPayments: { count: refundedPaymentCount }, cancelled: { count: cancelledCount, amount: cancelledAmount }, unknown: { count: unknownCount, amount: unknownAmount }, invalidAmountCount: failedCount, reconciliation: summarizeFatPaymentReconciliation({ transactionCount: txCount, classified: classifiedCount, unknown: unknownCount, failed: failedCount }) },
+        refunds: { source: 'cases.recovery', ...refundSummary, anomalies: refundAnomalies, countingBasis: 'Satu siklus refund per caseId; payment_status_history hanya audit trail dan tidak dijumlahkan.', note: 'Nominal refund bersumber dari cases.recovery.refundAmount. amountTotal adalah total nominal pada semua status refund relevan dan BUKAN dana yang sudah dikembalikan; hanya COMPLETED_MANUAL yang terealisasi. COMPLETED_MANUAL berarti konfirmasi Manager, bukan verifikasi gateway. payments.refundAmount bukan sumber resmi karena writer/provenance belum teridentifikasi. Pendapatan bersih tidak dihitung.' },
+        meta: { paymentsComplete: true, refundsComplete: true, paymentsLimit: null, refundsLimit: null, paymentsScanned: txCount, casesScanned: casesSnap.size, anomaliesScopedToLatest: anomalyScope.scannedCount, anomaliesScope: anomalyScope },
+        notes: ['Nominal pembayaran menggunakan PaymentRecord.amount dari koleksi payments (bukan bookings.totalAmount).', 'Satu booking dapat memiliki lebih dari satu transaksi pembayaran; metrik dihitung per transaksi pembayaran.', 'Nominal yang tidak valid (kosong, bukan angka, NaN/Infinity, atau negatif) tidak dimasukkan ke total nominal dan dihitung terpisah.', 'Status pembayaran yang tidak dikenal dikategorikan Unknown, bukan Unpaid.', 'Pendapatan bersih tidak dihitung karena keterkaitan pembayaran-refund tidak selalu pasti.', 'Booking bukan bukti penerimaan uang.'],
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_OVERVIEW_FAILED', message: 'Ringkasan FAT belum dapat dimuat.' });
+    }
+  });
+
+  app.get('/api/fat/payments', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const fields = ['id', 'bookingId', 'bookingCode', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
+      const snap = await adminDb.collection('payments').select(...fields).limit(FAT_LIST_LIMIT + 1).get();
+      const truncated = snap.docs.length > FAT_LIST_LIMIT;
+      const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
+      let invalidAmountCount = 0;
+      const payments = docs.map((d: any) => {
+        const p = d.data() || {};
+        const amt = parseFatAmount(p.amount);
+        if (!amt.valid) invalidAmountCount += 1;
+        const refund = p.refundAmount === undefined || p.refundAmount === null ? null : parseFatAmount(p.refundAmount);
+        return {
+          id: String(p.id || d.id || ''),
+          bookingId: String(p.bookingId || ''),
+          bookingCode: String(p.bookingCode || ''),
+          amount: amt.value,
+          amountValid: amt.valid,
+          status: normalizeFatStatus(p.status),
+          statusCategory: fatStatusCategory(p.status),
+          paymentMethod: String(p.paymentMethod || p.methodType || p.bankCode || ''),
+          methodType: String(p.methodType || ''),
+          bankCode: String(p.bankCode || ''),
+          provider: String(p.provider || ''),
+          createdAt: asIso(p.createdAt),
+          updatedAt: asIso(p.updatedAt),
+          paidAt: asIso(p.paidAt),
+          verifiedAt: asIso(p.verifiedAt),
+          paymentProofUploadedAt: asIso(p.paymentProofUploadedAt || p.proofUploadedAt),
+          hasProof: Boolean(p.paymentProofUploadedAt || p.proofUploadedAt || (typeof p.paymentProofUrl === 'string' && p.paymentProofUrl.trim())),
+          rejectedAt: asIso(p.rejectedAt),
+          expiredAt: asIso(p.expiredAt),
+          refundedAt: asIso(p.refundedAt),
+          refundAmount: refund ? refund.value : null,
+          refundAmountValid: refund ? refund.valid : null,
+          currency: String(p.currency || 'IDR'),
+        };
+      }).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      return res.json({ success: true, count: payments.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, payments, note: 'Data proyeksi minimum dari koleksi payments (tanpa dokumen lengkap/PII sensitif berlebih). Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_PAYMENTS_FAILED', message: 'Data pembayaran FAT belum dapat dimuat.' });
+    }
+  });
+
+  app.get('/api/fat/refunds', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const snap = await adminDb.collection('cases').select('caseId', 'bookingId', 'bookingCode', 'recovery', 'createdAt', 'updatedAt').limit(FAT_LIST_LIMIT + 1).get();
+      const truncated = snap.docs.length > FAT_LIST_LIMIT;
+      const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
+      const rows = docs.map((d: any) => projectFatRefund(d.data() || {}, d.id));
+      const anomalyRows = rows.filter((row: FatRefundRow | null): row is FatRefundRow => row !== null);
+      const anomalies = summarizeFatRefundAnomalies({ rows: anomalyRows });
+      const seenCases = new Set<string>();
+      let invalidAmountCount = 0;
+      const refunds = rows.filter(Boolean).filter((row: any) => {
+        if (seenCases.has(row.caseId)) return false;
+        seenCases.add(row.caseId);
+        return true;
+      }).map((row: any) => {
+        if (!row.refundAmountValid) invalidAmountCount += 1;
+        return {
+          caseId: row.caseId,
+          bookingId: row.bookingId,
+          bookingCode: row.bookingCode,
+          refundPaymentId: row.refundPaymentId,
+          refundPaymentHistoryId: row.refundPaymentHistoryId,
+          refundStatus: row.refundStatus,
+          refundAmount: row.refundAmount,
+          refundAmountValid: row.refundAmountValid,
+          refundNotes: row.refundNotes,
+          updatedAt: asIso(row.updatedAt),
+          createdAt: asIso(row.createdAt),
+        };
+      });
+      return res.json({ success: true, count: refunds.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, anomalies, refunds, source: 'cases.recovery', note: 'Sumber utama refund: cases.recovery.refundStatus/refundAmount, satu siklus per caseId (bukan per event). Relasi payment memakai recovery.refundPaymentId/refundPaymentHistoryId; linkedPaymentId tidak dipakai. payment_status_history adalah jejak audit, bukan sumber nominal. Deteksi duplicate completion event dan legacy guard hanya tersedia di /api/fat/overview. Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_REFUNDS_FAILED', message: 'Data refund FAT belum dapat dimuat.' });
+    }
+  });
+
+  // FAT read-only Accurate sync status (no mutation controls). Uses same data sources as manager status view.
+  app.post('/api/integrations/accurate/fat/sync/status', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      if (!adminAuth || !adminDb) {
+        return res.status(503).json({ success: false, code: 'DATABASE_UNAVAILABLE', message: 'Layanan status Accurate belum tersedia.' });
+      }
+      const authz = await authorizeReadActor(req, ['manager', 'admin', 'fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+
+      const TARGET = 2974047;
+      const [controlSnap, latest] = await Promise.all([
+        adminDb.collection('accurate_sync_private').doc('control').get(),
+        adminDb.collection('accurate_sync_jobs').orderBy('createdAt', 'desc').limit(20).get().catch(() => ({ docs: [] as any[] })),
+      ]);
+      const c: any = controlSnap.exists ? controlSnap.data() : null;
+      const controlValid = c && c.schemaVersion === 1 && c.databaseId === TARGET && c.taxPolicy === 'no_extra_tax';
+      const control = controlValid ? c : null;
+      const jobs = (latest.docs || []).map((d: any) => {
+        const j = d.data() || {};
+        const ra = parseFatAmount(j.amount ?? j.totalAmount);
+        return {
+          id: d.id,
+          bookingCode: j.bookingCode || j.bookingId || d.id,
+          amount: ra.valid ? ra.value : null,
+          amountValid: ra.valid,
+          state: j.state || j.status || 'unknown',
+          createdAt: j.createdAt || '',
+          updatedAt: j.updatedAt || '',
+        };
+      });
+      const env = process.env;
+      const writesConfigured = env.ACCURATE_SYNC_WRITES_ENABLED === 'true';
+      const schedulerConfigured = Boolean(env.ACCURATE_SYNC_SCHEDULER_TOKEN || env.CRON_SECRET || env.ACCURATE_SYNC_SCHEDULER_ENABLED === 'true');
+      return res.json({
+        success: true,
+        mode: 'posting_v1',
+        databaseId: TARGET,
+        writesConfigured,
+        schedulerConfigured,
+        manual: control?.manual || null,
+        active: Boolean(control?.enabled),
+        jobs,
+      });
+    } catch (e: any) {
+      return res.status(503).json({ success: false, code: 'ACCURATE_RETRY', message: e?.message || 'Status sync belum dapat dimuat.' });
+    }
   });
 
   // Protected Server Endpoint for Payment Verification (Prompt 18 Phase 5)
@@ -16107,8 +16381,8 @@ async function startServer() {
       if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
         return res.status(400).json({ error: 'Nama staf wajib diisi.' });
       }
-      if (!role || !['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
-        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist.' });
+      if (!role || !['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
+        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist, FAT.' });
       }
       if (!email || typeof email !== 'string' || !email.includes('@')) {
         return res.status(400).json({ error: 'Alamat email wajib diisi dengan format valid.' });
@@ -16384,7 +16658,7 @@ async function startServer() {
       const oldRole = existingStaff.role;
       const newRole = role || oldRole;
       if (role && role !== oldRole) {
-        if (!['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
+        if (!['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
           return res.status(400).json({ error: 'Peran organisasi tidak valid.' });
         }
         updates.role = role;
@@ -17007,8 +17281,8 @@ async function startServer() {
       const { staffId } = req.params;
       const { role } = req.body;
 
-      if (!role || !['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
-        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist.' });
+      if (!role || !['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
+        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist, FAT.' });
       }
 
       let staff: any = null;

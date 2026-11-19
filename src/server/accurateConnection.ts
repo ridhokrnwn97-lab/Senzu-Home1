@@ -8,6 +8,7 @@ type Dependencies = {
   db: Firestore | null;
   verify: (token: string) => Promise<{ uid: string }>;
   authorizeManager: (transaction: Transaction, uid: string) => Promise<unknown>;
+  authorizeReadOnly?: (transaction: Transaction, uid: string) => Promise<unknown>;
   env?: NodeJS.ProcessEnv; fetch?: typeof fetch; clock?: () => number;
   pause?: (ms: number) => Promise<void>;
 };
@@ -59,7 +60,7 @@ export function createAccurateConnection(deps: Dependencies) {
     if ((v && v.count >= maximum) || (!v && rates.size >= 5000)) throw fail(429, 'RATE_LIMITED');
     rates.set(key, { count: (v?.count || 0) + 1, until: v?.until || time + 60000 });
   }
-  async function actor(req: Request) {
+  async function actor(req: Request, readOnly = false) {
     rate(`ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`, 120);
     const count = (req.rawHeaders || []).filter((_, i) => i % 2 === 0).filter(k => k.toLowerCase() === 'authorization').length;
     if (count > 1 || Object.keys(req.headers).some(k => k.toLowerCase() === 'x-firebase-auth')) throw fail(401, 'INVALID_AUTH_HEADER');
@@ -74,7 +75,8 @@ export function createAccurateConnection(deps: Dependencies) {
     if (!identity?.uid || !/^[A-Za-z0-9_-]{1,128}$/.test(identity.uid)) throw fail(401, 'AUTH_INVALID');
     rate(`uid:${identity.uid}`, 60);
     if (!deps.db) throw fail(503, 'DATABASE_UNAVAILABLE');
-    await deps.db.runTransaction(t => deps.authorizeManager(t, identity.uid));
+    const authorizer = readOnly && deps.authorizeReadOnly ? deps.authorizeReadOnly : deps.authorizeManager;
+    await deps.db.runTransaction(t => authorizer(t, identity.uid));
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length) {
       throw fail(400, 'INVALID_ACCURATE_REQUEST');
     }
@@ -88,15 +90,16 @@ export function createAccurateConnection(deps: Dependencies) {
     if (pin !== undefined && (!/^[1-9][0-9]{0,14}$/.test(pin) || !validId(Number(pin)))) throw fail(503, 'ACCURATE_DATABASE_PIN_INVALID');
     return { token: env.ACCURATE_API_TOKEN!, secret: env.ACCURATE_SIGNATURE_SECRET!, databaseId: pin ? Number(pin) : null };
   }
-  async function configuration(req: Request): Promise<AccurateConfiguration> {
-    await actor(req);
+  async function configuration(req: Request, readOnly = false): Promise<AccurateConfiguration> {
+    await actor(req, readOnly);
     let configured = false;
     try { config(); configured = true; } catch {}
     return { mode: 'connection_only', writesEnabled: false, configured,
       apiTokenPresent: tokenValid(), signatureSecretPresent: signatureValid(), databaseIdPinned: Boolean(env.ACCURATE_DATABASE_ID) };
   }
-  async function check(req: Request): Promise<AccurateConnectionCheck> {
-    const uid = await actor(req), cfg = config();
+  async function check(req: Request, readOnly = false): Promise<AccurateConnectionCheck> {
+    const uid = await actor(req, readOnly), cfg = config();
+    const authorizer = readOnly && deps.authorizeReadOnly ? deps.authorizeReadOnly : deps.authorizeManager;
     rate(`check:${uid}`, 3);
     if (busy) throw fail(409, 'ACCURATE_CHECK_BUSY');
     busy = true;
@@ -176,9 +179,9 @@ export function createAccurateConnection(deps: Dependencies) {
         }
         checks.push(row);
       }
-      // A Manager may lose their Staff Master permissions while the network
+      // A Manager/FAT read actor may lose permissions while the network
       // check is running. Re-authorize before returning any provider result.
-      await deps.db!.runTransaction(t => deps.authorizeManager(t, uid));
+      await deps.db!.runTransaction(t => authorizer(t, uid));
       return { mode: 'connection_only', writesEnabled: false, connected: true, companyName: ACCURATE_COMPANY,
         applicationName: ACCURATE_APP_NAME, databaseId: database.id, databaseIdPinned: Boolean(cfg.databaseId),
         access: database.admin ? 'administrator' : 'operator', checkedAt: new Date(clock()).toISOString(),
@@ -193,13 +196,24 @@ export function registerAccurateConnection(app: Express, deps: Dependencies) {
   for (const action of ['configuration', 'check'] as const) {
     app.post(`${BASE}/${action}`, async (req, res) => {
       res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
-      try { res.json({ success: true, ...await service[action](req) }); }
+      try { res.json({ success: true, ...await (service as any)[action](req, false) }); }
       catch (e: any) {
         const known = Boolean(e?.code && MESSAGES[e.code]);
         const code = known ? e.code : e?.status === 403 ? 'MANAGER_ROLE_REQUIRED' : 'ACCURATE_UNAVAILABLE';
         res.status(known ? e.status : e?.status === 403 ? 403 : 503).json({ success: false, code, error: MESSAGES[code] });
       }
     });
+    if (deps.authorizeReadOnly) {
+      app.post(`${BASE}/fat/${action}`, async (req, res) => {
+        res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff');
+        try { res.json({ success: true, ...await (service as any)[action](req, true) }); }
+        catch (e: any) {
+          const known = Boolean(e?.code && MESSAGES[e.code]);
+          const code = known ? e.code : e?.status === 403 ? 'MANAGER_ROLE_REQUIRED' : 'ACCURATE_UNAVAILABLE';
+          res.status(known ? e.status : e?.status === 403 ? 403 : 503).json({ success: false, code, error: MESSAGES[code] });
+        }
+      });
+    }
   }
   return service;
 }
