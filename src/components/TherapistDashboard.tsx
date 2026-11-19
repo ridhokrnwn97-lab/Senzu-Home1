@@ -99,6 +99,7 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
   } | null>(null);
 
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
+  const [gpsIssue, setGpsIssue] = useState<string | null>(null);
   const [todayRoster, setTodayRoster] = useState<TherapistRoster | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -129,6 +130,8 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
   // lastProcessedTimestampRef mencegah penulisan posisi yang lebih lama setelah posisi
   // yang lebih baru sudah berhasil ditulis ke Firestore.
   const lastProcessedTimestampRef = useRef<number>(0);
+  // Booking yang memiliki guard timestamp di atas; reset hanya saat booking berganti.
+  const lastTrackingBookingRef = useRef<string | null>(null);
   const lastResumeAtRef = useRef<number>(0);
   const RESUME_COOLDOWN_MS = 3000;
 
@@ -489,6 +492,13 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
     const generation = ++trackingGenerationRef.current;
     // Siklus tracking baru dimulai: reset counter retry agar tidak mewarisi hitungan siklus lama.
     retryRef.current = 0;
+    // Timestamp hanya di-reset saat booking berganti; restart effect pada booking
+    // yang sama tidak boleh meloloskan posisi lama menimpa posisi terbaru.
+    if (lastTrackingBookingRef.current !== bookingId) {
+      lastTrackingBookingRef.current = bookingId;
+      lastProcessedTimestampRef.current = 0;
+    }
+    setGpsIssue(null);
 
     const processPendingLocation = () => {
       const pending = pendingLocationRef.current;
@@ -525,11 +535,22 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
         return;
       }
 
-      // Validasi koordinat dengan Number.isFinite: titik koordinat nol tetap dianggap
-      // valid asalkan merupakan bilangan hingga (tidak undefined/NaN).
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      // Validasi koordinat dan akurasi dengan Number.isFinite. Titik nol tetap valid
+      // asalkan bilangan hingga; nilai di luar rentang bumi ditolak.
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
         return;
       }
+      if (!Number.isFinite(accuracy) || accuracy < 0) {
+        return;
+      }
+      setGpsIssue(null);
 
       // B6: Jangan proses posisi yang lebih lama dari yang sudah berhasil ditulis ke Firestore.
       if (pos.timestamp <= lastProcessedTimestampRef.current) {
@@ -597,13 +618,13 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
       }
 
       if (!force) {
-        // Throttle penulisan Firestore: minimal 45 detik antar tulisan,
-        // atau 25 detik jika pergerakan signifikan (> 50m).
+        // Throttle penulisan Firestore: 10 detik jika pergerakan signifikan (> 50m),
+        // 30 detik jika relatif diam. Cukup segar untuk rute live, tetap hemat kuota.
         const distanceMoved =
           lastLat != null && lastLng != null
             ? calculateDistanceMeters(lastLat, lastLng, latitude, longitude)
             : 999;
-        const minInterval = distanceMoved > 50 ? 25000 : 45000;
+        const minInterval = distanceMoved > 50 ? 10000 : 30000;
         if (now - lastSentMillis < minInterval) {
           // B3: Simpan posisi terbaru (bandingkan timestamp) untuk dikirim setelah jeda throttle tercapai.
           const pending = pendingLocationRef.current;
@@ -746,23 +767,35 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
     };
     forceSyncRef.current = doForceSync;
 
+    const handleGpsError = (err: GeolocationPositionError) => {
+      if (generation !== trackingGenerationRef.current) return;
+      if (err.code === err.PERMISSION_DENIED) {
+        setLocationPermissionDenied(true);
+        setGpsIssue(null);
+        return;
+      }
+      setLocationPermissionDenied(false);
+      setGpsIssue(
+        err.code === err.TIMEOUT
+          ? 'Sinyal GPS lambat. Menunggu posisi terbaru...'
+          : 'GPS perangkat belum tersedia. Menunggu sinyal...'
+      );
+    };
+
     const watchId = navigator.geolocation.watchPosition(
       (pos) => sendCurrentPosition(pos, false, generation),
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          setLocationPermissionDenied(true);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 15000 }
+      handleGpsError,
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
     const intervalId = setInterval(() => {
       navigator.geolocation.getCurrentPosition(
         (pos) => sendCurrentPosition(pos, false, generation),
-        () => {},
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+        // Polling gagal tidak boleh mengubah status; biarkan watchPosition yang melapor.
+        (err) => console.warn('Therapist GPS poll notice:', err?.code ?? err),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
-    }, 60000);
+    }, 30000);
 
     if (typeof window !== 'undefined') {
       (window as any).__senzuTherapistWatchId = watchId;
@@ -786,9 +819,19 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
       // Bersihkan antrean pending saat booking/status berubah agar data lokasi
       // booking lama tidak dikirim ke dokumen booking baru.
       pendingLocationRef.current = null;
+      // Naikkan generation agar callback async dari siklus ini tidak lagi menulis
+      // setelah tracking berhenti, komponen dilepas, atau booking berganti.
+      trackingGenerationRef.current++;
       releaseWakeLock();
     };
-  }, [currentJob, currentTherapistId, therapistInfo, currentUser]);
+  }, [
+    currentJob?.id,
+    currentJob?.status,
+    currentJob?.bookingCode,
+    currentTherapistId,
+    therapistInfo?.name,
+    currentUser?.name,
+  ]);
 
   // Pemulihan tracking ketika halaman kembali aktif dari latar belakang
   // (contoh: terapis membuka Google Maps di tab lain lalu kembali ke Senzu Home).
@@ -937,16 +980,27 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
         return;
       }
       setUpdatingId(booking.id);
+      let initialPos: GeolocationPosition | null = null;
       try {
-        const initialPos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        initialPos = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
             timeout: 10000,
             maximumAge: 0,
           });
         });
-        setLocationPermissionDenied(false);
-        const { latitude, longitude, accuracy } = initialPos.coords;
+      } catch (err) {
+        setUpdatingId(null);
+        setLocationPermissionDenied(true);
+        alert(
+          'Izin lokasi diperlukan agar customer dapat memantau kedatangan Anda. Mohon aktifkan GPS perangkat Anda dan izinkan akses lokasi di browser.'
+        );
+        return;
+      }
+      setLocationPermissionDenied(false);
+      setGpsIssue(null);
+      const { latitude, longitude, accuracy } = initialPos.coords;
+      try {
         await saveTherapistLocation({
           therapistId: currentTherapistId || 'th-active',
           therapistName: therapistInfo?.name || currentUser?.name || 'Terapis Senzu',
@@ -959,13 +1013,9 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
           updatedAtMillis: Date.now(),
           isTrackingActive: true,
         });
-      } catch (err: any) {
-        setUpdatingId(null);
-        setLocationPermissionDenied(true);
-        alert(
-          'Izin lokasi diperlukan agar customer dapat memantau kedatangan Anda. Mohon aktifkan GPS perangkat Anda dan izinkan akses lokasi di browser.'
-        );
-        return;
+      } catch (err) {
+        // Gagal menulis posisi awal tidak membatalkan perjalanan; watcher GPS akan mencoba lagi.
+        console.warn('Initial therapist location sync notice:', err);
       }
     }
 
@@ -1394,6 +1444,9 @@ export const TherapistDashboard: React.FC<TherapistDashboardProps> = ({
                       Jika tab ditinggalkan (misal membuka Google Maps), lokasi akan
                       disinkronkan ulang otomatis saat Anda kembali ke halaman ini.
                       {liveLocation ? ` Sinyal: ±${liveLocation.accuracy}m (${liveLocation.lastSentTime})` : ' Mendeteksi titik GPS...'}
+                      {gpsIssue && (
+                        <span className="block mt-1 font-semibold text-rose-700">{gpsIssue}</span>
+                      )}
                     </p>
                   </div>
                 </div>
