@@ -374,6 +374,7 @@ export interface OperationalAuditLog {
     | 'case_reopened'
     | 'recovery_proposed'
     | 'recovery_approved'
+    | 'recovery_rejected'
     | 'refund_status_updated';
   actorRole: 'supervisor' | 'manager' | 'admin' | 'css' | 'system';
   actorName: string;

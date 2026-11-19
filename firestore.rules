@@ -99,6 +99,50 @@ service cloud.firestore {
       return isStaffActive() && ('role' in getStaffRole()) && getStaffRole().role in ['manager', 'admin', 'supervisor', 'css'];
     }
 
+    // Refund lifecycle fields are backend-only. Non-refund recovery/delivery
+    // metadata may still be written by operational staff from the client.
+    function recoveryTypeIndicatesRefund(data) {
+      return data is map
+        && data.get('type', '') is string
+        && data.get('type', '').lower().matches('.*refund.*');
+    }
+
+    function isRefundRecoveryData(data) {
+      if (!(data is map)) return false;
+      if (recoveryTypeIndicatesRefund(data)) return true;
+      return ('refundStatus' in data) && data.get('refundStatus', null) != 'NOT_REQUIRED';
+    }
+
+    function recoveryRefundFieldsUnchanged() {
+      if (!('recovery' in resource.data)) return !('recovery' in request.resource.data);
+      if (!('recovery' in request.resource.data)) return false;
+      if (!(resource.data.recovery is map) || !(request.resource.data.recovery is map)) return false;
+      if (!isRefundRecoveryData(resource.data.recovery) && !isRefundRecoveryData(request.resource.data.recovery)) return true;
+      return request.resource.data.recovery.get('status', null) == resource.data.recovery.get('status', null)
+        && request.resource.data.recovery.get('refundStatus', null) == resource.data.recovery.get('refundStatus', null)
+        && request.resource.data.recovery.get('approvedBy', null) == resource.data.recovery.get('approvedBy', null)
+        && request.resource.data.recovery.get('approvedByName', null) == resource.data.recovery.get('approvedByName', null)
+        && request.resource.data.recovery.get('approvedAt', null) == resource.data.recovery.get('approvedAt', null)
+        && request.resource.data.recovery.get('rejectedBy', null) == resource.data.recovery.get('rejectedBy', null)
+        && request.resource.data.recovery.get('rejectedByUid', null) == resource.data.recovery.get('rejectedByUid', null)
+        && request.resource.data.recovery.get('rejectedByName', null) == resource.data.recovery.get('rejectedByName', null)
+        && request.resource.data.recovery.get('rejectedAt', null) == resource.data.recovery.get('rejectedAt', null)
+        && request.resource.data.recovery.get('rejectionReason', null) == resource.data.recovery.get('rejectionReason', null)
+        && request.resource.data.recovery.get('refundAmount', null) == resource.data.recovery.get('refundAmount', null)
+        && request.resource.data.recovery.get('refundMethod', null) == resource.data.recovery.get('refundMethod', null)
+        && request.resource.data.recovery.get('refundDate', null) == resource.data.recovery.get('refundDate', null)
+        && request.resource.data.recovery.get('refundReference', null) == resource.data.recovery.get('refundReference', null)
+        && request.resource.data.recovery.get('refundProofUrl', null) == resource.data.recovery.get('refundProofUrl', null)
+        && request.resource.data.recovery.get('refundNotes', null) == resource.data.recovery.get('refundNotes', null)
+        && request.resource.data.recovery.get('refundPaymentId', null) == resource.data.recovery.get('refundPaymentId', null)
+        && request.resource.data.recovery.get('refundPaymentHistoryId', null) == resource.data.recovery.get('refundPaymentHistoryId', null)
+        && request.resource.data.recovery.get('refundPaymentHistoryLinked', null) == resource.data.recovery.get('refundPaymentHistoryLinked', null)
+        && request.resource.data.recovery.get('refundLinkageReviewRequired', null) == resource.data.recovery.get('refundLinkageReviewRequired', null)
+        && request.resource.data.recovery.get('refundProcessedBy', null) == resource.data.recovery.get('refundProcessedBy', null)
+        && request.resource.data.recovery.get('refundProcessedByName', null) == resource.data.recovery.get('refundProcessedByName', null)
+        && request.resource.data.recovery.get('refundProcessedAt', null) == resource.data.recovery.get('refundProcessedAt', null);
+    }
+
     function getStaffTherapistId() {
       return ('therapistId' in getStaffRole()) ? getStaffRole().therapistId : '';
     }
@@ -494,7 +538,7 @@ service cloud.firestore {
              isCustomer(resource.data.customerId)
             ));
       allow create: if isOperationalStaff() || isSignedIn();
-      allow update: if isOperationalStaff();
+      allow update: if isOperationalStaff() && recoveryRefundFieldsUnchanged();
       allow delete: if false; // Prompt 18D: Case No-Hard-Delete policy (Close/Resolve via status)
     }
 

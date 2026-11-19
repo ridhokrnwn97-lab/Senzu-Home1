@@ -8,7 +8,10 @@ import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import {
   parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
   summarizeFatRefundAnomalies, summarizeFatPaymentReconciliation,
-  computeFatAnomalyScope,
+  canTransitionRefundStatus, evaluateRefundPaymentClaim, evaluateRefundPaymentReservation,
+  matchesManualRefundRequestId, rejectionPayloadMatchesAuthoritativeState,
+  classifyRefundRecovery, recoveryApproveFingerprintPayload, recoveryApproveReceiptMatches,
+  buildRecoveryAuditLog, computeFatAnomalyScope,
   type FatRefundRow,
 } from './src/server/fatMetrics.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
@@ -4113,6 +4116,435 @@ async function startServer() {
   });
 
   // 2. Manager Manual Refund Status Endpoint
+  app.post('/api/cases/:caseId/recovery/propose', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['css', 'supervisor', 'manager', 'admin']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const caseId = String(req.params?.caseId || '').trim();
+      if (!isValidStage7dDocId(caseId, 128)) {
+        return res.status(400).json({ success: false, code: 'INVALID_CASE_ID', message: 'ID kasus tidak valid.' });
+      }
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const recoveryType = typeof body.recoveryType === 'string' ? body.recoveryType.trim().slice(0, 120) : '';
+      const description = typeof body.description === 'string' ? body.description.trim().slice(0, 2000) : '';
+      if (!recoveryType || !description) {
+        return res.status(400).json({ success: false, code: 'INVALID_RECOVERY_PROPOSAL', message: 'Jenis dan deskripsi service recovery wajib diisi.' });
+      }
+      const expectsRefund = recoveryType.toLowerCase().includes('refund');
+      let refundAmount: number | undefined;
+      if (expectsRefund && body.refundAmount !== undefined && body.refundAmount !== null) {
+        const parsed = parseFatAmount(body.refundAmount);
+        if (!parsed.valid || parsed.value === null || parsed.value <= 0) {
+          return res.status(400).json({ success: false, code: 'INVALID_REFUND_AMOUNT', message: 'Nominal refund tidak valid.' });
+        }
+        refundAmount = parsed.value;
+      }
+      const expectedOutcome = typeof body.expectedOutcome === 'string' && body.expectedOutcome.trim() ? body.expectedOutcome.trim().slice(0, 500) : '';
+      const actorName = typeof body.actorName === 'string' && body.actorName.trim() ? body.actorName.trim().slice(0, 120) : '';
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const caseRef = adminDb.collection('cases').doc(caseId);
+        const snap = await t.get(caseRef);
+        if (!snap.exists) return { error: { status: 404, code: 'CASE_NOT_FOUND', message: 'Kasus tidak ditemukan.' } };
+        const data = snap.data() || {};
+        const existingStatus = String((data.recovery || {}).refundStatus || '').toUpperCase();
+        if (existingStatus && existingStatus !== 'NOT_REQUIRED') {
+          return { error: { status: 409, code: 'REFUND_CYCLE_EXISTS', message: 'Kasus ini sudah memiliki siklus refund; pengajuan ulang tidak diizinkan.' } };
+        }
+        const now = new Date().toISOString();
+        const recovery = {
+          type: recoveryType,
+          description,
+          ...(expectedOutcome ? { expectedOutcome } : {}),
+          proposedBy: authz.uid,
+          proposedByName: actorName || authz.uid,
+          proposedAt: now,
+          status: 'PROPOSED',
+          ...(refundAmount !== undefined ? { refundAmount } : {}),
+          refundStatus: expectsRefund ? 'REVIEW_REQUIRED' : 'NOT_REQUIRED',
+        };
+        t.update(caseRef, { recovery, status: 'WAITING_MANAGER', updatedAt: now });
+        const caseEventId = `ce_propose_${caseId}_${Date.now().toString(36)}_${randomInt(1000000).toString(36)}`;
+        t.set(adminDb.collection('case_events').doc(caseEventId), {
+          id: caseEventId,
+          caseId,
+          caseCode: String(data.caseCode || ''),
+          eventType: 'recovery.proposed',
+          actorId: authz.uid,
+          actorUid: authz.uid,
+          actorName: actorName || authz.uid,
+          actorRole: 'staff',
+          summary: 'Service recovery diajukan',
+          details: description,
+          createdAt: now,
+          timestamp: now,
+        });
+        return { recovery };
+      });
+      if ('error' in result) return res.status(result.error.status).json({ success: false, code: result.error.code, message: result.error.message });
+      return res.json({ success: true, recovery: result.recovery });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'RECOVERY_PROPOSE_FAILED', message: 'Service recovery belum dapat diajukan.' });
+    }
+  });
+
+  app.post('/api/cases/:caseId/recovery/approve', async (req, res) => {
+    setStage7dNoStore(res);
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+    const textId = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    try {
+      const authResult = await verifyStage7dBearerToken(req);
+      if (!authResult.ok) {
+        return res.status(authResult.status || 401).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+      const verifiedUid = authResult.uid!;
+      const caseId = textId(req.params?.caseId);
+      if (!isValidStage7dDocId(caseId, 128)) {
+        return res.status(400).json({ success: false, code: 'INVALID_CASE_ID', message: 'ID kasus tidak valid.' });
+      }
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server sedang tidak tersedia.' });
+      }
+
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const decision = textId(body.decision).toUpperCase();
+      if (decision !== 'APPROVE' && decision !== 'REJECT') {
+        return res.status(400).json({ success: false, code: 'INVALID_RECOVERY_DECISION', message: 'Keputusan recovery tidak valid.' });
+      }
+      const reason = textId(body.reason).slice(0, 2000);
+      const rawAmount = body.approvedRefundAmount;
+      const approvedRefundAmount =
+        rawAmount === undefined || rawAmount === null
+          ? undefined
+          : typeof rawAmount === 'number' && Number.isFinite(rawAmount) && rawAmount > 0 && rawAmount <= 100_000_000
+          ? rawAmount
+          : null;
+      if (approvedRefundAmount === null) {
+        return res.status(400).json({ success: false, code: 'INVALID_REFUND_AMOUNT', message: 'Nominal refund tidak valid.' });
+      }
+      const requestId = textId(body.requestId);
+      if (!isValidStage7dDocId(requestId, 128) || requestId.length < 12) {
+        return res.status(400).json({ success: false, code: 'INVALID_REQUEST_ID', message: 'Request ID tidak valid.' });
+      }
+      const fingerprint = createHash('sha256')
+        .update(recoveryApproveFingerprintPayload({
+          action: 'recovery_approve',
+          caseId,
+          decision,
+          reason,
+          approvedRefundAmount: approvedRefundAmount ?? null,
+          actorUid: verifiedUid,
+          requestId,
+        }))
+        .digest('hex');
+      const receiptId = `rappr_${createHash('sha256').update(`recovery_approve:${requestId}`).digest('hex').slice(0, 32)}`;
+
+      const result = await adminDb.runTransaction(async (transaction: any) => {
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const staffQueries = [
+          adminDb.collection('staff_users').where('authUserId', '==', verifiedUid).limit(2),
+          adminDb.collection('staff_users').where('authUid', '==', verifiedUid).limit(2),
+        ];
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const caseRef = adminDb.collection('cases').doc(caseId);
+        const receiptRef = adminDb.collection('payment_governance_receipts').doc(receiptId);
+
+        const [roleSnap, staffA, staffB, directStaff, caseSnap, receiptSnap] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(staffQueries[0]),
+          transaction.get(staffQueries[1]),
+          transaction.get(directStaffRef),
+          transaction.get(caseRef),
+          transaction.get(receiptRef),
+        ]);
+        const roleData = snapExists(roleSnap) ? roleSnap.data() || {} : {};
+        const staffDocs = new Map<string, any>();
+        for (const snap of [staffA, staffB]) {
+          for (const d of snap?.docs || []) if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaff)) staffDocs.set(directStaff.id, directStaff);
+
+        const managerCheck = validateStage7dActiveManagerIdentity(
+          verifiedUid,
+          snapExists(roleSnap),
+          roleData,
+          staffDocs
+        );
+        if (!managerCheck.ok) {
+          return { status: managerCheck.status || 403, code: managerCheck.code, message: managerCheck.message };
+        }
+
+        if (!snapExists(caseSnap)) return { status: 404, code: 'CASE_NOT_FOUND', message: 'Kasus tidak ditemukan.' };
+        const caseData = caseSnap.data() || {};
+        if (caseData.id !== undefined && caseData.id !== null && caseData.id !== '' && caseData.id !== caseId) {
+          return { status: 409, code: 'CASE_ID_CONFLICT', message: 'Identitas dokumen kasus tidak konsisten.' };
+        }
+        const rec = caseData.recovery as Record<string, any> | undefined;
+        if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+          return { status: 400, code: 'RECOVERY_NOT_FOUND', message: 'Kasus ini belum memiliki recovery record.' };
+        }
+
+        if (snapExists(receiptSnap)) {
+          const receipt = receiptSnap.data() || {};
+          const requestMatches = recoveryApproveReceiptMatches({
+            receipt,
+            expected: { receiptId, requestId, actorUid: verifiedUid, caseId, decision, fingerprint },
+          });
+          if (!requestMatches) {
+            return {
+              status: 409,
+              code: 'IDEMPOTENCY_PARAMETER_MISMATCH',
+              message: 'Request ID sudah dipakai untuk identitas atau parameter lain.',
+            };
+          }
+          const stored = receipt.responsePayload && typeof receipt.responsePayload === 'object' && !Array.isArray(receipt.responsePayload)
+            ? (receipt.responsePayload as Record<string, any>)
+            : {};
+          const storedRec = stored.recovery && typeof stored.recovery === 'object' && !Array.isArray(stored.recovery)
+            ? (stored.recovery as Record<string, any>)
+            : {};
+          const stateMatches =
+            textId(stored.caseId) === caseId &&
+            textId(stored.refundStatus) === textId(storedRec.refundStatus) &&
+            textId(rec.refundStatus) === textId(stored.refundStatus) &&
+            textId(rec.status) === textId(storedRec.status);
+          if (!stateMatches) {
+            return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State kasus tidak sesuai dengan receipt idempotensi.' };
+          }
+          if (decision === 'APPROVE') {
+            const storedPayment = stored.paymentReservation && typeof stored.paymentReservation === 'object'
+              ? (stored.paymentReservation as Record<string, any>)
+              : {};
+            const storedPaymentId = textId(storedPayment.paymentId);
+            if (!isValidStage7dDocId(storedPaymentId, 128)) {
+              return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State reservasi tidak sesuai dengan receipt idempotensi.' };
+            }
+            const reservedSnap = await transaction.get(adminDb.collection('payments').doc(storedPaymentId));
+            const reservedData = snapExists(reservedSnap) ? reservedSnap.data() || {} : {};
+            if (
+              textId(reservedData.refundReservationCaseId) !== caseId ||
+              textId(reservedData.refundReservationStatus) !== 'RESERVED' ||
+              textId(reservedData.refundClaimCaseId) === caseId ||
+              textId(reservedData.refundClaimStatus).toUpperCase() === 'CLAIMED'
+            ) {
+              return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State reservasi tidak sesuai dengan receipt idempotensi.' };
+            }
+          }
+          return { status: 200, ...stored, isIdempotent: true, noOp: true };
+        }
+
+        const classification = classifyRefundRecovery(rec);
+        if (!classification.isRefund) {
+          return {
+            status: 400,
+            code: 'NON_REFUND_RECOVERY_LEGACY_PATH',
+            message: 'Approval recovery non-refund tetap memakai jalur lama.',
+          };
+        }
+        if (classification.legacy) {
+          return {
+            status: 409,
+            code: 'LEGACY_REFUND_STATUS_UNSUPPORTED',
+            message: `Status refund legacy ${classification.status || '(kosong)'} tidak dapat diproses otomatis; diperlukan keputusan data eksplisit.`,
+          };
+        }
+        const currentRefundStatus = classification.status;
+        if (currentRefundStatus === 'COMPLETED_MANUAL') {
+          return { status: 409, code: 'REFUND_STATUS_TERMINAL', message: 'Status refund bersifat terminal.' };
+        }
+        if (currentRefundStatus === 'REJECTED') {
+          return { status: 409, code: 'REFUND_STATUS_TERMINAL', message: 'Status refund bersifat terminal.' };
+        }
+        if (currentRefundStatus === 'APPROVED') {
+          return {
+            status: 409,
+            code: 'REFUND_TERMINAL_REQUEST_MISMATCH',
+            message: 'Keputusan terminal memerlukan request ID yang sama dengan transaksi awal.',
+          };
+        }
+        if (textId(rec.status) !== 'PROPOSED') {
+          return { status: 409, code: 'RECOVERY_NOT_PROPOSED', message: 'Pengajuan recovery tidak berada pada status PROPOSED.' };
+        }
+
+        const caseCode = textId(caseData.caseCode) || caseId;
+        const persistedBookingId = textId(caseData.bookingId);
+        const bookingSnap = isValidStage7dDocId(persistedBookingId, 128)
+          ? await transaction.get(adminDb.collection('bookings').doc(persistedBookingId))
+          : null;
+        const bookingData = snapExists(bookingSnap) ? bookingSnap.data() || {} : null;
+        const activePaymentId = bookingData ? textId(bookingData.activePaymentId) : '';
+        const paymentSnap = isValidStage7dDocId(persistedBookingId, 128)
+          ? await transaction.get(adminDb.collection('payments').where('bookingId', '==', persistedBookingId))
+          : null;
+        const bookingPayments = (paymentSnap?.docs || []).filter((d: any) => snapExists(d));
+        const activeMatches = bookingPayments.filter((d: any) => d.id === activePaymentId);
+        const otherPaid = bookingPayments.filter(
+          (d: any) => d.id !== activePaymentId && textId((d.data() || {}).status).toLowerCase() === 'paid'
+        );
+        const paymentUnambiguous =
+          isValidStage7dDocId(activePaymentId, 128) && activeMatches.length === 1 && otherPaid.length === 0;
+        if (!paymentUnambiguous && decision === 'APPROVE') {
+          return {
+            status: 409,
+            code: 'PAYMENT_NOT_UNAMBIGUOUS',
+            message: 'Payment tidak dapat dipastikan secara unik; approval refund memerlukan peninjauan manual.',
+          };
+        }
+
+        let paymentRef: any = null;
+        let paymentData: Record<string, any> = {};
+        if (paymentUnambiguous) {
+          paymentRef = adminDb.collection('payments').doc(activePaymentId);
+          const paymentSnapFresh = await transaction.get(paymentRef);
+          if (!snapExists(paymentSnapFresh)) {
+            return { status: 409, code: 'LINKED_PAYMENT_NOT_FOUND', message: 'Payment tertaut tidak ditemukan.' };
+          }
+          paymentData = paymentSnapFresh.data() || {};
+          const reservationCheck = evaluateRefundPaymentReservation({
+            caseId,
+            claimOwnerCaseId: textId(paymentData.refundClaimCaseId),
+            claimStatus: textId(paymentData.refundClaimStatus),
+            reservationOwnerCaseId: textId(paymentData.refundReservationCaseId),
+            reservationStatus: textId(paymentData.refundReservationStatus),
+          });
+          if (!reservationCheck.ok) {
+            return { status: 409, code: reservationCheck.code || 'PAYMENT_REFUND_RESERVATION_CONFLICT', message: reservationCheck.message };
+          }
+        }
+
+        const now = new Date().toISOString();
+        const nextRefundStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+        const updatedRec: Record<string, any> = {
+          ...rec,
+          status: nextRefundStatus,
+          refundStatus: nextRefundStatus,
+          ...(decision === 'APPROVE'
+            ? {
+                approvedBy: managerCheck.actorStaffId,
+                approvedByName: managerCheck.actorName,
+                approvedAt: now,
+                ...(approvedRefundAmount !== undefined ? { refundAmount: approvedRefundAmount } : {}),
+              }
+            : {
+                rejectedBy: managerCheck.actorStaffId,
+                rejectedByUid: verifiedUid,
+                rejectedByName: managerCheck.actorName,
+                rejectedAt: now,
+                rejectionReason: reason,
+              }),
+        };
+
+        const suffix = createHash('sha256')
+          .update(`recovery_approve:${caseId}:${decision}:${verifiedUid}:${now}:${randomInt(1000000).toString(36)}`)
+          .digest('hex')
+          .slice(0, 32);
+        const caseEventId = `ce_appr_${suffix}`;
+        const auditId = `audit_appr_${suffix}`;
+
+        transaction.update(caseRef, { recovery: updatedRec, status: 'IN_PROGRESS', updatedAt: now });
+        if (paymentRef && decision === 'APPROVE') {
+          transaction.update(paymentRef, {
+            refundReservationCaseId: caseId,
+            refundReservationStatus: 'RESERVED',
+            refundReservedAt: now,
+            updatedAt: now,
+          });
+        } else if (paymentRef && decision === 'REJECT' && textId(paymentData.refundReservationCaseId) === caseId) {
+          transaction.update(paymentRef, {
+            refundReservationStatus: 'RELEASED',
+            refundReservationReleasedAt: now,
+            refundReservationReleaseReason: 'REJECTED',
+            updatedAt: now,
+          });
+        }
+        transaction.set(adminDb.collection('case_events').doc(caseEventId), {
+          id: caseEventId,
+          caseId,
+          caseCode,
+          eventType: decision === 'APPROVE' ? 'recovery.approved' : 'recovery.rejected',
+          actorId: managerCheck.actorStaffId,
+          actorUid: verifiedUid,
+          actorName: managerCheck.actorName,
+          actorRole: managerCheck.actorRoleLabel,
+          summary: decision === 'APPROVE' ? 'Service recovery refund disetujui' : 'Pengajuan refund ditolak',
+          details: reason,
+          newValue: nextRefundStatus,
+          timestamp: now,
+        });
+        transaction.set(adminDb.collection('operational_audit_logs').doc(auditId), buildRecoveryAuditLog({
+          id: auditId,
+          caseId,
+          caseCode,
+          bookingId: persistedBookingId,
+          bookingCode: textId(caseData.bookingCode).toUpperCase(),
+          action: decision === 'APPROVE' ? 'recovery_approved' : 'recovery_rejected',
+          actorUid: verifiedUid,
+          actorStaffId: managerCheck.actorStaffId,
+          actorName: managerCheck.actorName,
+          actorRole: managerCheck.actorRole,
+          note: reason,
+          timestamp: now,
+          formattedWIB: formatStage7dWIB(new Date(now)),
+        }));
+
+        const responsePayload = {
+          requestId,
+          caseId,
+          caseCode,
+          recovery: updatedRec,
+          refundStatus: nextRefundStatus,
+          paymentReservation: decision === 'APPROVE'
+            ? { paymentId: activePaymentId, status: 'RESERVED', reservedAt: now }
+            : null,
+          caseEventId,
+          auditId,
+          isIdempotent: false,
+        };
+        transaction.set(receiptRef, {
+          id: receiptId,
+          action: 'recovery_approve',
+          requestId,
+          caseId,
+          caseCode,
+          decision,
+          actorUid: verifiedUid,
+          actorStaffId: managerCheck.actorStaffId,
+          actorRole: managerCheck.actorRole,
+          actorName: managerCheck.actorName,
+          fingerprint,
+          responsePayload,
+          createdAt: now,
+          committedAt: now,
+        });
+
+        return { status: 200, ...responsePayload };
+      });
+
+      if (result.status !== 200) {
+        return res.status(result.status).json({
+          success: false,
+          code: result.code || 'RECOVERY_APPROVE_REJECTED',
+          error: result.message,
+          message: result.message,
+        });
+      }
+      return res.status(200).json({ success: true, ...result });
+    } catch (e: any) {
+      return res.status(500).json({
+        success: false,
+        code: 'RECOVERY_APPROVE_FAILED',
+        message: 'Keputusan recovery refund belum dapat diproses.',
+      });
+    }
+  });
+
   app.post('/api/cases/:caseId/manual-refund-status', async (req, res) => {
     setStage7dNoStore(res);
     const snapExists = (snap: any): boolean =>
@@ -5514,6 +5946,7 @@ async function startServer() {
           refundAmount: number;
           paymentHistoryLinked: boolean;
           reviewRequired: boolean;
+          requestId?: string;
           paymentId?: string;
           paymentHistoryId?: string;
           linkageReviewReason?: string;
@@ -5577,6 +6010,7 @@ async function startServer() {
             refundAmount: guard.refundAmount,
             paymentHistoryLinked: guard.paymentHistoryLinked,
             reviewRequired: guard.reviewRequired,
+            requestId: textId(guard.requestId),
             ...(guard.paymentHistoryLinked
               ? {
                   paymentId: guard.paymentId,
@@ -5624,6 +6058,7 @@ async function startServer() {
                 refundAmount: rResp.recovery.refundAmount,
                 paymentHistoryLinked: rResp.paymentHistoryLinked,
                 reviewRequired: rResp.reviewRequired,
+                requestId: textId(rData.requestId),
                 ...(rResp.paymentHistoryLinked
                   ? {
                       paymentId: rResp.paymentId,
@@ -5664,6 +6099,15 @@ async function startServer() {
               reviewRequired: true,
               message:
                 'Konfirmasi refund manual pada kasus ini telah tercatat dan tidak dapat ditulis ulang dengan parameter berbeda.',
+            };
+          }
+
+          if (!matchesManualRefundRequestId(trustedCompletion?.requestId || '', cleanRequestId)) {
+            return {
+              status: 409,
+              code: 'REFUND_TERMINAL_REQUEST_MISMATCH',
+              reviewRequired: true,
+              message: 'Status refund sudah selesai; requestId berbeda tidak diizinkan.',
             };
           }
 
@@ -5791,8 +6235,48 @@ async function startServer() {
           };
         }
 
-        // Check same-state no-op for non-completed statuses without an existing receipt
         const currentRefundStatus = textId(rec.refundStatus);
+
+        // REJECTED is terminal: only a full authoritative payload match may be a no-op.
+        if (currentRefundStatus === 'REJECTED' && newStatus === 'REJECTED') {
+          const authoritativeRejectionMatches = rejectionPayloadMatchesAuthoritativeState({
+            authoritative: rec,
+            incoming: {
+              actorUid: verifiedUid,
+              actorStaffId: managerCheck.actorStaffId,
+              actorName: managerCheck.actorName,
+              note: sanitizedNote,
+              refundAmount: validatedRefundAmount,
+              refundMethod: sanitizedMethod,
+              refundDate: sanitizedDate,
+              refundReference: sanitizedReference,
+              refundProofUrl: sanitizedProofUrl,
+            },
+          });
+          if (!authoritativeRejectionMatches) {
+            return {
+              status: 409,
+              code: 'REFUND_STATUS_TERMINAL',
+              message: 'Status refund ditolak bersifat terminal; payload berbeda tidak diizinkan.',
+            };
+          }
+          return {
+            caseId,
+            caseCode: persistedCaseCode,
+            bookingId: persistedBookingId || '',
+            bookingCode: canonicalBookingCode || '',
+            oldStatus: currentRefundStatus,
+            newStatus,
+            recovery: rec,
+            paymentHistoryLinked: false,
+            reviewRequired: false,
+            status: 200,
+            isIdempotent: true,
+            noOp: true,
+          };
+        }
+
+        // Check same-state no-op for non-terminal statuses without an existing receipt
         if (
           currentRefundStatus === newStatus &&
           (validatedRefundAmount === null || validatedRefundAmount === rec.refundAmount) &&
@@ -5814,6 +6298,14 @@ async function startServer() {
             status: 200,
             isIdempotent: true,
             noOp: true,
+          };
+        }
+
+        if (!canTransitionRefundStatus(currentRefundStatus, newStatus)) {
+          return {
+            status: 409,
+            code: 'REFUND_STATUS_TERMINAL',
+            message: 'Status refund bersifat terminal dan tidak dapat diubah.',
           };
         }
 
@@ -5866,6 +6358,24 @@ async function startServer() {
               status: 409,
               code: 'FOREIGN_PAYMENT_LINKAGE',
               message: 'ID pembayaran pada permintaan tidak sesuai dengan pembayaran sah reservasi ini.',
+            };
+          }
+        }
+
+        if (newStatus === 'COMPLETED_MANUAL') {
+          const claimCheck = evaluateRefundPaymentClaim({
+            targetPaymentId: linkedPayment ? linkedPayment.id : '',
+            linkedRefundPaymentId: textId(rec.refundPaymentId),
+            claimOwnerCaseId: linkedPayment ? textId(linkedPayment.data.refundClaimCaseId) : '',
+            claimStatus: linkedPayment ? textId(linkedPayment.data.refundClaimStatus) : '',
+            reservationOwnerCaseId: linkedPayment ? textId(linkedPayment.data.refundReservationCaseId) : '',
+            caseId,
+          });
+          if (!claimCheck.ok) {
+            return {
+              status: 409,
+              code: claimCheck.code || 'PAYMENT_REFUND_CLAIM_CONFLICT',
+              message: claimCheck.message || 'Pembayaran ini sudah terkait dengan kasus refund lain.',
             };
           }
         }
@@ -5931,6 +6441,14 @@ async function startServer() {
             updatedRec.refundPaymentId = linkedPayment.id;
             updatedRec.refundPaymentHistoryId = actualManualRefundHistId;
           }
+        }
+
+        if (newStatus === 'REJECTED') {
+          updatedRec.rejectedByUid = verifiedUid;
+          updatedRec.rejectedBy = managerCheck.actorStaffId;
+          updatedRec.rejectedByName = managerCheck.actorName;
+          updatedRec.rejectedAt = nowIso;
+          updatedRec.rejectionReason = sanitizedNote;
         }
 
         const caseEventId = cleanRequestId
@@ -6058,6 +6576,16 @@ async function startServer() {
             timestamp: nowIso,
           };
           transaction.set(actualManualRefundHistRef, paymentHistoryEntry);
+          if (newStatus === 'COMPLETED_MANUAL') {
+            // shortcut: claim permanen, release hanya bila transaksi rollback; upgrade bila aturan bisnis mengizinkan pembatalan refund.
+            transaction.update(adminDb.collection('payments').doc(linkedPayment.id), {
+              refundClaimCaseId: caseId,
+              refundClaimStatus: 'CLAIMED',
+              refundClaimedAt: nowIso,
+              refundClaimHistoryId: actualManualRefundHistId,
+              updatedAt: nowIso,
+            });
+          }
         }
 
         if (newStatus === 'COMPLETED_MANUAL' && effectiveRefundAmount !== undefined) {
