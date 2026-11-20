@@ -2757,53 +2757,61 @@ export async function cssConfirmBooking(
 }
 
 /**
- * CSS: Reschedule Booking
+ * CSS: Request reschedule from customer (does not change active schedule until customer approves).
+ * Server-authoritative for atomic validation and in-app notification creation.
  */
-export async function cssRescheduleBooking(
+export async function cssRequestRescheduleBooking(
   booking: Booking,
   newDate: string,
   newTime: string,
   cssStaffName: string,
-  notes?: string
+  notes?: string,
+  _cssStaffId?: string
 ): Promise<void> {
-  const ref = doc(db, 'bookings', booking.id);
-  const now = new Date().toISOString();
-  const oldSchedule = `${booking.scheduleDate} ${booking.scheduleTime} WIB`;
-  const newSchedule = `${newDate} ${newTime} WIB`;
-
-  await updateDoc(ref, {
-    scheduleDate: newDate,
-    scheduleTime: newTime,
-    scheduleAt: `${newDate} ${newTime}`,
-    status: 'Rescheduled',
-    updatedAt: now,
+  if (!newDate || !newTime) throw new Error('Tanggal dan jam usulan wajib diisi.');
+  if ((booking.scheduleDate || '') === newDate && (booking.scheduleTime || '') === newTime) {
+    throw new Error('Jadwal usulan harus berbeda dari jadwal aktif.');
+  }
+  const session = auth?.currentUser;
+  if (!session || typeof session.getIdToken !== 'function') {
+    throw new Error('Sesi staf tidak ditemukan. Silakan login ulang.');
+  }
+  const token = await session.getIdToken();
+  const res = await fetch(`/api/bookings/${encodeURIComponent(booking.id)}/reschedule-propose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ newDate, newTime, reason: notes || '', cssStaffName }),
   });
-
-  await addBookingStatusHistory(
-    booking.id,
-    booking.bookingCode,
-    'Rescheduled',
-    'css',
-    cssStaffName,
-    notes || `Jadwal diubah dari ${oldSchedule} ke ${newSchedule}`
-  );
-
-  await addOperationalAuditLog({
-    bookingId: booking.id,
-    bookingCode: booking.bookingCode,
-    customerId: booking.customerId,
-    therapistId: booking.therapistId,
-    therapistName: booking.therapistName,
-    action: 'reschedule',
-    actorRole: 'css',
-    actorName: cssStaffName,
-    oldValue: oldSchedule,
-    newValue: newSchedule,
-    reason: notes || 'Permintaan perubahan jadwal pelanggan',
-    note: `Rescheduled oleh CSS ${cssStaffName}`,
-  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || data?.error || 'Gagal mengajukan permintaan reschedule.');
+  }
 }
 
+/** @deprecated use cssRequestRescheduleBooking (proposal flow). */
+export const cssRescheduleBooking = cssRequestRescheduleBooking;
+
+export async function customerRespondRescheduleRequest(
+  booking: Booking,
+  action: 'approve' | 'reject',
+  requestId?: string,
+  note?: string
+): Promise<void> {
+  const session = auth?.currentUser;
+  if (!session || typeof session.getIdToken !== 'function') {
+    throw new Error('Silakan login sebagai customer untuk merespons permintaan reschedule.');
+  }
+  const token = await session.getIdToken();
+  const res = await fetch(`/api/bookings/${encodeURIComponent(booking.id)}/reschedule-respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action, requestId: requestId || booking.csRescheduleRequest?.id, note: note || '' }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || data?.error || 'Gagal memproses respons reschedule.');
+  }
+}
 /**
  * CSS: Cancel Booking
  */

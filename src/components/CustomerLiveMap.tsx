@@ -23,7 +23,17 @@ import {
   Phone
 } from 'lucide-react';
 import { Booking, TherapistLocation, AppSettings, OperationalSettings } from '../types';
-import { subscribeToTherapistLocation, calculateDistanceKm } from '../lib/dbService';
+import {
+  subscribeToTherapistLocation,
+  getTherapistLocation,
+  calculateDistanceKm,
+} from '../lib/dbService';
+import {
+  parseTherapistLocation,
+  getLocationFreshness,
+  locationAgeMs,
+  isValidLatLng,
+} from '../lib/locationTracking';
 import { emitEvent } from '../lib/notificationService';
 import { useGoogleMaps } from './GoogleMapsProvider';
 import { useCustomerServiceWhatsApp } from '../lib/supportWhatsApp';
@@ -102,7 +112,14 @@ function LiveRoutePolyline({
 }: {
   origin: { lat: number; lng: number };
   destination: { lat: number; lng: number };
-  onRouteCalculated: (result: { distanceText: string; durationText: string; distanceMeters: number } | null) => void;
+  onRouteCalculated: (
+    result: {
+      distanceText: string;
+      durationText: string;
+      distanceMeters: number;
+      durationMinutes: number;
+    } | null
+  ) => void;
   onRouteStatus: (status: 'available' | 'stale' | 'unavailable' | null) => void;
 }) {
   const map = useMap();
@@ -131,7 +148,9 @@ function LiveRoutePolyline({
   const routeRequestSeqRef = useRef<number>(0);
   const lastRouteRequestAtRef = useRef<number>(0);
   const routeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ROUTE_REQUEST_MIN_INTERVAL_MS = 30000;
+  // Menulis posisi tiap 10-30 detik; batas 10 detik hanya mencegah request ganda
+  // dari satu pembaruan, bukan menunda rute seperti batas 30 detik sebelumnya.
+  const ROUTE_REQUEST_MIN_INTERVAL_MS = 10000;
 
   const clearRouteTimeout = useCallback(() => {
     if (routeTimeoutRef.current) {
@@ -184,6 +203,7 @@ function LiveRoutePolyline({
               distanceText: distText,
               durationText: `${mins} mnt`,
               distanceMeters: meters,
+              durationMinutes: mins,
             });
           } else if (hasSameDestinationRoute) {
             // Pembaruan gagal untuk destination yang sama: pertahankan rute terakhir,
@@ -198,8 +218,8 @@ function LiveRoutePolyline({
 
           const hasSameDestinationRoute =
             lastGoodRouteRef.current &&
-            lastGoodRouteRef.current.destination.lat === destination.lat &&
-            lastGoodRouteRef.current.destination.lng === destination.lng;
+            lastGoodRouteRef.current.destination.lat === dst.lat &&
+            lastGoodRouteRef.current.destination.lng === dst.lng;
 
           if (hasSameDestinationRoute) {
             onRouteStatus?.('stale');
@@ -208,7 +228,7 @@ function LiveRoutePolyline({
           }
         });
     },
-    [destination.lat, destination.lng, onRouteCalculated, onRouteStatus]
+    [onRouteCalculated, onRouteStatus]
   );
 
   const compute = useCallback(() => {
@@ -229,9 +249,27 @@ function LiveRoutePolyline({
       return;
     }
 
+    clearRouteTimeout();
     lastRouteRequestAtRef.current = now;
     fireCompute(seq, originRef.current, destinationRef.current);
   }, [fireCompute, clearRouteTimeout]);
+
+  // 3. Jika destination booking berubah, reset rute. Efek ini harus berjalan
+  // sebelum efek compute agar request untuk tujuan baru tidak ikut dibatalkan.
+  const prevDestinationRef = useRef(destination);
+  useEffect(() => {
+    const prev = prevDestinationRef.current;
+    if (prev.lat === destination.lat && prev.lng === destination.lng) return;
+    prevDestinationRef.current = destination;
+    // Invalidasi request yang masih berjalan agar hasil destinasi lama tidak menimpa.
+    routeRequestSeqRef.current++;
+    lastRouteRequestAtRef.current = 0;
+    clearRouteTimeout();
+    lastGoodRouteRef.current = null;
+    setRoutePath(null);
+    onRouteStatus?.(null);
+    onRouteCalculated?.(null);
+  }, [destination.lat, destination.lng, onRouteStatus, onRouteCalculated, clearRouteTimeout]);
 
   useEffect(() => {
     if (!map || !routesLib) return;
@@ -244,15 +282,6 @@ function LiveRoutePolyline({
       clearRouteTimeout();
     };
   }, [map, routesLib, origin.lat, origin.lng, destination.lat, destination.lng, compute]);
-
-  // 3. Jika destination booking berubah, reset routePath, lastGoodRouteRef,
-  // routeStatus, dan routeInfo. Data booking lama tidak boleh tampil pada booking baru.
-  useEffect(() => {
-    lastGoodRouteRef.current = null;
-    setRoutePath(null);
-    onRouteStatus?.(null);
-    onRouteCalculated?.(null);
-  }, [destination.lat, destination.lng, onRouteStatus, onRouteCalculated]);
 
   // 5. Lifecycle polyline:
   // - Buat objek saat map tersedia (hanya sekali).
@@ -306,62 +335,89 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
     distanceText: string;
     durationText: string;
     distanceMeters: number;
+    durationMinutes: number;
   } | null>(null);
   const [routeStatus, setRouteStatus] = useState<'available' | 'stale' | 'unavailable' | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const hasEmittedNearbyRef = useRef<boolean>(false);
 
   const isOnTheWay = booking.status === 'On The Way';
   const isPostOnTheWay = ['Arrived', 'Treatment', 'Completed'].includes(booking.status);
 
   // Customer Target Coordinates
-  const hasCustomerCoords = booking.latitude != null && booking.longitude != null;
+  const hasCustomerCoords = isValidLatLng(booking.latitude, booking.longitude);
   const customerPos = {
-    lat: booking.latitude ?? -2.976074,
-    lng: booking.longitude ?? 104.757305,
+    lat: booking.latitude ?? 0,
+    lng: booking.longitude ?? 0,
   };
 
   // Subscribe to therapist realtime location updates
   useEffect(() => {
-    if (!booking.id || !isOnTheWay) return;
+    if (!booking.id || !isOnTheWay) {
+      setTherapistLoc(null);
+      return;
+    }
 
     const unsubscribe = subscribeToTherapistLocation(booking.id, (loc) => {
-      if (loc) {
-        setTherapistLoc(loc);
-        setLastRefreshedAt(new Date().toLocaleTimeString('id-ID'));
-      }
+      // Validasi identitas booking, koordinat, akurasi, dan timestamp sebelum dipakai.
+      setTherapistLoc(parseTherapistLocation(loc, booking.id));
     });
 
     return () => unsubscribe();
   }, [booking.id, isOnTheWay]);
 
-  // Fallback therapist starting point if not yet emitted
-  const effectiveTherapistPos = therapistLoc
-    ? { lat: therapistLoc.latitude, lng: therapistLoc.longitude }
-    : {
-        lat: (settings?.baseLatitude ?? -2.976074) + 0.008,
-        lng: (settings?.baseLongitude ?? 104.757305) - 0.005,
-      };
+  // Label LIVE/STALE/OFFLINE harus ikut berubah walau tidak ada snapshot baru.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
-  const mapCenter = hasCustomerCoords ? customerPos : effectiveTherapistPos;
+  const freshness = therapistLoc ? getLocationFreshness(therapistLoc, now) : 'OFFLINE';
+  const hasLiveGps = freshness === 'LIVE';
+  const hasKnownGps = (freshness === 'LIVE' || freshness === 'STALE') && therapistLoc != null;
+  const therapistPos =
+    therapistLoc && hasKnownGps
+      ? { lat: therapistLoc.latitude, lng: therapistLoc.longitude }
+      : null;
+
+  // Pusat peta bukan posisi terapis; fallback hanya untuk viewport peta.
+  const mapCenter =
+    hasCustomerCoords
+      ? customerPos
+      : therapistPos ?? {
+          lat: settings?.baseLatitude ?? -2.976074,
+          lng: settings?.baseLongitude ?? 104.757305,
+        };
 
   // Direct distance calculation
-  const straightDistKm = hasCustomerCoords
-    ? calculateDistanceKm(
-        effectiveTherapistPos.lat,
-        effectiveTherapistPos.lng,
-        customerPos.lat,
-        customerPos.lng
-      )
-    : 0;
+  const straightDistKm =
+    hasCustomerCoords && therapistPos
+      ? calculateDistanceKm(
+          therapistPos.lat,
+          therapistPos.lng,
+          customerPos.lat,
+          customerPos.lng
+        )
+      : null;
 
   // Nearby condition: straight distance <= nearbyDistanceKm or route distance <= nearbyDistanceMeters or duration <= 5 mins
-  const isNearby = isOnTheWay && (
-    straightDistKm <= nearbyDistanceKm ||
-    (routeInfo != null && (routeInfo.distanceMeters <= nearbyDistanceMeters || routeInfo.durationText.includes('1 ') || routeInfo.durationText.includes('2 ') || routeInfo.durationText.includes('3 ') || routeInfo.durationText.includes('4 ') || routeInfo.durationText.includes('5 ')))
-  );
+  const isNearby =
+    isOnTheWay &&
+    hasLiveGps &&
+    ((straightDistKm != null && straightDistKm <= nearbyDistanceKm) ||
+      (routeInfo != null &&
+        (routeInfo.distanceMeters <= nearbyDistanceMeters ||
+          routeInfo.durationMinutes <= 5)));
+
+  // Rute dan estimasi hanya valid untuk posisi GPS live; jangan tampilkan angka lama.
+  useEffect(() => {
+    if (!hasLiveGps) {
+      setRouteInfo(null);
+      setRouteStatus(null);
+    }
+  }, [hasLiveGps]);
 
   useEffect(() => {
     if (onNearbyChange) {
@@ -383,12 +439,17 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
     }
   }, [isNearby, booking, onNearbyChange]);
 
-  const handleManualRefresh = () => {
+  const handleManualRefresh = async () => {
+    if (isRefreshing) return;
     setIsRefreshing(true);
-    setTimeout(() => {
+    try {
+      const loc = await getTherapistLocation(booking.id);
+      setTherapistLoc(parseTherapistLocation(loc, booking.id));
+    } catch {
+      // Subscription realtime tetap menjadi sumber utama.
+    } finally {
       setIsRefreshing(false);
-      setLastRefreshedAt(new Date().toLocaleTimeString('id-ID'));
-    }, 600);
+    }
   };
 
   const handleCopy = () => {
@@ -397,8 +458,15 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
     setTimeout(() => setIsCopied(false), 2500);
   };
 
+  const lastUpdateLabel = therapistLoc
+    ? new Date(therapistLoc.updatedAtMillis).toLocaleTimeString('id-ID')
+    : '';
+  const ageMinutes = therapistLoc ? Math.floor(locationAgeMs(therapistLoc, now) / 60000) : 0;
+
   const externalMapsUrl = hasCustomerCoords
-    ? `https://www.google.com/maps/dir/?api=1&origin=${effectiveTherapistPos.lat},${effectiveTherapistPos.lng}&destination=${customerPos.lat},${customerPos.lng}`
+    ? therapistPos
+      ? `https://www.google.com/maps/dir/?api=1&origin=${therapistPos.lat},${therapistPos.lng}&destination=${customerPos.lat},${customerPos.lng}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${customerPos.lat},${customerPos.lng}`
     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.address + ' Palembang')}`;
 
   const {
@@ -419,11 +487,25 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                {hasLiveGps && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span
+                  className={`relative inline-flex rounded-full h-3 w-3 ${
+                    hasLiveGps ? 'bg-emerald-500' : freshness === 'STALE' ? 'bg-amber-400' : 'bg-slate-400'
+                  }`}
+                ></span>
               </span>
-              <span className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
-                Live GPS Aktif
+              <span
+                className={`text-xs font-bold uppercase tracking-wider ${
+                  hasLiveGps ? 'text-[#D4AF37]' : freshness === 'STALE' ? 'text-amber-200' : 'text-slate-300'
+                }`}
+              >
+                {hasLiveGps
+                  ? 'LIVE • GPS Aktif'
+                  : freshness === 'STALE'
+                  ? 'STALE • Posisi Terakhir'
+                  : 'OFFLINE • Menunggu GPS'}
               </span>
             </div>
 
@@ -434,7 +516,7 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               className="text-[11px] bg-white/15 hover:bg-white/25 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition active:scale-95 cursor-pointer font-medium"
             >
               <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span>{isRefreshing ? 'Memperbarui...' : lastRefreshedAt ? `Update: ${lastRefreshedAt}` : 'Refresh'}</span>
+              <span>{isRefreshing ? 'Memperbarui...' : lastUpdateLabel ? `Update: ${lastUpdateLabel}` : 'Refresh'}</span>
             </button>
           </div>
 
@@ -451,19 +533,26 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               <p className="text-xs text-slate-300 mt-0.5">
                 {booking.therapistName ? `${booking.therapistName} sedang berkendara menuju alamat Anda.` : 'Terapis sedang dalam perjalanan.'}
               </p>
+              <p className="text-[11px] text-slate-300/90 mt-1">
+                {hasLiveGps
+                  ? `Posisi GPS terakhir: ${lastUpdateLabel} (±${therapistLoc?.accuracy ?? 0}m).`
+                  : freshness === 'STALE'
+                  ? `Posisi terakhir ${ageMinutes} menit lalu. Menunggu pembaruan GPS terapis...`
+                  : 'Belum ada posisi GPS terapis. Rute dan estimasi tiba ditampilkan setelah GPS aktif.'}
+              </p>
             </div>
 
             <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/15 flex items-center gap-3">
               <div>
                 <span className="text-[10px] text-slate-300 block uppercase">Estimasi Tiba</span>
                 <span className="text-sm font-bold text-[#FDF3CD]">
-                  {routeInfo?.durationText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : '–')}
+                  {routeInfo?.durationText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : hasLiveGps ? '–' : 'Menunggu GPS')}
                 </span>
               </div>
               <div className="border-l border-white/20 pl-3">
                 <span className="text-[10px] text-slate-300 block uppercase">Jarak Tempuh</span>
                 <span className="text-sm font-bold text-white">
-                  {routeInfo?.distanceText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : '–')}
+                  {routeInfo?.distanceText || (routeStatus === 'unavailable' ? 'Tidak tersedia' : hasLiveGps ? '–' : 'Menunggu GPS')}
                 </span>
               </div>
             </div>
@@ -553,31 +642,60 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                 </AdvancedMarker>
               )}
 
-              {/* Therapist Realtime Moving Pin (When On The Way) */}
-              {isOnTheWay && (
+              {/* Therapist Realtime Moving Pin (only from actual GPS) */}
+              {isOnTheWay && therapistPos && (
                 <AdvancedMarker
-                  position={effectiveTherapistPos}
-                  title={`Posisi Terapis (${booking.therapistName || 'Terapis'})`}
+                  position={therapistPos}
+                  title={
+                    hasLiveGps
+                      ? `Posisi Terapis (${booking.therapistName || 'Terapis'})`
+                      : `Posisi terakhir terapis (${booking.therapistName || 'Terapis'}), bukan posisi live`
+                  }
                 >
-                  <div className="relative flex flex-col items-center justify-center -translate-y-8 select-none animate-bounce">
-                    <div className="w-9 h-9 rounded-full bg-[#8B5A36] border-2 border-[#D4AF37] shadow-lg flex items-center justify-center text-[#D4AF37]">
+                  <div
+                    className={`relative flex flex-col items-center justify-center -translate-y-8 select-none ${
+                      hasLiveGps ? 'animate-bounce' : 'opacity-80'
+                    }`}
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-full border-2 shadow-lg flex items-center justify-center ${
+                        hasLiveGps
+                          ? 'bg-[#8B5A36] border-[#D4AF37] text-[#D4AF37]'
+                          : 'bg-slate-400 border-slate-300 text-white'
+                      }`}
+                    >
                       <Car className="w-5 h-5" />
                     </div>
-                    <div className="w-2.5 h-2.5 bg-[#8B5A36] border-r-2 border-b-2 border-[#D4AF37] rotate-45 -mt-1" />
+                    <div
+                      className={`w-2.5 h-2.5 border-r-2 border-b-2 rotate-45 -mt-1 ${
+                        hasLiveGps ? 'bg-[#8B5A36] border-[#D4AF37]' : 'bg-slate-400 border-slate-300'
+                      }`}
+                    />
                   </div>
                 </AdvancedMarker>
               )}
 
-              {/* Live Driving Route Polyline */}
-              {isOnTheWay && hasCustomerCoords && (
+              {/* Live Driving Route Polyline — only when GPS is live */}
+              {isOnTheWay && hasLiveGps && hasCustomerCoords && therapistPos && (
                 <LiveRoutePolyline
-                  origin={effectiveTherapistPos}
+                  origin={therapistPos}
                   destination={customerPos}
                   onRouteCalculated={setRouteInfo}
                   onRouteStatus={setRouteStatus}
                 />
               )}
             </Map>
+
+            {/* Posisi belum tersedia / stale */}
+            {isOnTheWay && !hasLiveGps && (
+              <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none px-3">
+                <span className="bg-white/95 backdrop-blur-xs px-3 py-1.5 rounded-xl shadow-md border border-slate-200 text-[10px] font-semibold text-slate-700 text-center">
+                  {freshness === 'STALE'
+                    ? `Posisi terakhir ${ageMinutes} menit lalu — bukan posisi live.`
+                    : 'Menunggu posisi GPS terapis...'}
+                </span>
+              </div>
+            )}
 
             {/* Status rute jalan */}
             {isOnTheWay && hasCustomerCoords && routeStatus === 'unavailable' && (
@@ -597,10 +715,10 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                 <MapPin className="w-3 h-3 text-rose-600" />
                 Alamat Customer
               </span>
-              {isOnTheWay && (
+              {isOnTheWay && therapistPos && (
                 <span className="flex items-center gap-1 font-semibold text-[#4B2B18]">
                   <Navigation className="w-3 h-3 text-[#4B2B18]" />
-                  Terapis (Live)
+                  {hasLiveGps ? 'Terapis (Live)' : 'Terapis (posisi terakhir)'}
                 </span>
               )}
             </div>
@@ -615,8 +733,26 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
               Navigasi Perjalanan Terapis
             </span>
             <span className="text-[11px] font-medium text-slate-500">
-              Jarak Langsung: <strong className="text-slate-800">{straightDistKm} KM</strong>
+              Jarak Langsung:{' '}
+              <strong className="text-slate-800">
+                {straightDistKm != null ? `${straightDistKm} KM` : '–'}
+              </strong>
             </span>
+          </div>
+
+          {/* Status sumber posisi pada mode fallback */}
+          <div className="text-[10px] font-semibold">
+            {hasLiveGps ? (
+              <span className="text-emerald-700">
+                LIVE • GPS aktif (akurasi ±{therapistLoc?.accuracy ?? 0}m, update {lastUpdateLabel})
+              </span>
+            ) : freshness === 'STALE' ? (
+              <span className="text-amber-700">
+                STALE • Posisi terakhir {ageMinutes} menit lalu (bukan posisi live)
+              </span>
+            ) : (
+              <span className="text-slate-500">OFFLINE • Menunggu posisi GPS terapis</span>
+            )}
           </div>
 
           <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-300">
@@ -630,7 +766,9 @@ export const CustomerLiveMap: React.FC<CustomerLiveMapProps> = ({ booking, setti
                   {booking.therapistName || 'Terapis Senzu'}
                 </div>
                 <div className="text-[11px] text-slate-500 font-mono">
-                  Koordinat: {effectiveTherapistPos.lat.toFixed(4)}, {effectiveTherapistPos.lng.toFixed(4)}
+                  {therapistPos
+                    ? `Koordinat: ${therapistPos.lat.toFixed(4)}, ${therapistPos.lng.toFixed(4)}`
+                    : 'Koordinat: belum tersedia'}
                 </div>
               </div>
             </div>

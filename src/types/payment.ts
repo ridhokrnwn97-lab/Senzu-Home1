@@ -133,6 +133,19 @@ export interface PaymentRecord {
   cancelledAt?: string;
   refundedAt?: string;
   
+  // Refund claim (permanent: one payment belongs to one refund case)
+  refundClaimCaseId?: string;
+  refundClaimStatus?: 'CLAIMED';
+  refundClaimedAt?: string;
+  refundClaimHistoryId?: string;
+
+  // Approval-stage reservation (distinct from the permanent completion claim)
+  refundReservationCaseId?: string;
+  refundReservationStatus?: 'RESERVED' | 'RELEASED';
+  refundReservedAt?: string;
+  refundReservationReleasedAt?: string;
+  refundReservationReleaseReason?: string;
+
   // Refund fields
   refundAmount?: number;
   refundReason?: string;
