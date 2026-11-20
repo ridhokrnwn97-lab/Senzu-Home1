@@ -16539,6 +16539,434 @@ async function startServer() {
   app.post('/api/booking-status-history/append', handleBookingStatusHistoryAppend);
 
   // =============================================================
+  // CS RESCHEDULE REQUEST & CUSTOMER APPROVAL (server-authoritative)
+  // =============================================================
+  const isValidBookingDocId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v.trim());
+  const cleanText = (v: unknown, max = 500): string => typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, max) : '';
+  const isoNow = () => new Date().toISOString();
+  const formatDateTimeWIBServer = (dateOrIso: string | Date): string => {
+    try {
+      const d = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso;
+      if (isNaN(d.getTime())) return String(dateOrIso);
+      const dateFormatted = new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(d);
+      return `${dateFormatted} WIB`;
+    } catch { return String(dateOrIso); }
+  };
+  const isValidYmd = (v: string): boolean => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const [ys, ms, ds] = v.split('-');
+    const y = Number(ys), m = Number(ms), d = Number(ds);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  };
+  const isValidHm = (v: string): boolean => {
+    if (!/^\d{2}:\d{2}$/.test(v)) return false;
+    const [hs, ms] = v.split(':');
+    const h = Number(hs), m = Number(ms);
+    return Number.isInteger(h) && Number.isInteger(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59;
+  };
+  const isValidSchedulePair = (date: string, time: string): boolean => isValidYmd(date) && isValidHm(time);
+  const getBookingCustomerAuthUid = (booking: any): string | undefined => {
+    for (const v of [booking?.customerAuthUid, booking?.authUserId]) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return undefined;
+  };
+  const getEffectiveTaskStatus = (booking: any): string => {
+    const raw = typeof booking?.taskStatus === 'string' ? booking.taskStatus.trim() : '';
+    return raw || 'Open';
+  };
+
+  async function verifyBearerUid(req: any): Promise<string | null> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.split('Bearer ')[1]?.trim();
+    if (!token) return null;
+    const verified = await adminAuth?.verifyIdToken(token).catch(() => null);
+    return verified?.uid || null;
+  }
+
+  app.post('/api/bookings/:bookingId/reschedule-propose', async (req, res) => {
+    const requestId = (req as any).id;
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server tidak tersedia.', requestId });
+      const bookingId = isValidBookingDocId(req.params.bookingId) ? req.params.bookingId.trim() : '';
+      if (!bookingId) return res.status(400).json({ success: false, code: 'INVALID_BOOKING_ID', message: 'ID booking tidak valid.', requestId });
+      const staffUid = await verifyBearerUid(req);
+      if (!staffUid) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', message: 'Sesi staf diperlukan.', requestId });
+      const roleDoc = await adminDb.collection('staff_roles').doc(staffUid).get();
+      if (!roleDoc.exists) return res.status(403).json({ success: false, code: 'PERMISSION_DENIED', message: 'Identitas staf tidak terdaftar.', requestId });
+      const roleData = roleDoc.data() as any;
+      if (!roleData?.isActive || !['css', 'supervisor', 'manager', 'admin'].includes(roleData.role)) {
+        return res.status(403).json({ success: false, code: 'PERMISSION_DENIED', message: 'Hanya staf operasional berwenang mengajukan reschedule.', requestId });
+      }
+      const staffRole = cleanText(roleData.role, 20).toLowerCase() as 'css' | 'supervisor' | 'manager' | 'admin';
+      const staffName = cleanText(roleData.name || req.body?.cssStaffName || 'CSS Senzu', 80) || 'CSS Senzu';
+      const newDate = cleanText(req.body?.newDate, 20);
+      const newTime = cleanText(req.body?.newTime, 20);
+      const reason = cleanText(req.body?.reason || req.body?.notes, 500);
+      if (!isValidSchedulePair(newDate, newTime)) {
+        return res.status(400).json({ success: false, code: 'INVALID_SCHEDULE', message: 'Tanggal/jam usulan tidak valid (gunakan tanggal kalender valid dan jam 00:00–23:59).', requestId });
+      }
+
+      const now = isoNow();
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const snap = await t.get(bookingRef);
+        if (!snap.exists) throw Object.assign(new Error('Pesanan tidak ditemukan.'), { statusCode: 404, code: 'BOOKING_NOT_FOUND' });
+        const booking = snap.data() as any;
+        if (['Completed', 'Cancelled', 'Treatment', 'On The Way', 'Arrived'].includes(booking.status)) {
+          throw Object.assign(new Error('Status booking saat ini tidak dapat diajukan reschedule.'), { statusCode: 409, code: 'INVALID_BOOKING_STATUS' });
+        }
+        if (booking.csRescheduleRequest?.status === 'pending_customer') {
+          throw Object.assign(new Error('Masih ada permintaan reschedule yang menunggu konfirmasi customer.'), { statusCode: 409, code: 'REQUEST_ALREADY_PENDING' });
+        }
+        const oldDate = cleanText(booking.scheduleDate, 20);
+        const oldTime = cleanText(booking.scheduleTime, 20);
+        if (!isValidSchedulePair(oldDate, oldTime)) {
+          throw Object.assign(new Error('Jadwal aktif booking tidak valid; tidak dapat mengajukan reschedule.'), { statusCode: 409, code: 'INVALID_ACTIVE_SCHEDULE' });
+        }
+        if (oldDate === newDate && oldTime === newTime) {
+          throw Object.assign(new Error('Jadwal usulan harus berbeda dari jadwal aktif.'), { statusCode: 400, code: 'SAME_SCHEDULE' });
+        }
+
+        let recipientAuthUid = getBookingCustomerAuthUid(booking);
+        if (!recipientAuthUid && typeof booking.customerId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(booking.customerId.trim())) {
+          const custSnap = await t.get(adminDb.collection('customers').doc(booking.customerId.trim()));
+          if (custSnap.exists) {
+            const cust = custSnap.data() || {};
+            const custAuth = [cust.authUserId, cust.customerAuthUid].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+            if (custAuth.length > 0) recipientAuthUid = custAuth[0];
+          }
+        }
+        if (!recipientAuthUid) {
+          throw Object.assign(new Error('Pemilik booking (Firebase Auth UID) belum terpetakan/terverifikasi. Lakukan pemetaan identitas customer ke akun login sebelum mengajukan reschedule.'), { statusCode: 409, code: 'CUSTOMER_AUTH_MAPPING_REQUIRED' });
+        }
+
+        const reqObjId = `csr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const oldScheduleAt = cleanText(booking.scheduleAt || `${oldDate} ${oldTime}`, 60);
+        const proposedScheduleAt = `${newDate} ${newTime}`;
+        const previousTaskStatus = getEffectiveTaskStatus(booking);
+        const csRescheduleRequest = {
+          id: reqObjId,
+          status: 'pending_customer',
+          requestedByRole: staffRole,
+          requestedById: roleData.staffId || staffUid,
+          requestedByName: staffName,
+          requestedAt: now,
+          oldScheduleDate: oldDate,
+          oldScheduleTime: oldTime,
+          oldScheduleAt,
+          proposedScheduleDate: newDate,
+          proposedScheduleTime: newTime,
+          proposedScheduleAt,
+          previousTaskStatus,
+          ...(reason ? { reason } : {}),
+        };
+        t.update(bookingRef, { csRescheduleRequest, taskStatus: 'Waiting Customer', updatedAt: now });
+
+        const eventId = `evt_resched_req_${reqObjId}`;
+        const notifId = `notif_resched_req_${bookingId}_${reqObjId}`;
+        const notif = {
+          id: notifId,
+          eventId,
+          eventType: 'booking.reschedule_requested',
+          recipientRole: 'customer',
+          recipientUserId: recipientAuthUid,
+          bookingId,
+          bookingCode: booking.bookingCode || '',
+          customerId: booking.customerId || undefined,
+          title: 'Permintaan Perubahan Jadwal',
+          message: `CS mengajukan perubahan jadwal pesanan #${booking.bookingCode || bookingId}: ${oldScheduleAt} → ${proposedScheduleAt}. Mohon konfirmasi persetujuan Anda.`,
+          channel: 'in_app',
+          priority: 'HIGH',
+          read: false,
+          readAt: null,
+          actionUrl: `/portal?booking=${booking.bookingCode || bookingId}&reschedule=pending`,
+          metadata: { bookingId, bookingCode: booking.bookingCode, customerId: booking.customerId, oldScheduleAt, proposedScheduleAt, requestId: reqObjId },
+          createdAt: now,
+        };
+        t.set(adminDb.collection('notification_events').doc(eventId), {
+          id: eventId, eventType: 'booking.reschedule_requested', bookingId, actorId: roleData.staffId || staffUid, actorRole: staffRole,
+          payload: notif.metadata, createdAt: now, status: 'processed', processedAt: now,
+        }, { merge: false });
+        t.set(adminDb.collection('notifications').doc(notifId), notif, { merge: false });
+
+        const histRef = adminDb.collection('booking_status_history').doc();
+        t.set(histRef, {
+          id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+          note: `Permintaan reschedule dikirim ke customer: ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB. Menunggu konfirmasi customer.`,
+          updatedByRole: staffRole, updatedByName: staffName, timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          requestId: `req_${reqObjId}`,
+        });
+        const auditRef = adminDb.collection('operational_audit_logs').doc();
+        t.set(auditRef, {
+          id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+          therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+          action: 'reschedule', actorRole: staffRole, actorName: staffName,
+          oldValue: oldScheduleAt, newValue: `${proposedScheduleAt} (menunggu konfirmasi customer)`,
+          reason: reason || 'Permintaan perubahan jadwal oleh staf menunggu persetujuan customer',
+          note: `Permintaan reschedule (${reqObjId}) diajukan; jadwal aktif belum berubah`,
+          timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+        });
+
+        return { request: csRescheduleRequest };
+      });
+      return res.json({ success: true, requestId, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ success: false, code: err?.code || 'INTERNAL_ERROR', message: err?.message || 'Gagal mengajukan reschedule.', requestId });
+    }
+  });
+
+  app.post('/api/bookings/:bookingId/reschedule-respond', async (req, res) => {
+    const requestId = (req as any).id;
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server tidak tersedia.', requestId });
+      const bookingId = isValidBookingDocId(req.params.bookingId) ? req.params.bookingId.trim() : '';
+      if (!bookingId) return res.status(400).json({ success: false, code: 'INVALID_BOOKING_ID', message: 'ID booking tidak valid.', requestId });
+      const customerUid = await verifyBearerUid(req);
+      if (!customerUid) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', message: 'Sesi customer diperlukan.', requestId });
+      const action = cleanText(req.body?.action, 20).toLowerCase();
+      const requestKey = cleanText(req.body?.requestId, 64);
+      const responseNote = cleanText(req.body?.note, 500);
+      if (!['approve', 'reject'].includes(action)) {
+        return res.status(400).json({ success: false, code: 'INVALID_ACTION', message: 'Aksi harus approve atau reject.', requestId });
+      }
+      if (!requestKey) {
+        return res.status(400).json({ success: false, code: 'REQUEST_ID_REQUIRED', message: 'requestId permintaan reschedule wajib dikirim.', requestId });
+      }
+
+      const now = isoNow();
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const snap = await t.get(bookingRef);
+        if (!snap.exists) throw Object.assign(new Error('Pesanan tidak ditemukan.'), { statusCode: 404, code: 'BOOKING_NOT_FOUND' });
+        const booking = snap.data() as any;
+        const reqObj = booking.csRescheduleRequest;
+        const storedRequestId = cleanText(reqObj?.id, 64);
+        if (!storedRequestId) {
+          throw Object.assign(new Error('Permintaan reschedule aktif tidak valid.'), { statusCode: 409, code: 'INVALID_REQUEST_ID' });
+        }
+        if (!reqObj || reqObj.status !== 'pending_customer') {
+          throw Object.assign(new Error('Tidak ada permintaan reschedule yang menunggu konfirmasi.'), { statusCode: 409, code: 'NO_PENDING_REQUEST' });
+        }
+        if (requestKey !== storedRequestId) {
+          throw Object.assign(new Error('Permintaan reschedule tidak cocok atau sudah diperbarui.'), { statusCode: 409, code: 'REQUEST_MISMATCH' });
+        }
+
+        const directOwnerUids = [booking.customerAuthUid, booking.authUserId].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+        let ownerVerified = directOwnerUids.includes(customerUid);
+        let mappedCustomerAuthUid: string | undefined = directOwnerUids[0];
+        if (!ownerVerified && typeof booking.customerId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(booking.customerId.trim())) {
+          const custSnap = await t.get(adminDb.collection('customers').doc(booking.customerId.trim()));
+          if (custSnap.exists) {
+            const cust = custSnap.data() || {};
+            const custAuth = [cust.authUserId, cust.customerAuthUid].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+            if (custAuth.includes(customerUid)) {
+              ownerVerified = true;
+              mappedCustomerAuthUid = customerUid;
+            } else if (!mappedCustomerAuthUid && custAuth.length > 0) {
+              mappedCustomerAuthUid = custAuth[0];
+            }
+          }
+        }
+        if (!ownerVerified) {
+          throw Object.assign(new Error('Anda tidak berwenang merespons permintaan ini.'), { statusCode: 403, code: 'NOT_BOOKING_OWNER' });
+        }
+
+        const prevTaskStatus = typeof reqObj.previousTaskStatus === 'string' && reqObj.previousTaskStatus.trim()
+          ? reqObj.previousTaskStatus.trim()
+          : 'Open';
+        const currentTaskStatus = getEffectiveTaskStatus(booking);
+        const restoredTaskStatus = currentTaskStatus === 'Waiting Customer' ? prevTaskStatus : currentTaskStatus;
+        const oldScheduleDate = cleanText(reqObj.oldScheduleDate || booking.scheduleDate, 20);
+        const oldScheduleTime = cleanText(reqObj.oldScheduleTime || booking.scheduleTime, 20);
+        const oldScheduleAt = cleanText(reqObj.oldScheduleAt || `${oldScheduleDate} ${oldScheduleTime}`, 60);
+        const proposedDate = cleanText(reqObj.proposedScheduleDate, 20);
+        const proposedTime = cleanText(reqObj.proposedScheduleTime, 20);
+        const proposedScheduleAt = cleanText(reqObj.proposedScheduleAt || `${proposedDate} ${proposedTime}`, 60);
+        const recipientCustomerAuthUid = getBookingCustomerAuthUid(booking) || mappedCustomerAuthUid || customerUid;
+
+        if (String(booking.status || '').toLowerCase() === 'cancelled') {
+          const cancelledReq = { ...reqObj, status: 'cancelled', respondedAt: now, responseNote: responseNote || 'Booking dibatalkan' };
+          t.update(bookingRef, { csRescheduleRequest: cancelledReq, taskStatus: restoredTaskStatus, updatedAt: now });
+          const histRef = adminDb.collection('booking_status_history').doc();
+          t.set(histRef, {
+            id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || 'Cancelled',
+            note: `Permintaan reschedule (${storedRequestId}) ditandai cancelled karena booking telah dibatalkan. Jadwal aktif tidak berubah.`,
+            updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            requestId: `req_${storedRequestId}_cancelled`,
+          });
+          const auditRef = adminDb.collection('operational_audit_logs').doc();
+          t.set(auditRef, {
+            id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+            action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+            oldValue: oldScheduleAt, newValue: `${oldScheduleAt} (permintaan dibatalkan, jadwal aktif tetap)`,
+            reason: responseNote || 'Booking dibatalkan saat respons reschedule',
+            note: `Permintaan ${storedRequestId} ditandai cancelled; jadwal aktif tidak berubah`,
+            timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          });
+          return {
+            conflict: { status: 409, code: 'BOOKING_CANCELLED', message: 'Booking telah dibatalkan; permintaan reschedule ditandai cancelled dan tidak dapat diproses.' },
+            action: 'cancelled',
+            request: cancelledReq,
+          };
+        }
+
+        if (action === 'approve') {
+          if (!isValidSchedulePair(proposedDate, proposedTime)) {
+            throw Object.assign(new Error('Data jadwal usulan tidak valid (tanggal/jam kalender tidak sah).'), { statusCode: 409, code: 'INVALID_PROPOSED_SCHEDULE' });
+          }
+          if (!isValidSchedulePair(oldScheduleDate, oldScheduleTime)) {
+            throw Object.assign(new Error('Data jadwal awal pada permintaan tidak valid.'), { statusCode: 409, code: 'INVALID_OLD_SCHEDULE' });
+          }
+          const activeDate = cleanText(booking.scheduleDate, 20);
+          const activeTime = cleanText(booking.scheduleTime, 20);
+          if (activeDate !== oldScheduleDate || activeTime !== oldScheduleTime) {
+            const conflictMessage = `Jadwal aktif booking telah berubah (aktif: ${activeDate} ${activeTime} WIB, permintaan: ${oldScheduleDate} ${oldScheduleTime} WIB). Permintaan ditandai konflik dan tidak diterapkan.`;
+            const conflictedReq = { ...reqObj, status: 'conflicted', respondedAt: now, conflictedAt: now, conflictMessage, ...(responseNote ? { responseNote } : {}) };
+            t.update(bookingRef, { csRescheduleRequest: conflictedReq, taskStatus: restoredTaskStatus, updatedAt: now });
+            const histRef = adminDb.collection('booking_status_history').doc();
+            t.set(histRef, {
+              id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+              note: `Konflik reschedule (${storedRequestId}): jadwal aktif ${activeDate} ${activeTime} WIB berbeda dari jadwal permintaan ${oldScheduleDate} ${oldScheduleTime} WIB. Jadwal aktif tidak diubah.`,
+              updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+              requestId: `req_${storedRequestId}_conflicted`,
+            });
+            const auditRef = adminDb.collection('operational_audit_logs').doc();
+            t.set(auditRef, {
+              id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+              therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+              action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+              oldValue: `${activeDate} ${activeTime} (aktif)`, newValue: `${oldScheduleDate} ${oldScheduleTime} (permintaan, tidak diterapkan)`,
+              reason: conflictMessage,
+              note: `Permintaan ${storedRequestId} ditandai conflicted; jadwal aktif tidak diubah`,
+              timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            });
+            return {
+              conflict: { status: 409, code: 'SCHEDULE_CONFLICT', message: conflictMessage },
+              action: 'conflicted',
+              request: conflictedReq,
+            };
+          }
+          if (['Completed', 'Treatment', 'On The Way', 'Arrived'].includes(booking.status)) {
+            throw Object.assign(new Error('Status booking saat ini tidak dapat menerapkan reschedule.'), { statusCode: 409, code: 'INVALID_BOOKING_STATUS' });
+          }
+          const updatedRequest = { ...reqObj, status: 'approved', respondedAt: now, ...(responseNote ? { responseNote } : {}) };
+          t.update(bookingRef, {
+            scheduleDate: proposedDate,
+            scheduleTime: proposedTime,
+            scheduleAt: proposedScheduleAt,
+            status: 'Rescheduled',
+            csRescheduleRequest: updatedRequest,
+            taskStatus: restoredTaskStatus,
+            updatedAt: now,
+          });
+
+          const histRef = adminDb.collection('booking_status_history').doc();
+          t.set(histRef, {
+            id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: 'Rescheduled',
+            note: `Customer menyetujui reschedule: ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB.`,
+            updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            requestId: `req_${storedRequestId}_approved`,
+          });
+          const auditRef = adminDb.collection('operational_audit_logs').doc();
+          t.set(auditRef, {
+            id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+            action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+            oldValue: oldScheduleAt, newValue: proposedScheduleAt,
+            reason: responseNote || 'Customer menyetujui permintaan reschedule',
+            note: `Permintaan ${storedRequestId} disetujui customer; jadwal aktif diperbarui`,
+            timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          });
+          const eventId = `evt_resched_appr_${storedRequestId}`;
+          for (const [role, suffix] of [['css','css'], ['supervisor','supervisor'], ['customer','customer']] as const) {
+            const nid = `notif_resched_appr_${bookingId}_${storedRequestId}_${suffix}`;
+            t.set(adminDb.collection('notifications').doc(nid), {
+              id: nid, eventId, eventType: 'booking.reschedule_approved', recipientRole: role,
+              ...(role === 'customer' && recipientCustomerAuthUid ? { recipientUserId: recipientCustomerAuthUid } : {}),
+              bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+              title: role === 'customer' ? 'Perubahan Jadwal Disetujui' : role === 'css' ? 'Customer Menyetujui Reschedule' : 'Reschedule Disetujui Customer',
+              message: role === 'customer'
+                ? `Jadwal pesanan #${booking.bookingCode || bookingId} telah diperbarui menjadi ${proposedScheduleAt}.`
+                : `Order #${booking.bookingCode || bookingId} (${booking.customerName || 'Customer'}) disetujui pindah ke ${proposedScheduleAt}.`,
+              channel: 'in_app', priority: 'NORMAL', read: false, readAt: null,
+              actionUrl: role === 'customer' ? `/track/${booking.bookingCode || bookingId}` : role === 'css' ? `/css?booking=${booking.bookingCode || bookingId}` : `/supervisor?booking=${booking.bookingCode || bookingId}`,
+              metadata: { bookingId, bookingCode: booking.bookingCode, newScheduleAt: proposedScheduleAt, requestId: storedRequestId },
+              createdAt: now,
+            });
+          }
+          t.set(adminDb.collection('notification_events').doc(eventId), {
+            id: eventId, eventType: 'booking.reschedule_approved', bookingId, actorId: customerUid, actorRole: 'customer',
+            payload: { bookingId, bookingCode: booking.bookingCode, newScheduleAt: proposedScheduleAt, requestId: storedRequestId },
+            createdAt: now, status: 'processed', processedAt: now,
+          }, { merge: false });
+          return { action, request: updatedRequest };
+        }
+
+        const updatedRequest = { ...reqObj, status: 'rejected', respondedAt: now, ...(responseNote ? { responseNote } : {}) };
+        t.update(bookingRef, { csRescheduleRequest: updatedRequest, taskStatus: restoredTaskStatus, updatedAt: now });
+        const histRef = adminDb.collection('booking_status_history').doc();
+        t.set(histRef, {
+          id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+          note: `Customer menolak reschedule usulan ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB. Jadwal awal tetap berlaku.`,
+          updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          requestId: `req_${storedRequestId}_rejected`,
+        });
+        const auditRef = adminDb.collection('operational_audit_logs').doc();
+        t.set(auditRef, {
+          id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+          therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+          action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+          oldValue: oldScheduleAt, newValue: `${oldScheduleAt} (ditolak, jadwal awal tetap)`,
+          reason: responseNote || 'Customer menolak permintaan reschedule',
+          note: `Permintaan ${storedRequestId} ditolak customer; jadwal aktif tidak berubah`,
+          timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+        });
+        const eventId = `evt_resched_rej_${storedRequestId}`;
+        for (const [role, suffix] of [['css','css'], ['customer','customer']] as const) {
+          const nid = `notif_resched_rej_${bookingId}_${storedRequestId}_${suffix}`;
+          t.set(adminDb.collection('notifications').doc(nid), {
+            id: nid, eventId, eventType: 'booking.reschedule_rejected', recipientRole: role,
+            ...(role === 'customer' && recipientCustomerAuthUid ? { recipientUserId: recipientCustomerAuthUid } : {}),
+            bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            title: role === 'customer' ? 'Perubahan Jadwal Ditolak' : 'Customer Menolak Reschedule',
+            message: role === 'customer'
+              ? `Anda menolak usulan perubahan jadwal pesanan #${booking.bookingCode || bookingId}. Jadwal awal tetap berlaku.`
+              : `Order #${booking.bookingCode || bookingId} (${booking.customerName || 'Customer'}) menolak usulan perubahan jadwal. Jadwal awal tetap berlaku.`,
+            channel: 'in_app', priority: 'NORMAL', read: false, readAt: null,
+            actionUrl: role === 'customer' ? `/track/${booking.bookingCode || bookingId}` : `/css?booking=${booking.bookingCode || bookingId}`,
+            metadata: { bookingId, bookingCode: booking.bookingCode, requestId: storedRequestId },
+            createdAt: now,
+          });
+        }
+        t.set(adminDb.collection('notification_events').doc(eventId), {
+          id: eventId, eventType: 'booking.reschedule_rejected', bookingId, actorId: customerUid, actorRole: 'customer',
+          payload: { bookingId, bookingCode: booking.bookingCode, requestId: storedRequestId }, createdAt: now, status: 'processed', processedAt: now,
+        }, { merge: false });
+        return { action, request: updatedRequest };
+      });
+
+      if (result && (result as any).conflict) {
+        const c = (result as any).conflict;
+        return res.status(c.status).json({ success: false, code: c.code, message: c.message, requestId, ...result });
+      }
+      return res.json({ success: true, requestId, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ success: false, code: err?.code || 'INTERNAL_ERROR', message: err?.message || 'Gagal memproses respons reschedule.', requestId });
+    }
+  });
+
+  // =============================================================
   // MANAGER STAFF MASTER CRUD ENDPOINTS (Server-Authoritative RBAC)
   // =============================================================
 
@@ -20925,7 +21353,7 @@ async function startServer() {
   type S7Caller = { uid: string; role: string; staffId: string; name: string; therapistIds: Set<string> };
   type S7Source = { type: string; references: Record<string, any>; booking: any; bookingId: string; customerId: string; customerUid: string; therapistId: string; payload: Record<string, any>; version: string; entity: any; ownerUid: string };
   const s7Operational = ['css', 'supervisor', 'manager', 'admin'];
-  const s7EventTypes = new Set<string>(["booking.created", "booking.confirmed", "booking.cancelled", "payment.proof_uploaded", "payment.verified", "payment.rejected", "payment.expired", "booking.ready_for_assignment", "therapist.assigned", "therapist.reassigned", "therapist.accepted", "therapist.on_the_way", "therapist.nearby", "therapist.arrived", "treatment.started", "treatment.completed", "tracking.location_stale", "booking.reminder", "supervisor.unassigned_alert", "therapist.not_accepted_alert", "therapist.late_departure_alert", "review.low_rating", "crm.task_due", "loyalty.points_earned", "loyalty.points_redeemed", "loyalty.points_expiring", "membership.tier_upgraded", "membership.tier_renewed", "voucher.issued", "voucher.expiring", "voucher.used", "referral.qualified", "birthday.reward_issued", "therapist.shift_updated", "therapist.off_updated", "therapist.schedule_override", "case.created", "case.assigned", "case.escalated", "case.high_severity", "case.waiting_customer", "case.waiting_manager", "case.resolved", "case.closed", "case.reopened", "recovery.proposed", "recovery.approved", "recovery.rejected", "recovery.completed"]);
+  const s7EventTypes = new Set<string>(["booking.created", "booking.confirmed", "booking.cancelled", "payment.proof_uploaded", "payment.verified", "payment.rejected", "payment.expired", "booking.ready_for_assignment", "therapist.assigned", "therapist.reassigned", "therapist.accepted", "therapist.on_the_way", "therapist.nearby", "therapist.arrived", "treatment.started", "treatment.completed", "tracking.location_stale", "booking.reminder", "supervisor.unassigned_alert", "therapist.not_accepted_alert", "therapist.late_departure_alert", "review.low_rating", "crm.task_due", "loyalty.points_earned", "loyalty.points_redeemed", "loyalty.points_expiring", "membership.tier_upgraded", "membership.tier_renewed", "voucher.issued", "voucher.expiring", "voucher.used", "referral.qualified", "birthday.reward_issued", "therapist.shift_updated", "therapist.off_updated", "therapist.schedule_override", "case.created", "case.assigned", "case.escalated", "case.high_severity", "case.waiting_customer", "case.waiting_manager", "case.resolved", "case.closed", "case.reopened", "recovery.proposed", "recovery.approved", "recovery.rejected", "recovery.completed", "booking.reschedule_requested", "booking.reschedule_approved", "booking.reschedule_rejected"]);
   const s7Rates = new Map<string, { count: number; until: number }>();
   const s7GuestRates = new Map<string, { count: number; until: number }>();
   const s7Text = (v: unknown, max = 160): string => typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -21235,6 +21663,15 @@ async function startServer() {
       if (booking && entity.bookingId !== booking.id) throw s7Error(409, 'REVIEW_LINKAGE_CONFLICT');
       if (!booking && entity.bookingId) booking = await s7Booking(read, { bookingId: entity.bookingId });
       version = `${entityId}:${type}:${entity.createdAt || ''}`;
+    } else if (type === 'booking.reschedule_requested' || type === 'booking.reschedule_approved' || type === 'booking.reschedule_rejected') {
+      kind = 'reschedule';
+      if (!s7Id(refs.requestId)) throw s7Error(400, 'RESCHEDULE_REQUEST_REQUIRED');
+      const req = (booking?.data || {}).csRescheduleRequest || null;
+      if (!req || req.id !== refs.requestId) throw s7Error(409, 'RESCHEDULE_SOURCE_MISSING');
+      const expectedStatus = type === 'booking.reschedule_requested' ? 'pending_customer' : type === 'booking.reschedule_approved' ? 'approved' : 'rejected';
+      if (req.status !== expectedStatus) throw s7Error(409, 'RESCHEDULE_SOURCE_STATE_MISMATCH');
+      entity = req; entityId = req.id; refs.requestId = req.id;
+      version = `${booking!.id}:${type}:${req.id}:${req.status}:${req.respondedAt || req.requestedAt || ''}`;
     }
     if (!booking && !['ledger', 'tier', 'voucher', 'roster'].includes(kind)) throw s7Error(400, 'PERSISTED_SOURCE_REQUIRED');
     const data = booking?.data || null;
@@ -21250,6 +21687,12 @@ async function startServer() {
       ...(booking ? { bookingId: booking.id, bookingCode: data.bookingCode, customerName: s7Text(data.customerName, 120), serviceName: s7Text(data.serviceName, 160), scheduleAt: s7Text(data.scheduleAt, 80) || `${s7Text(data.date)} ${s7Text(data.time)}`.trim(), area: s7Text(data.area, 100), totalAmount: data.totalAmount } : {}),
       customerId: customer.id || undefined, customerName: customer.name, therapistId: therapistId || undefined, therapistName: s7Text(data?.therapistName || data?.assignedTherapistName, 120) || undefined,
     };
+    if (kind === 'reschedule') {
+      payload.requestId = entity.id;
+      payload.oldScheduleAt = s7Text(entity.oldScheduleAt, 80) || `${s7Text(entity.oldScheduleDate)} ${s7Text(entity.oldScheduleTime)}`.trim();
+      payload.proposedScheduleAt = s7Text(entity.proposedScheduleAt, 80) || `${s7Text(entity.proposedScheduleDate)} ${s7Text(entity.proposedScheduleTime)}`.trim();
+      payload.newScheduleAt = payload.proposedScheduleAt;
+    }
     if (kind === 'ledger') {
       payload.pointsEarned = Math.max(0, entity.points); payload.pointsRedeemed = Math.abs(entity.points); payload.newBalance = entity.balanceAfter;
       payload.discountAmount = Number(entity.metadata?.discountRp || entity.metadata?.discountAmount || 0);
@@ -21319,6 +21762,9 @@ async function startServer() {
     if (type === 'payment.expired') requireState(paymentStatus === 'expired');
     if (type === 'review.low_rating') requireState(Number(entity.overallRating) <= 2 && Number(entity.overallRating) >= 1);
     if (type === 'case.high_severity') requireState(['HIGH', 'CRITICAL'].includes(entity.severity));
+    if (type === 'booking.reschedule_requested') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'pending_customer'));
+    if (type === 'booking.reschedule_approved') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'approved'));
+    if (type === 'booking.reschedule_rejected') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'rejected'));
     if (type === 'therapist.nearby' || type === 'tracking.location_stale') {
       const snap = await read.doc('therapist_locations', source.bookingId);
       requireState(snap.exists && source.therapistId && status === 'on the way');
@@ -21477,8 +21923,9 @@ async function startServer() {
         // Historic public rows are pointers, never trusted text, actor, URL or identity proof.
         if ((!s7EventTypes.has(data.eventType) && data.eventType !== 'chat.message_received') || !s7Id(data.bookingId)) return null;
         const messageId = data.metadata?.messageId;
+        const rescheduleRequestId = data.metadata?.requestId || data.requestId;
         if (data.eventType === 'chat.message_received' && !s7Id(messageId)) return null;
-        source = await s7Source(read, data.eventType, { bookingId: data.bookingId, ...(s7Id(data.paymentId) ? { paymentId: data.paymentId } : {}), ...(s7Id(messageId) ? { messageId } : {}) });
+        source = await s7Source(read, data.eventType, { bookingId: data.bookingId, ...(s7Id(data.paymentId) ? { paymentId: data.paymentId } : {}), ...(s7Id(messageId) ? { messageId } : {}), ...(s7Id(rescheduleRequestId) ? { requestId: rescheduleRequestId } : {}) });
         if (data.eventType === 'chat.message_received') {
           const legacy = await read.doc('chat_notification_dispatches', `chat_notif_${messageId}`);
           if (!legacy.exists || legacy.data().bookingId !== source.bookingId || legacy.data().messageId !== messageId || legacy.data().notificationId !== snap.id || legacy.data().recipientUserId !== source.entity.recipientUid) return null;
@@ -21487,7 +21934,7 @@ async function startServer() {
         const settings = await s7Settings(read);
         await s7Eligible(read, source, settings);
         const targets = await s7Recipients(read, source, settings, 'Sistem Senzu Home');
-        const target = targets.find(target => target.recipientRole === data.recipientRole && (!target.recipientUserId || target.recipientUserId === caller.uid));
+        const target = targets.find(t => t.recipientRole === data.recipientRole && (!t.recipientUserId || t.recipientUserId === caller.uid || (data.recipientRole === 'customer' && source.customerId && t.recipientUserId === source.customerId)));
         if (!target) return null;
         content = { ...target, eventId: s7Id(data.eventId) ? data.eventId : `legacy_${s7Hash([source.type, source.bookingId]).slice(0, 32)}`, eventType: source.type, bookingId: source.bookingId, bookingCode: source.booking?.bookingCode, customerId: source.customerId, therapistId: source.therapistId, read: data.read === true, readAt: s7Date(data.readAt) || null };
         createdAt = s7Date(snap.createTime) || s7Date(source.booking?.createdAt);
