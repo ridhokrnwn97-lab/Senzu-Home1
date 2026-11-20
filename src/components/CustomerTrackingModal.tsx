@@ -140,7 +140,7 @@ export function mapBookingStatusToDisplay(status: BookingStatus): {
     case 'Rescheduled':
       return {
         label: 'Jadwal Diubah',
-        sublabel: 'Jadwal kunjungan telah disesuaikan ulang oleh Supervisor',
+        sublabel: 'Jadwal kunjungan telah diperbarui (perubahan disetujui customer)',
         badgeClass: 'bg-sky-500/20 text-sky-300 border border-sky-400/50',
         stageIndex: 1,
       };

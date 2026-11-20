@@ -295,11 +295,12 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
         rescheduleNote
       );
       setIsRescheduleOpen(false);
-      setActionSuccess(`Jadwal ${rescheduleBookingTarget.bookingCode} berhasil diubah!`);
-      setTimeout(() => setActionSuccess(''), 3500);
+      setActionSuccess(`Permintaan reschedule ${rescheduleBookingTarget.bookingCode} telah dikirim ke customer. Menunggu konfirmasi.`);
+      setTimeout(() => setActionSuccess(''), 4500);
       onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(err?.message || 'Gagal mengajukan permintaan reschedule.');
     }
   };
 
@@ -1006,8 +1007,9 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-[#8B5A36] text-white p-5 flex items-center justify-between">
               <div>
-                <span className="text-[10px] text-[#D4AF37] font-semibold uppercase">Reschedule Jadwal</span>
+                <span className="text-[10px] text-[#D4AF37] font-semibold uppercase">Ajukan Perubahan Jadwal</span>
                 <h4 className="font-mono text-lg font-bold">{rescheduleBookingTarget.bookingCode}</h4>
+                <p className="text-[10px] text-white/80 mt-0.5">Jadwal aktif tidak berubah sebelum customer menyetujui.</p>
               </div>
               <button
                 type="button"
@@ -1019,11 +1021,21 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
             </div>
 
             <form onSubmit={submitReschedule} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 space-y-1">
+                <div className="font-semibold text-slate-800">Jadwal Aktif (tidak berubah sekarang)</div>
+                <div>{rescheduleBookingTarget.scheduleDate} • {rescheduleBookingTarget.scheduleTime} WIB</div>
+                {rescheduleBookingTarget.csRescheduleRequest?.status === 'pending_customer' && (
+                  <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
+                    <div className="font-semibold">Menunggu Konfirmasi Customer</div>
+                    <div>Usulan: {rescheduleBookingTarget.csRescheduleRequest.proposedScheduleDate} • {rescheduleBookingTarget.csRescheduleRequest.proposedScheduleTime} WIB</div>
+                  </div>
+                )}
+              </div>
               {rescheduleBookingTarget.therapistName && (
                 <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
                   <div>
-                    <strong>Perhatian:</strong> Terapis <em>{rescheduleBookingTarget.therapistName}</em> sudah ditugaskan. Supervisor akan menerima notifikasi bahwa jadwal berubah.
+                    <strong>Perhatian:</strong> Terapis <em>{rescheduleBookingTarget.therapistName}</em> sudah ditugaskan. Jika customer menyetujui perubahan, jadwal baru akan diterapkan setelah persetujuan.
                   </div>
                 </div>
               )}
@@ -1052,10 +1064,10 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Alasan / Catatan:</label>
+                <label className="block font-semibold text-slate-700 mb-1">Alasan/Catatan untuk Customer (Opsional):</label>
                 <textarea
                   rows={2}
-                  placeholder="Permintaan customer diundur 1 jam..."
+                  placeholder="Contoh: terapis berhalangan, kami usulkan jadwal pengganti..."
                   value={rescheduleNote}
                   onChange={(e) => setRescheduleNote(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-[#8B5A36]"
@@ -1072,9 +1084,10 @@ export const CssAdminDashboard: React.FC<CssAdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold"
+                  disabled={rescheduleBookingTarget.csRescheduleRequest?.status === 'pending_customer'}
+                  className="px-4 py-2 rounded-lg bg-[#8B5A36] hover:bg-[#94603B] text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Simpan Jadwal Baru
+                  {rescheduleBookingTarget.csRescheduleRequest?.status === 'pending_customer' ? 'Menunggu Konfirmasi Customer' : 'Kirim Permintaan ke Customer'}
                 </button>
               </div>
             </form>

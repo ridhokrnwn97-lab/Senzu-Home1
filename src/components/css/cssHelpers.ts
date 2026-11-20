@@ -108,7 +108,7 @@ export function computeCssWorkQueue(
       return;
     }
 
-    // A. Customer Requested Reschedule
+    // A. Customer Requested Reschedule (customer-initiated)
     if (b.customerRequest && b.customerRequest.type === 'reschedule' && b.customerRequest.status === 'pending') {
       items.push({
         id: `req_resched_${b.id}`,
@@ -139,6 +139,42 @@ export function computeCssWorkQueue(
         lastUpdated: b.updatedAt,
         actionType: 'process_reschedule',
         actionLabel: 'Proses Reschedule',
+      });
+    }
+
+    // A2. CS Proposed Reschedule (waiting customer approval)
+    if (b.csRescheduleRequest?.status === 'pending_customer' && !isTerminal) {
+      const oldAt = b.csRescheduleRequest.oldScheduleAt || `${b.csRescheduleRequest.oldScheduleDate} ${b.csRescheduleRequest.oldScheduleTime}`;
+      const newAt = b.csRescheduleRequest.proposedScheduleAt || `${b.csRescheduleRequest.proposedScheduleDate} ${b.csRescheduleRequest.proposedScheduleTime}`;
+      items.push({
+        id: `cs_resched_wait_${b.id}`,
+        bookingId: b.id,
+        bookingCode: b.bookingCode,
+        customerId: b.customerId,
+        customerName: b.customerName,
+        customerWhatsApp: b.customerWhatsApp,
+        area: b.area,
+        category: 'customer_reschedule_request',
+        categoryLabel: 'Reschedule CS (Menunggu Customer)',
+        priority: minsToSchedule <= 120 ? 'HIGH' : 'NORMAL',
+        title: `Menunggu Konfirmasi Customer: ${b.bookingCode}`,
+        description: `Jadwal aktif: ${oldAt} WIB → Usulan: ${newAt} WIB. Jadwal aktif belum berubah.`,
+        scheduleDate: b.scheduleDate,
+        scheduleTime: b.scheduleTime,
+        scheduleAt: b.scheduleAt,
+        minutesToSchedule: minsToSchedule,
+        totalAmount: b.totalAmount,
+        paymentMethod: b.paymentMethod,
+        paymentStatus: b.paymentStatus,
+        bookingStatus: b.status,
+        therapistName: b.therapistName,
+        ownerId: b.cssOwnerId,
+        ownerName: b.cssOwnerName,
+        taskStatus: 'Waiting Customer',
+        createdAt: b.csRescheduleRequest.requestedAt || b.updatedAt,
+        lastUpdated: b.updatedAt,
+        actionType: 'open_detail',
+        actionLabel: 'Lihat Detail',
       });
     }
 

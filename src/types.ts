@@ -320,6 +320,26 @@ export interface Booking {
     requestedAt: string;
     status: 'pending' | 'processed' | 'rejected';
   };
+  csRescheduleRequest?: {
+    id: string;
+    status: 'pending_customer' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'conflicted';
+    requestedByRole: 'css' | 'supervisor' | 'manager' | 'admin';
+    requestedById?: string;
+    requestedByName: string;
+    requestedAt: string;
+    oldScheduleDate: string;
+    oldScheduleTime: string;
+    oldScheduleAt: string;
+    proposedScheduleDate: string;
+    proposedScheduleTime: string;
+    proposedScheduleAt: string;
+    previousTaskStatus?: string;
+    conflictMessage?: string;
+    conflictedAt?: string;
+    reason?: string;
+    respondedAt?: string;
+    responseNote?: string;
+  };
   unreachableCount?: number;
   lastContactAttemptAt?: string;
   nextFollowUpAt?: string;
