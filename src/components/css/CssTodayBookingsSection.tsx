@@ -319,6 +319,31 @@ export const CssTodayBookingsSection: React.FC<CssTodayBookingsSectionProps> = (
                         >
                           {b.status}
                         </span>
+                        {b.csRescheduleRequest?.status === 'pending_customer' && (
+                          <div className="mt-1 text-[9px] font-semibold text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded inline-block">
+                            Menunggu konfirmasi customer ({b.csRescheduleRequest.proposedScheduleTime} WIB)
+                          </div>
+                        )}
+                        {b.csRescheduleRequest?.status === 'approved' && (
+                          <div className="mt-1 text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded inline-block">
+                            Reschedule disetujui
+                          </div>
+                        )}
+                        {b.csRescheduleRequest?.status === 'rejected' && (
+                          <div className="mt-1 text-[9px] font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded inline-block">
+                            Reschedule ditolak (jadwal awal)
+                          </div>
+                        )}
+                        {b.csRescheduleRequest?.status === 'conflicted' && (
+                          <div className="mt-1 text-[9px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded inline-block">
+                            Reschedule konflik (jadwal berubah)
+                          </div>
+                        )}
+                        {b.csRescheduleRequest?.status === 'cancelled' && (
+                          <div className="mt-1 text-[9px] font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded inline-block">
+                            Reschedule dibatalkan
+                          </div>
+                        )}
                       </td>
 
                       {/* Action */}
