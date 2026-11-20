@@ -323,6 +323,69 @@ export function resolveNotificationTargets(
       });
       break;
 
+    case 'booking.reschedule_requested':
+      targets.push({
+        recipientRole: 'customer',
+        recipientUserId: p.customerId,
+        title: 'Permintaan Perubahan Jadwal',
+        message: `CS mengajukan perubahan jadwal pesanan #${code}: ${p.oldScheduleAt || scheduleAt} → ${p.proposedScheduleAt || p.newScheduleAt || 'jadwal baru'}. Mohon konfirmasi persetujuan Anda.`,
+        priority: 'HIGH',
+        actionUrl: `/portal?booking=${code}&reschedule=pending`,
+      });
+      if (settings.supervisorAlert) {
+        targets.push({
+          recipientRole: 'supervisor',
+          title: 'Permintaan Reschedule Menunggu Customer',
+          message: `Order #${code} (${customerName}) menunggu konfirmasi customer untuk perubahan jadwal.`,
+          priority: 'NORMAL',
+          actionUrl: `/supervisor?booking=${code}`,
+        });
+      }
+      break;
+
+    case 'booking.reschedule_approved':
+      targets.push({
+        recipientRole: 'customer',
+        recipientUserId: p.customerId,
+        title: 'Perubahan Jadwal Disetujui',
+        message: `Jadwal pesanan #${code} telah diperbarui menjadi ${p.newScheduleAt || scheduleAt}.`,
+        priority: 'NORMAL',
+        actionUrl: `/track/${code}`,
+      });
+      targets.push({
+        recipientRole: 'css',
+        title: 'Customer Menyetujui Reschedule',
+        message: `Order #${code} (${customerName}) disetujui pindah ke ${p.newScheduleAt || scheduleAt}.`,
+        priority: 'NORMAL',
+        actionUrl: `/css?booking=${code}`,
+      });
+      targets.push({
+        recipientRole: 'supervisor',
+        title: 'Reschedule Disetujui Customer',
+        message: `Order #${code} (${customerName}) disetujui pindah ke ${p.newScheduleAt || scheduleAt}.`,
+        priority: 'NORMAL',
+        actionUrl: `/supervisor?booking=${code}`,
+      });
+      break;
+
+    case 'booking.reschedule_rejected':
+      targets.push({
+        recipientRole: 'customer',
+        recipientUserId: p.customerId,
+        title: 'Perubahan Jadwal Ditolak',
+        message: `Anda menolak usulan perubahan jadwal pesanan #${code}. Jadwal awal tetap berlaku.`,
+        priority: 'NORMAL',
+        actionUrl: `/track/${code}`,
+      });
+      targets.push({
+        recipientRole: 'css',
+        title: 'Customer Menolak Reschedule',
+        message: `Order #${code} (${customerName}) menolak usulan perubahan jadwal. Jadwal awal tetap berlaku.`,
+        priority: 'NORMAL',
+        actionUrl: `/css?booking=${code}`,
+      });
+      break;
+
     case 'supervisor.unassigned_alert':
       targets.push({
         recipientRole: 'supervisor',

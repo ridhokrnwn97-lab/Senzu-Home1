@@ -54,7 +54,7 @@ export type PaymentMethod = ActivePaymentMethodName | HistoricalPaymentMethodNam
 
 export type GenderPreference = 'Bebas' | 'Perempuan' | 'Laki-laki';
 
-export type UserRole = 'css' | 'supervisor' | 'therapist' | 'manager' | 'admin';
+export type UserRole = 'css' | 'supervisor' | 'therapist' | 'manager' | 'admin' | 'fat';
 
 export interface ServiceItem {
   id: string;
@@ -320,6 +320,26 @@ export interface Booking {
     requestedAt: string;
     status: 'pending' | 'processed' | 'rejected';
   };
+  csRescheduleRequest?: {
+    id: string;
+    status: 'pending_customer' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'conflicted';
+    requestedByRole: 'css' | 'supervisor' | 'manager' | 'admin';
+    requestedById?: string;
+    requestedByName: string;
+    requestedAt: string;
+    oldScheduleDate: string;
+    oldScheduleTime: string;
+    oldScheduleAt: string;
+    proposedScheduleDate: string;
+    proposedScheduleTime: string;
+    proposedScheduleAt: string;
+    previousTaskStatus?: string;
+    conflictMessage?: string;
+    conflictedAt?: string;
+    reason?: string;
+    respondedAt?: string;
+    responseNote?: string;
+  };
   unreachableCount?: number;
   lastContactAttemptAt?: string;
   nextFollowUpAt?: string;
@@ -374,6 +394,7 @@ export interface OperationalAuditLog {
     | 'case_reopened'
     | 'recovery_proposed'
     | 'recovery_approved'
+    | 'recovery_rejected'
     | 'refund_status_updated';
   actorRole: 'supervisor' | 'manager' | 'admin' | 'css' | 'system';
   actorName: string;

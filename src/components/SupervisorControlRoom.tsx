@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { subscribeToActiveTherapistLocations, DEFAULT_SERVICES } from '../lib/dbService';
 import { computeOperationalAlerts } from '../lib/supervisorAlerts';
+import { parseTherapistLocation } from '../lib/locationTracking';
 import { getOperationalSettings } from '../lib/masterDataService';
 import { SupervisorHeader } from './supervisor/SupervisorHeader';
 import { SupervisorKpiSummary, OperationsFilterType } from './supervisor/SupervisorKpiSummary';
@@ -75,7 +76,8 @@ export const SupervisorControlRoom: React.FC<SupervisorControlRoomProps> = ({
       if (Array.isArray(locations)) {
         locations.forEach((loc) => {
           if (loc && loc.therapistId) {
-            locMap[loc.therapistId] = loc;
+            const parsed = parseTherapistLocation(loc);
+            if (parsed) locMap[loc.therapistId] = parsed;
           }
         });
       }

@@ -33,6 +33,7 @@ import { addOperationalAuditLog, addBookingStatusHistory } from './dbService';
 import { addCustomerInteraction, createCrmTask } from './crmService';
 import { emitEvent } from './notificationService';
 import { issueVoucherToCustomer, createVoucher, adminManualPointAdjustment, getAllVouchers } from './loyaltyService';
+import { classifyRefundRecovery } from '../server/fatMetrics';
 
 const CASES_COLLECTION = 'cases';
 const CASE_EVENTS_COLLECTION = 'case_events';
@@ -510,37 +511,26 @@ export async function proposeServiceRecovery(params: {
   actorName: string;
   actorRole: string;
 }): Promise<void> {
-  const now = new Date().toISOString();
-  const caseRef = doc(db, CASES_COLLECTION, params.caseItem.id);
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Sesi login tidak valid. Silakan masuk kembali.');
 
-  const recovery: CaseRecovery = {
-    type: params.recoveryType,
-    description: params.description.trim(),
-    expectedOutcome: params.expectedOutcome?.trim(),
-    proposedBy: params.actorId,
-    proposedByName: params.actorName,
-    proposedAt: now,
-    status: 'PROPOSED',
-    refundAmount: params.refundAmount || undefined,
-    refundStatus: params.recoveryType.includes('Refund') ? 'REVIEW_REQUIRED' : 'NOT_REQUIRED',
-  };
-
-  await updateDoc(caseRef, cleanFirestoreData({
-    recovery,
-    status: 'WAITING_MANAGER',
-    updatedAt: now,
-  }));
-
-  await addCaseTimelineEvent({
-    caseId: params.caseItem.id,
-    caseCode: params.caseItem.caseCode,
-    eventType: 'recovery.proposed',
-    actorId: params.actorId,
-    actorName: params.actorName,
-    actorRole: params.actorRole,
-    summary: `Pengajuan Pemulihan Layanan (${params.recoveryType}) diajukan oleh ${params.actorName}`,
-    details: `${params.description} ${params.refundAmount ? `(Nominal: Rp ${params.refundAmount.toLocaleString('id-ID')})` : ''}`,
+  const response = await fetch(`/api/cases/${encodeURIComponent(params.caseItem.id)}/recovery/propose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      recoveryType: params.recoveryType,
+      description: params.description,
+      expectedOutcome: params.expectedOutcome,
+      refundAmount: params.refundAmount,
+      actorId: params.actorId,
+      actorName: params.actorName,
+      actorRole: params.actorRole,
+    }),
   });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Gagal mengajukan service recovery.');
+  }
 
   await addOperationalAuditLog({
     bookingId: params.caseItem.bookingId,
@@ -576,6 +566,35 @@ export async function approveServiceRecovery(params: {
   const now = new Date().toISOString();
   const caseRef = doc(db, CASES_COLLECTION, params.caseItem.id);
   const prevRec = params.caseItem.recovery;
+  const refundClassification = classifyRefundRecovery(prevRec);
+
+  if (refundClassification.isRefund) {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Sesi login tidak valid. Silakan masuk kembali.');
+    const requestId = generateManualRefundRequestId('rapp');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetch(`/api/cases/${encodeURIComponent(params.caseItem.id)}/recovery/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            decision: params.decision,
+            reason: params.reason ?? '',
+            approvedRefundAmount: params.approvedRefundAmount ?? null,
+            requestId,
+          }),
+        });
+      } catch (err) {
+        if (attempt === 0) continue;
+        throw err;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload?.success !== false) return;
+      if (attempt === 0 && (response.status === 429 || response.status >= 500)) continue;
+      throw new Error(payload?.message || 'Gagal memproses keputusan recovery refund.');
+    }
+  }
 
   if (params.decision === 'REJECT') {
     const updatedRec: CaseRecovery = {
@@ -651,15 +670,9 @@ export async function approveServiceRecovery(params: {
     }
   }
 
-  // 3. If recovery involves Refund, transition refund status to APPROVED
-  let refundStatus: RefundRequestStatus = prevRec.refundStatus;
-  let finalRefundAmount = prevRec.refundAmount;
-  if ((prevRec.type || '').toLowerCase().includes('refund')) {
-    refundStatus = 'APPROVED';
-    if (params.approvedRefundAmount !== undefined) {
-      finalRefundAmount = params.approvedRefundAmount;
-    }
-  }
+  // 3. Refund status/amount are backend-owned; legacy non-refund approval preserves them as-is.
+  const refundStatus: RefundRequestStatus = prevRec.refundStatus;
+  const finalRefundAmount = prevRec.refundAmount;
 
   const updatedRec: CaseRecovery = {
     ...prevRec,
@@ -767,7 +780,7 @@ function isValidManualRefundDocId(value: unknown, maxLen = 128): value is string
   );
 }
 
-function generateManualRefundRequestId(): string {
+function generateManualRefundRequestId(prefix = 'mref'): string {
   const ts = Date.now().toString(36);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     const bytes = new Uint8Array(12);
@@ -775,9 +788,9 @@ function generateManualRefundRequestId(): string {
     const hex = Array.from(bytes)
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
-    return `mref_${ts}_${hex}`;
+    return `${prefix}_${ts}_${hex}`;
   }
-  return `mref_${ts}_${Math.random().toString(36).slice(2, 12)}_${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}_${ts}_${Math.random().toString(36).slice(2, 12)}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
 /**

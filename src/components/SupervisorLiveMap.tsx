@@ -35,6 +35,9 @@ import {
 } from '../lib/dbService';
 import { useAuth } from '../context/AuthContext';
 import { useGoogleMaps } from './GoogleMapsProvider';
+import { parseTherapistLocation, getLocationFreshness } from '../lib/locationTracking';
+
+const ACTIVE_BOOKING_STATUSES = ['Therapist Assigned', 'On The Way', 'Arrived', 'Treatment'];
 
 interface SupervisorLiveMapProps {
   bookings: Booking[];
@@ -78,6 +81,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
   const shouldUseGoogleMaps = isKeyProvided && !hasAuthError && !forceFallback && !mapRenderError;
 
   const [activeLocations, setActiveLocations] = useState<Record<string, TherapistLocation>>({});
+  const [now, setNow] = useState(Date.now());
   const [filter, setFilter] = useState<TherapistFilter>('ALL');
   const [selectedEntity, setSelectedEntity] = useState<{
     type: 'therapist' | 'booking';
@@ -97,14 +101,21 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
     const unsubscribe = subscribeToActiveTherapistLocations((locations) => {
       const map: Record<string, TherapistLocation> = {};
       locations.forEach((loc) => {
-        if (loc.therapistId) {
-          map[loc.therapistId] = loc;
+        const parsed = parseTherapistLocation(loc, loc.bookingId);
+        if (parsed && parsed.therapistId) {
+          map[parsed.therapistId] = parsed;
         }
       });
       setActiveLocations(map);
     });
 
     return () => unsubscribe();
+  }, []);
+
+  // Refresh freshness labels even when no new snapshot arrives.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(timer);
   }, []);
 
   // Filter therapists
@@ -117,14 +128,17 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
     })
     .map((th) => {
       const live = activeLocations[th.id];
-      const activeBooking = bookings.find(
-        (b) =>
-          b.therapistId === th.id &&
-          ['Therapist Assigned', 'On The Way', 'Arrived', 'Treatment'].includes(b.status)
-      );
-
-      const lat = live?.latitude ?? baseCenter.lat + (Math.sin(th.id.charCodeAt(0) || 1) * 0.015);
-      const lng = live?.longitude ?? baseCenter.lng + (Math.cos(th.id.charCodeAt(0) || 1) * 0.015);
+      const freshness = live ? getLocationFreshness(live, now) : null;
+      // Hanya posisi LIVE/STALE yang berasal dari GPS aktual. Tidak ada koordinat buatan.
+      const hasFix = !!live && (freshness === 'LIVE' || freshness === 'STALE');
+      const liveBooking = live
+        ? bookings.find((b) => b.id === live.bookingId && ACTIVE_BOOKING_STATUSES.includes(b.status))
+        : undefined;
+      const activeBooking =
+        liveBooking ??
+        bookings.find(
+          (b) => b.therapistId === th.id && ACTIVE_BOOKING_STATUSES.includes(b.status)
+        );
 
       const statusType =
         activeBooking?.status === 'On The Way'
@@ -135,9 +149,10 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
 
       return {
         therapist: th,
-        latitude: lat,
-        longitude: lng,
-        liveGps: live,
+        latitude: live && hasFix ? live.latitude : null,
+        longitude: live && hasFix ? live.longitude : null,
+        liveGps: live && hasFix ? live : null,
+        freshness,
         currentBooking: activeBooking,
         statusType,
       };
@@ -145,7 +160,7 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
 
   // Active bookings with coordinates
   const activeBookings = bookings.filter((b) =>
-    ['Therapist Assigned', 'On The Way', 'Arrived', 'Treatment'].includes(b.status)
+    ACTIVE_BOOKING_STATUSES.includes(b.status)
   );
 
   const handleOverrideArrival = async (booking: Booking) => {
@@ -310,16 +325,24 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
 
               {/* Therapist Markers */}
               {(filteredTherapists || []).map((item) => {
+                if (item.latitude == null || item.longitude == null || !item.liveGps) return null;
                 const pos = { lat: item.latitude, lng: item.longitude };
                 const isOTW = item.statusType === 'on_the_way';
                 const isAtLoc = item.statusType === 'at_location';
-                const pinBg = isOTW ? 'bg-amber-600 border-amber-300' : isAtLoc ? 'bg-emerald-600 border-emerald-300' : 'bg-slate-600 border-slate-300';
+                const isStale = item.freshness === 'STALE';
+                const pinBg = isStale
+                  ? 'bg-slate-400 border-slate-300'
+                  : isOTW
+                  ? 'bg-amber-600 border-amber-300'
+                  : isAtLoc
+                  ? 'bg-emerald-600 border-emerald-300'
+                  : 'bg-slate-600 border-slate-300';
 
                 return (
                   <AdvancedMarker
                     key={item.therapist.id}
                     position={pos}
-                    title={`${item.therapist.name} (${item.statusType})`}
+                    title={`${item.therapist.name} (${isStale ? 'posisi terakhir' : item.statusType})`}
                     onClick={() => setSelectedEntity({ type: 'therapist', data: item })}
                   >
                     <div className={`relative flex flex-col items-center justify-center -translate-y-7 select-none cursor-pointer transition-transform hover:scale-110`}>
@@ -357,8 +380,12 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                 <InfoWindow
                 position={
                   selectedEntity.type === 'therapist'
+                    ? selectedEntity.data.latitude != null && selectedEntity.data.longitude != null
+                      ? { lat: selectedEntity.data.latitude, lng: selectedEntity.data.longitude }
+                      : baseCenter
+                    : selectedEntity.data.latitude != null && selectedEntity.data.longitude != null
                     ? { lat: selectedEntity.data.latitude, lng: selectedEntity.data.longitude }
-                    : { lat: selectedEntity.data.latitude, lng: selectedEntity.data.longitude }
+                    : baseCenter
                 }
                 onCloseClick={() => setSelectedEntity(null)}
               >
@@ -389,9 +416,30 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                       <div className="text-[11px] text-slate-600 mt-1.5 space-y-1">
                         <div>Gender: <strong>{selectedEntity.data.therapist.gender}</strong></div>
                         <div>Rating: <strong>★ {selectedEntity.data.therapist.rating}</strong></div>
-                        {selectedEntity.data.liveGps && (
-                          <div className="text-emerald-700 font-mono">
-                            Live GPS: Akurasi ±{selectedEntity.data.liveGps.accuracy}m
+                        {selectedEntity.data.liveGps ? (
+                          <div className="text-[11px] space-y-0.5">
+                            <div className="text-emerald-700 font-mono">
+                              GPS: Akurasi ±{selectedEntity.data.liveGps.accuracy}m
+                            </div>
+                            <div className="text-slate-500">
+                              Update terakhir:{' '}
+                              {new Date(selectedEntity.data.liveGps.updatedAtMillis).toLocaleTimeString('id-ID')}
+                            </div>
+                            <div
+                              className={`inline-block px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                                selectedEntity.data.freshness === 'LIVE'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {selectedEntity.data.freshness === 'LIVE'
+                                ? 'LIVE'
+                                : 'STALE (posisi terakhir)'}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400 italic">
+                            GPS belum tersedia.
                           </div>
                         )}
                       </div>
@@ -492,7 +540,6 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {(filteredTherapists || []).map((item) => {
-              const live = item.liveGps;
               const current = item.currentBooking;
               return (
                 <div
@@ -561,14 +608,37 @@ export const SupervisorLiveMap: React.FC<SupervisorLiveMapProps> = ({
                   )}
 
                   {/* Live GPS Coordinates Info */}
-                  <div className="text-[11px] font-mono text-slate-600 flex items-center justify-between border-t border-slate-200/60 pt-2">
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3 text-rose-500" />
-                      <span>{item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}</span>
-                    </span>
-                    {live?.accuracy && (
-                      <span className="text-emerald-700 font-semibold">
-                        Akurasi ±{live.accuracy}m
+                  <div className="text-[11px] font-mono text-slate-600 flex items-center justify-between gap-2 border-t border-slate-200/60 pt-2">
+                    {item.liveGps ? (
+                      <>
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-rose-500" />
+                          <span>
+                            {item.liveGps.latitude.toFixed(4)}, {item.liveGps.longitude.toFixed(4)}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-emerald-700 font-semibold">
+                            ±{item.liveGps.accuracy}m
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                              item.freshness === 'LIVE'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {item.freshness === 'LIVE' ? 'LIVE' : 'STALE'}
+                          </span>
+                          <span className="text-slate-500">
+                            {new Date(item.liveGps.updatedAtMillis).toLocaleTimeString('id-ID')}
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="italic text-slate-400 flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-slate-400" />
+                        Belum ada GPS
                       </span>
                     )}
                   </div>

@@ -11,6 +11,7 @@ import {
   Settings,
   Users,
   Award,
+  Landmark,
 } from 'lucide-react';
 import { StaffUser } from '../types';
 
@@ -82,6 +83,12 @@ const ALL_STAFF_TABS: NavTabItem[] = [
     icon: Award,
     roles: ['manager', 'admin', 'css'],
   },
+  {
+    id: 'fat',
+    label: 'Dashboard FAT',
+    icon: Landmark,
+    roles: ['fat'],
+  },
 ];
 
 export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
@@ -97,6 +104,8 @@ export const StaffNavigationBar: React.FC<StaffNavigationBarProps> = ({
 
   // Filter tabs accessible to current staff member's role
   const visibleTabs = ALL_STAFF_TABS.filter((tab) => {
+    // FAT dashboard is restricted to the FAT role only (backend FAT endpoints reject other roles).
+    if (tab.id === 'fat') return tab.roles.includes(userRole);
     if (userRole === 'manager' || userRole === 'admin') return true;
     return tab.roles.includes(userRole);
   });

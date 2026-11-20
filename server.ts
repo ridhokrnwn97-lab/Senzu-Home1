@@ -5,6 +5,15 @@ import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
+import {
+  parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
+  summarizeFatRefundAnomalies, summarizeFatPaymentReconciliation,
+  canTransitionRefundStatus, evaluateRefundPaymentClaim, evaluateRefundPaymentReservation,
+  matchesManualRefundRequestId, rejectionPayloadMatchesAuthoritativeState,
+  classifyRefundRecovery, recoveryApproveFingerprintPayload, recoveryApproveReceiptMatches,
+  buildRecoveryAuditLog, computeFatAnomalyScope,
+  type FatRefundRow,
+} from './src/server/fatMetrics.ts';
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { resolveNotificationTargets } from './src/lib/notificationTargets.ts';
 import { DEFAULT_NOTIFICATION_SETTINGS } from './src/types/notification.ts';
@@ -1154,7 +1163,7 @@ async function startServer() {
         throw deny(403, 'STAFF_INACTIVE', 'Status aktif staf belum dapat diverifikasi.');
       }
       const canonicalRole = staff.role || 'staff';
-      if (!['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff'].includes(canonicalRole)) {
+      if (!['manager', 'admin', 'supervisor', 'css', 'therapist', 'staff', 'fat'].includes(canonicalRole)) {
         throw deny(403, 'STAFF_ROLE_INVALID', 'Role staf belum dapat diverifikasi. Hubungi Manager.');
       }
       const now = new Date().toISOString();
@@ -1793,6 +1802,31 @@ async function startServer() {
       if (!adminAuth) throw Object.assign(new Error('Auth unavailable'), { code: 'auth/internal-error' });
       return adminAuth.verifyIdToken(token);
     },
+    authorizeReadOnly: async (transaction, uid) => {
+      const [roleSnap, canonical, legacy, direct] = await Promise.all([
+        transaction.get(adminDb.collection('staff_roles').doc(uid)),
+        transaction.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+        transaction.get(adminDb.collection('staff_users').doc(uid)),
+      ]);
+      const matches = new Map<string, any>();
+      for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+      const role = roleSnap.data() || {};
+      for (const linked of [role.staffId, role.staffUserId]) {
+        if (typeof linked === 'string' && isValidStage7dDocId(linked, 128) && !matches.has(linked)) {
+          const snap = await transaction.get(adminDb.collection('staff_users').doc(linked));
+          if (snap.exists) matches.set(snap.id, snap);
+        }
+      }
+      const staff = [...matches.values()][0]?.data() || {};
+      const disabled = (r: any) => r?.isActive === false || ['inactive', 'disabled', 'archived', 'dinonaktifkan'].includes(String(r?.status || '').toLowerCase());
+      const roleName = String(role.role || staff.role || '').toLowerCase();
+      const allowed = ['manager', 'admin', 'fat'].includes(roleName);
+      if (!roleSnap.exists || role.isActive !== true || disabled(role) || matches.size !== 1 || disabled(staff) || !allowed) {
+        throw Object.assign(new Error('Akses baca FAT/Manager/Admin aktif dan valid diperlukan.'), { status: 403, code: 'MANAGER_ROLE_REQUIRED' });
+      }
+      return { ok: true };
+    },
     authorizeManager: async (transaction, uid) => {
       const [roleSnap, canonical, legacy, direct] = await Promise.all([
         transaction.get(adminDb.collection('staff_roles').doc(uid)),
@@ -1815,6 +1849,249 @@ async function startServer() {
       });
       return result;
     },
+  });
+
+
+  // FAT read-only dashboard APIs (Finance/Accounting/Tax support). Fail-closed, projections only.
+  const setFatNoStore = (res: express.Response) => {
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+  };
+  async function authorizeReadActor(req: express.Request, allowedRoles: string[]): Promise<{ uid: string } | { error: { status: number; code: string; message: string } }> {
+    if (!adminAuth || !adminDb) return { error: { status: 503, code: 'SERVICE_UNAVAILABLE', message: 'Layanan data belum tersedia.' } };
+    const authHeader = String(req.headers?.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) {
+      return { error: { status: 401, code: authHeader ? 'INVALID_AUTH_HEADER' : 'AUTH_REQUIRED', message: 'Sesi autentikasi tidak valid. Silakan masuk kembali.' } };
+    }
+    const token = authHeader.slice(7).trim();
+    const verified = await verifyFirebaseIdToken(token).catch(() => null);
+    if (!verified?.uid || !/^[A-Za-z0-9_-]{1,128}$/.test(verified.uid)) {
+      return { error: { status: 401, code: 'AUTH_INVALID', message: 'Sesi login tidak valid. Silakan masuk kembali.' } };
+    }
+    const uid = verified.uid;
+    let ok = false;
+    try {
+      ok = await adminDb.runTransaction(async (t: any) => {
+        const [roleSnap, canonical, legacy, direct] = await Promise.all([
+          t.get(adminDb.collection('staff_roles').doc(uid)),
+          t.get(adminDb.collection('staff_users').where('authUserId', '==', uid).limit(2)),
+          t.get(adminDb.collection('staff_users').where('authUid', '==', uid).limit(2)),
+          t.get(adminDb.collection('staff_users').doc(uid)),
+        ]);
+        const matches = new Map<string, any>();
+        for (const snap of [...canonical.docs, ...legacy.docs, ...(direct.exists ? [direct] : [])]) matches.set(snap.id, snap);
+        const role = roleSnap.data() || {};
+        for (const linked of [role.staffId, role.staffUserId]) {
+          if (typeof linked === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(linked) && !matches.has(linked)) {
+            const snap = await t.get(adminDb.collection('staff_users').doc(linked));
+            if (snap.exists) matches.set(snap.id, snap);
+          }
+        }
+        const staff = [...matches.values()][0]?.data() || {};
+        const disabled = (r: any) => r?.isActive === false || ['inactive', 'disabled', 'archived', 'dinonaktifkan'].includes(String(r?.status || '').toLowerCase());
+        const roleName = String(role.role || staff.role || '').toLowerCase();
+        if (!roleSnap.exists || role.isActive !== true || disabled(role) || matches.size !== 1 || disabled(staff) || !allowedRoles.includes(roleName)) return false;
+        return true;
+      });
+    } catch {
+      return { error: { status: 503, code: 'SERVICE_UNAVAILABLE', message: 'Layanan otorisasi sedang tidak tersedia. Coba kembali.' } };
+    }
+    if (!ok) return { error: { status: 403, code: 'ROLE_REQUIRED', message: 'Akses peran aktif dan valid diperlukan.' } };
+    return { uid };
+  }
+  const asIso = (v: any) => typeof v === 'string' && v ? v : (v?.toDate ? v.toDate().toISOString() : '');
+  const FAT_LIST_LIMIT = 1000;
+
+  app.get('/api/fat/overview', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const [paymentsSnap, casesSnap, completionEventsSnap, completionGuardsSnap] = await Promise.all([
+        adminDb.collection('payments').select('status', 'amount').get(),
+        adminDb.collection('cases').select('caseId', 'recovery').get(),
+        adminDb.collection('payment_status_history').where('eventType', '==', 'refund_processed').select('caseId').limit(FAT_LIST_LIMIT + 1).get(),
+        adminDb.collection('payment_governance_receipts').where('action', '==', 'manual_refund_completion_guard').select('caseId').limit(FAT_LIST_LIMIT + 1).get(),
+      ]);
+      let txCount = 0, paidCount = 0, paidAmount = 0, pendingCount = 0, pendingAmount = 0, rejectedCount = 0, rejectedAmount = 0, unpaidCount = 0, expiredCount = 0, refundedPaymentCount = 0, cancelledCount = 0, cancelledAmount = 0, unknownCount = 0, unknownAmount = 0, classifiedCount = 0, failedCount = 0;
+      paymentsSnap.docs.forEach((d: any) => {
+        const p = d.data() || {};
+        txCount += 1;
+        const amt = parseFatAmount(p.amount);
+        if (!amt.valid) { failedCount += 1; return; }
+        const value = amt.value ?? 0;
+        const cat = fatStatusCategory(p.status);
+        if (cat === 'unknown') { unknownCount += 1; unknownAmount += value; return; }
+        classifiedCount += 1;
+        if (cat === 'paid') { paidCount += 1; paidAmount += value; }
+        else if (cat === 'pending') { pendingCount += 1; pendingAmount += value; }
+        else if (cat === 'rejected') { rejectedCount += 1; rejectedAmount += value; }
+        else if (cat === 'expired') { expiredCount += 1; }
+        else if (cat === 'refunded') { refundedPaymentCount += 1; }
+        else if (cat === 'unpaid') { unpaidCount += 1; }
+        else if (cat === 'cancelled') { cancelledCount += 1; cancelledAmount += value; }
+      });
+      const refundRows = casesSnap.docs
+        .map((d: any) => projectFatRefund(d.data() || {}, d.id))
+        .filter((row: FatRefundRow | null): row is FatRefundRow => row !== null);
+      const refundSummary = summarizeFatRefunds(refundRows);
+      const refundAnomalies = summarizeFatRefundAnomalies({
+        rows: refundRows,
+        completionEventCaseIds: completionEventsSnap.docs.map((d: any) => String((d.data() || {}).caseId || '')),
+        completionGuardCaseIds: completionGuardsSnap.docs.map((d: any) => String((d.data() || {}).caseId || '')),
+      });
+      const anomalyScope = computeFatAnomalyScope({
+        eventsCount: completionEventsSnap.docs.length,
+        guardsCount: completionGuardsSnap.docs.length,
+        limit: FAT_LIST_LIMIT,
+      });
+      const nowIso = new Date().toISOString();
+      return res.json({
+        success: true,
+        period: { type: 'all_time', label: 'Sepanjang waktu (akumulasi seluruh data yang tersedia saat ini)', timezone: 'Asia/Jakarta', generatedAt: nowIso },
+        payments: { transactionCount: txCount, paid: { count: paidCount, amount: paidAmount }, pending: { count: pendingCount, amount: pendingAmount }, rejected: { count: rejectedCount, amount: rejectedAmount }, unpaid: { count: unpaidCount }, expired: { count: expiredCount }, refundedOrPartiallyRefundedPayments: { count: refundedPaymentCount }, cancelled: { count: cancelledCount, amount: cancelledAmount }, unknown: { count: unknownCount, amount: unknownAmount }, invalidAmountCount: failedCount, reconciliation: summarizeFatPaymentReconciliation({ transactionCount: txCount, classified: classifiedCount, unknown: unknownCount, failed: failedCount }) },
+        refunds: { source: 'cases.recovery', ...refundSummary, anomalies: refundAnomalies, countingBasis: 'Satu siklus refund per caseId; payment_status_history hanya audit trail dan tidak dijumlahkan.', note: 'Nominal refund bersumber dari cases.recovery.refundAmount. amountTotal adalah total nominal pada semua status refund relevan dan BUKAN dana yang sudah dikembalikan; hanya COMPLETED_MANUAL yang terealisasi. COMPLETED_MANUAL berarti konfirmasi Manager, bukan verifikasi gateway. payments.refundAmount bukan sumber resmi karena writer/provenance belum teridentifikasi. Pendapatan bersih tidak dihitung.' },
+        meta: { paymentsComplete: true, refundsComplete: true, paymentsLimit: null, refundsLimit: null, paymentsScanned: txCount, casesScanned: casesSnap.size, anomaliesScopedToLatest: anomalyScope.scannedCount, anomaliesScope: anomalyScope },
+        notes: ['Nominal pembayaran menggunakan PaymentRecord.amount dari koleksi payments (bukan bookings.totalAmount).', 'Satu booking dapat memiliki lebih dari satu transaksi pembayaran; metrik dihitung per transaksi pembayaran.', 'Nominal yang tidak valid (kosong, bukan angka, NaN/Infinity, atau negatif) tidak dimasukkan ke total nominal dan dihitung terpisah.', 'Status pembayaran yang tidak dikenal dikategorikan Unknown, bukan Unpaid.', 'Pendapatan bersih tidak dihitung karena keterkaitan pembayaran-refund tidak selalu pasti.', 'Booking bukan bukti penerimaan uang.'],
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_OVERVIEW_FAILED', message: 'Ringkasan FAT belum dapat dimuat.' });
+    }
+  });
+
+  app.get('/api/fat/payments', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const fields = ['id', 'bookingId', 'bookingCode', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
+      const snap = await adminDb.collection('payments').select(...fields).limit(FAT_LIST_LIMIT + 1).get();
+      const truncated = snap.docs.length > FAT_LIST_LIMIT;
+      const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
+      let invalidAmountCount = 0;
+      const payments = docs.map((d: any) => {
+        const p = d.data() || {};
+        const amt = parseFatAmount(p.amount);
+        if (!amt.valid) invalidAmountCount += 1;
+        const refund = p.refundAmount === undefined || p.refundAmount === null ? null : parseFatAmount(p.refundAmount);
+        return {
+          id: String(p.id || d.id || ''),
+          bookingId: String(p.bookingId || ''),
+          bookingCode: String(p.bookingCode || ''),
+          amount: amt.value,
+          amountValid: amt.valid,
+          status: normalizeFatStatus(p.status),
+          statusCategory: fatStatusCategory(p.status),
+          paymentMethod: String(p.paymentMethod || p.methodType || p.bankCode || ''),
+          methodType: String(p.methodType || ''),
+          bankCode: String(p.bankCode || ''),
+          provider: String(p.provider || ''),
+          createdAt: asIso(p.createdAt),
+          updatedAt: asIso(p.updatedAt),
+          paidAt: asIso(p.paidAt),
+          verifiedAt: asIso(p.verifiedAt),
+          paymentProofUploadedAt: asIso(p.paymentProofUploadedAt || p.proofUploadedAt),
+          hasProof: Boolean(p.paymentProofUploadedAt || p.proofUploadedAt || (typeof p.paymentProofUrl === 'string' && p.paymentProofUrl.trim())),
+          rejectedAt: asIso(p.rejectedAt),
+          expiredAt: asIso(p.expiredAt),
+          refundedAt: asIso(p.refundedAt),
+          refundAmount: refund ? refund.value : null,
+          refundAmountValid: refund ? refund.valid : null,
+          currency: String(p.currency || 'IDR'),
+        };
+      }).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      return res.json({ success: true, count: payments.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, payments, note: 'Data proyeksi minimum dari koleksi payments (tanpa dokumen lengkap/PII sensitif berlebih). Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_PAYMENTS_FAILED', message: 'Data pembayaran FAT belum dapat dimuat.' });
+    }
+  });
+
+  app.get('/api/fat/refunds', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const snap = await adminDb.collection('cases').select('caseId', 'bookingId', 'bookingCode', 'recovery', 'createdAt', 'updatedAt').limit(FAT_LIST_LIMIT + 1).get();
+      const truncated = snap.docs.length > FAT_LIST_LIMIT;
+      const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
+      const rows = docs.map((d: any) => projectFatRefund(d.data() || {}, d.id));
+      const anomalyRows = rows.filter((row: FatRefundRow | null): row is FatRefundRow => row !== null);
+      const anomalies = summarizeFatRefundAnomalies({ rows: anomalyRows });
+      const seenCases = new Set<string>();
+      let invalidAmountCount = 0;
+      const refunds = rows.filter(Boolean).filter((row: any) => {
+        if (seenCases.has(row.caseId)) return false;
+        seenCases.add(row.caseId);
+        return true;
+      }).map((row: any) => {
+        if (!row.refundAmountValid) invalidAmountCount += 1;
+        return {
+          caseId: row.caseId,
+          bookingId: row.bookingId,
+          bookingCode: row.bookingCode,
+          refundPaymentId: row.refundPaymentId,
+          refundPaymentHistoryId: row.refundPaymentHistoryId,
+          refundStatus: row.refundStatus,
+          refundAmount: row.refundAmount,
+          refundAmountValid: row.refundAmountValid,
+          refundNotes: row.refundNotes,
+          updatedAt: asIso(row.updatedAt),
+          createdAt: asIso(row.createdAt),
+        };
+      });
+      return res.json({ success: true, count: refunds.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, anomalies, refunds, source: 'cases.recovery', note: 'Sumber utama refund: cases.recovery.refundStatus/refundAmount, satu siklus per caseId (bukan per event). Relasi payment memakai recovery.refundPaymentId/refundPaymentHistoryId; linkedPaymentId tidak dipakai. payment_status_history adalah jejak audit, bukan sumber nominal. Deteksi duplicate completion event dan legacy guard hanya tersedia di /api/fat/overview. Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'FAT_REFUNDS_FAILED', message: 'Data refund FAT belum dapat dimuat.' });
+    }
+  });
+
+  // FAT read-only Accurate sync status (no mutation controls). Uses same data sources as manager status view.
+  app.post('/api/integrations/accurate/fat/sync/status', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      if (!adminAuth || !adminDb) {
+        return res.status(503).json({ success: false, code: 'DATABASE_UNAVAILABLE', message: 'Layanan status Accurate belum tersedia.' });
+      }
+      const authz = await authorizeReadActor(req, ['manager', 'admin', 'fat']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+
+      const TARGET = 2974047;
+      const [controlSnap, latest] = await Promise.all([
+        adminDb.collection('accurate_sync_private').doc('control').get(),
+        adminDb.collection('accurate_sync_jobs').orderBy('createdAt', 'desc').limit(20).get().catch(() => ({ docs: [] as any[] })),
+      ]);
+      const c: any = controlSnap.exists ? controlSnap.data() : null;
+      const controlValid = c && c.schemaVersion === 1 && c.databaseId === TARGET && c.taxPolicy === 'no_extra_tax';
+      const control = controlValid ? c : null;
+      const jobs = (latest.docs || []).map((d: any) => {
+        const j = d.data() || {};
+        const ra = parseFatAmount(j.amount ?? j.totalAmount);
+        return {
+          id: d.id,
+          bookingCode: j.bookingCode || j.bookingId || d.id,
+          amount: ra.valid ? ra.value : null,
+          amountValid: ra.valid,
+          state: j.state || j.status || 'unknown',
+          createdAt: j.createdAt || '',
+          updatedAt: j.updatedAt || '',
+        };
+      });
+      const env = process.env;
+      const writesConfigured = env.ACCURATE_SYNC_WRITES_ENABLED === 'true';
+      const schedulerConfigured = Boolean(env.ACCURATE_SYNC_SCHEDULER_TOKEN || env.CRON_SECRET || env.ACCURATE_SYNC_SCHEDULER_ENABLED === 'true');
+      return res.json({
+        success: true,
+        mode: 'posting_v1',
+        databaseId: TARGET,
+        writesConfigured,
+        schedulerConfigured,
+        manual: control?.manual || null,
+        active: Boolean(control?.enabled),
+        jobs,
+      });
+    } catch (e: any) {
+      return res.status(503).json({ success: false, code: 'ACCURATE_RETRY', message: e?.message || 'Status sync belum dapat dimuat.' });
+    }
   });
 
   // Protected Server Endpoint for Payment Verification (Prompt 18 Phase 5)
@@ -3839,6 +4116,435 @@ async function startServer() {
   });
 
   // 2. Manager Manual Refund Status Endpoint
+  app.post('/api/cases/:caseId/recovery/propose', async (req, res) => {
+    setFatNoStore(res);
+    try {
+      const authz = await authorizeReadActor(req, ['css', 'supervisor', 'manager', 'admin']);
+      if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
+      const caseId = String(req.params?.caseId || '').trim();
+      if (!isValidStage7dDocId(caseId, 128)) {
+        return res.status(400).json({ success: false, code: 'INVALID_CASE_ID', message: 'ID kasus tidak valid.' });
+      }
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const recoveryType = typeof body.recoveryType === 'string' ? body.recoveryType.trim().slice(0, 120) : '';
+      const description = typeof body.description === 'string' ? body.description.trim().slice(0, 2000) : '';
+      if (!recoveryType || !description) {
+        return res.status(400).json({ success: false, code: 'INVALID_RECOVERY_PROPOSAL', message: 'Jenis dan deskripsi service recovery wajib diisi.' });
+      }
+      const expectsRefund = recoveryType.toLowerCase().includes('refund');
+      let refundAmount: number | undefined;
+      if (expectsRefund && body.refundAmount !== undefined && body.refundAmount !== null) {
+        const parsed = parseFatAmount(body.refundAmount);
+        if (!parsed.valid || parsed.value === null || parsed.value <= 0) {
+          return res.status(400).json({ success: false, code: 'INVALID_REFUND_AMOUNT', message: 'Nominal refund tidak valid.' });
+        }
+        refundAmount = parsed.value;
+      }
+      const expectedOutcome = typeof body.expectedOutcome === 'string' && body.expectedOutcome.trim() ? body.expectedOutcome.trim().slice(0, 500) : '';
+      const actorName = typeof body.actorName === 'string' && body.actorName.trim() ? body.actorName.trim().slice(0, 120) : '';
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const caseRef = adminDb.collection('cases').doc(caseId);
+        const snap = await t.get(caseRef);
+        if (!snap.exists) return { error: { status: 404, code: 'CASE_NOT_FOUND', message: 'Kasus tidak ditemukan.' } };
+        const data = snap.data() || {};
+        const existingStatus = String((data.recovery || {}).refundStatus || '').toUpperCase();
+        if (existingStatus && existingStatus !== 'NOT_REQUIRED') {
+          return { error: { status: 409, code: 'REFUND_CYCLE_EXISTS', message: 'Kasus ini sudah memiliki siklus refund; pengajuan ulang tidak diizinkan.' } };
+        }
+        const now = new Date().toISOString();
+        const recovery = {
+          type: recoveryType,
+          description,
+          ...(expectedOutcome ? { expectedOutcome } : {}),
+          proposedBy: authz.uid,
+          proposedByName: actorName || authz.uid,
+          proposedAt: now,
+          status: 'PROPOSED',
+          ...(refundAmount !== undefined ? { refundAmount } : {}),
+          refundStatus: expectsRefund ? 'REVIEW_REQUIRED' : 'NOT_REQUIRED',
+        };
+        t.update(caseRef, { recovery, status: 'WAITING_MANAGER', updatedAt: now });
+        const caseEventId = `ce_propose_${caseId}_${Date.now().toString(36)}_${randomInt(1000000).toString(36)}`;
+        t.set(adminDb.collection('case_events').doc(caseEventId), {
+          id: caseEventId,
+          caseId,
+          caseCode: String(data.caseCode || ''),
+          eventType: 'recovery.proposed',
+          actorId: authz.uid,
+          actorUid: authz.uid,
+          actorName: actorName || authz.uid,
+          actorRole: 'staff',
+          summary: 'Service recovery diajukan',
+          details: description,
+          createdAt: now,
+          timestamp: now,
+        });
+        return { recovery };
+      });
+      if ('error' in result) return res.status(result.error.status).json({ success: false, code: result.error.code, message: result.error.message });
+      return res.json({ success: true, recovery: result.recovery });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, code: 'RECOVERY_PROPOSE_FAILED', message: 'Service recovery belum dapat diajukan.' });
+    }
+  });
+
+  app.post('/api/cases/:caseId/recovery/approve', async (req, res) => {
+    setStage7dNoStore(res);
+    const snapExists = (snap: any): boolean =>
+      Boolean(snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists));
+    const textId = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    try {
+      const authResult = await verifyStage7dBearerToken(req);
+      if (!authResult.ok) {
+        return res.status(authResult.status || 401).json({
+          success: false,
+          code: authResult.code,
+          error: authResult.message,
+          message: authResult.message,
+        });
+      }
+      const verifiedUid = authResult.uid!;
+      const caseId = textId(req.params?.caseId);
+      if (!isValidStage7dDocId(caseId, 128)) {
+        return res.status(400).json({ success: false, code: 'INVALID_CASE_ID', message: 'ID kasus tidak valid.' });
+      }
+      if (!adminDb || typeof adminDb.runTransaction !== 'function') {
+        return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server sedang tidak tersedia.' });
+      }
+
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const decision = textId(body.decision).toUpperCase();
+      if (decision !== 'APPROVE' && decision !== 'REJECT') {
+        return res.status(400).json({ success: false, code: 'INVALID_RECOVERY_DECISION', message: 'Keputusan recovery tidak valid.' });
+      }
+      const reason = textId(body.reason).slice(0, 2000);
+      const rawAmount = body.approvedRefundAmount;
+      const approvedRefundAmount =
+        rawAmount === undefined || rawAmount === null
+          ? undefined
+          : typeof rawAmount === 'number' && Number.isFinite(rawAmount) && rawAmount > 0 && rawAmount <= 100_000_000
+          ? rawAmount
+          : null;
+      if (approvedRefundAmount === null) {
+        return res.status(400).json({ success: false, code: 'INVALID_REFUND_AMOUNT', message: 'Nominal refund tidak valid.' });
+      }
+      const requestId = textId(body.requestId);
+      if (!isValidStage7dDocId(requestId, 128) || requestId.length < 12) {
+        return res.status(400).json({ success: false, code: 'INVALID_REQUEST_ID', message: 'Request ID tidak valid.' });
+      }
+      const fingerprint = createHash('sha256')
+        .update(recoveryApproveFingerprintPayload({
+          action: 'recovery_approve',
+          caseId,
+          decision,
+          reason,
+          approvedRefundAmount: approvedRefundAmount ?? null,
+          actorUid: verifiedUid,
+          requestId,
+        }))
+        .digest('hex');
+      const receiptId = `rappr_${createHash('sha256').update(`recovery_approve:${requestId}`).digest('hex').slice(0, 32)}`;
+
+      const result = await adminDb.runTransaction(async (transaction: any) => {
+        const roleRef = adminDb.collection('staff_roles').doc(verifiedUid);
+        const staffQueries = [
+          adminDb.collection('staff_users').where('authUserId', '==', verifiedUid).limit(2),
+          adminDb.collection('staff_users').where('authUid', '==', verifiedUid).limit(2),
+        ];
+        const directStaffRef = adminDb.collection('staff_users').doc(verifiedUid);
+        const caseRef = adminDb.collection('cases').doc(caseId);
+        const receiptRef = adminDb.collection('payment_governance_receipts').doc(receiptId);
+
+        const [roleSnap, staffA, staffB, directStaff, caseSnap, receiptSnap] = await Promise.all([
+          transaction.get(roleRef),
+          transaction.get(staffQueries[0]),
+          transaction.get(staffQueries[1]),
+          transaction.get(directStaffRef),
+          transaction.get(caseRef),
+          transaction.get(receiptRef),
+        ]);
+        const roleData = snapExists(roleSnap) ? roleSnap.data() || {} : {};
+        const staffDocs = new Map<string, any>();
+        for (const snap of [staffA, staffB]) {
+          for (const d of snap?.docs || []) if (snapExists(d)) staffDocs.set(d.id, d);
+        }
+        if (snapExists(directStaff)) staffDocs.set(directStaff.id, directStaff);
+
+        const managerCheck = validateStage7dActiveManagerIdentity(
+          verifiedUid,
+          snapExists(roleSnap),
+          roleData,
+          staffDocs
+        );
+        if (!managerCheck.ok) {
+          return { status: managerCheck.status || 403, code: managerCheck.code, message: managerCheck.message };
+        }
+
+        if (!snapExists(caseSnap)) return { status: 404, code: 'CASE_NOT_FOUND', message: 'Kasus tidak ditemukan.' };
+        const caseData = caseSnap.data() || {};
+        if (caseData.id !== undefined && caseData.id !== null && caseData.id !== '' && caseData.id !== caseId) {
+          return { status: 409, code: 'CASE_ID_CONFLICT', message: 'Identitas dokumen kasus tidak konsisten.' };
+        }
+        const rec = caseData.recovery as Record<string, any> | undefined;
+        if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+          return { status: 400, code: 'RECOVERY_NOT_FOUND', message: 'Kasus ini belum memiliki recovery record.' };
+        }
+
+        if (snapExists(receiptSnap)) {
+          const receipt = receiptSnap.data() || {};
+          const requestMatches = recoveryApproveReceiptMatches({
+            receipt,
+            expected: { receiptId, requestId, actorUid: verifiedUid, caseId, decision, fingerprint },
+          });
+          if (!requestMatches) {
+            return {
+              status: 409,
+              code: 'IDEMPOTENCY_PARAMETER_MISMATCH',
+              message: 'Request ID sudah dipakai untuk identitas atau parameter lain.',
+            };
+          }
+          const stored = receipt.responsePayload && typeof receipt.responsePayload === 'object' && !Array.isArray(receipt.responsePayload)
+            ? (receipt.responsePayload as Record<string, any>)
+            : {};
+          const storedRec = stored.recovery && typeof stored.recovery === 'object' && !Array.isArray(stored.recovery)
+            ? (stored.recovery as Record<string, any>)
+            : {};
+          const stateMatches =
+            textId(stored.caseId) === caseId &&
+            textId(stored.refundStatus) === textId(storedRec.refundStatus) &&
+            textId(rec.refundStatus) === textId(stored.refundStatus) &&
+            textId(rec.status) === textId(storedRec.status);
+          if (!stateMatches) {
+            return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State kasus tidak sesuai dengan receipt idempotensi.' };
+          }
+          if (decision === 'APPROVE') {
+            const storedPayment = stored.paymentReservation && typeof stored.paymentReservation === 'object'
+              ? (stored.paymentReservation as Record<string, any>)
+              : {};
+            const storedPaymentId = textId(storedPayment.paymentId);
+            if (!isValidStage7dDocId(storedPaymentId, 128)) {
+              return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State reservasi tidak sesuai dengan receipt idempotensi.' };
+            }
+            const reservedSnap = await transaction.get(adminDb.collection('payments').doc(storedPaymentId));
+            const reservedData = snapExists(reservedSnap) ? reservedSnap.data() || {} : {};
+            if (
+              textId(reservedData.refundReservationCaseId) !== caseId ||
+              textId(reservedData.refundReservationStatus) !== 'RESERVED' ||
+              textId(reservedData.refundClaimCaseId) === caseId ||
+              textId(reservedData.refundClaimStatus).toUpperCase() === 'CLAIMED'
+            ) {
+              return { status: 409, code: 'RECEIPT_STATE_MISMATCH', message: 'State reservasi tidak sesuai dengan receipt idempotensi.' };
+            }
+          }
+          return { status: 200, ...stored, isIdempotent: true, noOp: true };
+        }
+
+        const classification = classifyRefundRecovery(rec);
+        if (!classification.isRefund) {
+          return {
+            status: 400,
+            code: 'NON_REFUND_RECOVERY_LEGACY_PATH',
+            message: 'Approval recovery non-refund tetap memakai jalur lama.',
+          };
+        }
+        if (classification.legacy) {
+          return {
+            status: 409,
+            code: 'LEGACY_REFUND_STATUS_UNSUPPORTED',
+            message: `Status refund legacy ${classification.status || '(kosong)'} tidak dapat diproses otomatis; diperlukan keputusan data eksplisit.`,
+          };
+        }
+        const currentRefundStatus = classification.status;
+        if (currentRefundStatus === 'COMPLETED_MANUAL') {
+          return { status: 409, code: 'REFUND_STATUS_TERMINAL', message: 'Status refund bersifat terminal.' };
+        }
+        if (currentRefundStatus === 'REJECTED') {
+          return { status: 409, code: 'REFUND_STATUS_TERMINAL', message: 'Status refund bersifat terminal.' };
+        }
+        if (currentRefundStatus === 'APPROVED') {
+          return {
+            status: 409,
+            code: 'REFUND_TERMINAL_REQUEST_MISMATCH',
+            message: 'Keputusan terminal memerlukan request ID yang sama dengan transaksi awal.',
+          };
+        }
+        if (textId(rec.status) !== 'PROPOSED') {
+          return { status: 409, code: 'RECOVERY_NOT_PROPOSED', message: 'Pengajuan recovery tidak berada pada status PROPOSED.' };
+        }
+
+        const caseCode = textId(caseData.caseCode) || caseId;
+        const persistedBookingId = textId(caseData.bookingId);
+        const bookingSnap = isValidStage7dDocId(persistedBookingId, 128)
+          ? await transaction.get(adminDb.collection('bookings').doc(persistedBookingId))
+          : null;
+        const bookingData = snapExists(bookingSnap) ? bookingSnap.data() || {} : null;
+        const activePaymentId = bookingData ? textId(bookingData.activePaymentId) : '';
+        const paymentSnap = isValidStage7dDocId(persistedBookingId, 128)
+          ? await transaction.get(adminDb.collection('payments').where('bookingId', '==', persistedBookingId))
+          : null;
+        const bookingPayments = (paymentSnap?.docs || []).filter((d: any) => snapExists(d));
+        const activeMatches = bookingPayments.filter((d: any) => d.id === activePaymentId);
+        const otherPaid = bookingPayments.filter(
+          (d: any) => d.id !== activePaymentId && textId((d.data() || {}).status).toLowerCase() === 'paid'
+        );
+        const paymentUnambiguous =
+          isValidStage7dDocId(activePaymentId, 128) && activeMatches.length === 1 && otherPaid.length === 0;
+        if (!paymentUnambiguous && decision === 'APPROVE') {
+          return {
+            status: 409,
+            code: 'PAYMENT_NOT_UNAMBIGUOUS',
+            message: 'Payment tidak dapat dipastikan secara unik; approval refund memerlukan peninjauan manual.',
+          };
+        }
+
+        let paymentRef: any = null;
+        let paymentData: Record<string, any> = {};
+        if (paymentUnambiguous) {
+          paymentRef = adminDb.collection('payments').doc(activePaymentId);
+          const paymentSnapFresh = await transaction.get(paymentRef);
+          if (!snapExists(paymentSnapFresh)) {
+            return { status: 409, code: 'LINKED_PAYMENT_NOT_FOUND', message: 'Payment tertaut tidak ditemukan.' };
+          }
+          paymentData = paymentSnapFresh.data() || {};
+          const reservationCheck = evaluateRefundPaymentReservation({
+            caseId,
+            claimOwnerCaseId: textId(paymentData.refundClaimCaseId),
+            claimStatus: textId(paymentData.refundClaimStatus),
+            reservationOwnerCaseId: textId(paymentData.refundReservationCaseId),
+            reservationStatus: textId(paymentData.refundReservationStatus),
+          });
+          if (!reservationCheck.ok) {
+            return { status: 409, code: reservationCheck.code || 'PAYMENT_REFUND_RESERVATION_CONFLICT', message: reservationCheck.message };
+          }
+        }
+
+        const now = new Date().toISOString();
+        const nextRefundStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+        const updatedRec: Record<string, any> = {
+          ...rec,
+          status: nextRefundStatus,
+          refundStatus: nextRefundStatus,
+          ...(decision === 'APPROVE'
+            ? {
+                approvedBy: managerCheck.actorStaffId,
+                approvedByName: managerCheck.actorName,
+                approvedAt: now,
+                ...(approvedRefundAmount !== undefined ? { refundAmount: approvedRefundAmount } : {}),
+              }
+            : {
+                rejectedBy: managerCheck.actorStaffId,
+                rejectedByUid: verifiedUid,
+                rejectedByName: managerCheck.actorName,
+                rejectedAt: now,
+                rejectionReason: reason,
+              }),
+        };
+
+        const suffix = createHash('sha256')
+          .update(`recovery_approve:${caseId}:${decision}:${verifiedUid}:${now}:${randomInt(1000000).toString(36)}`)
+          .digest('hex')
+          .slice(0, 32);
+        const caseEventId = `ce_appr_${suffix}`;
+        const auditId = `audit_appr_${suffix}`;
+
+        transaction.update(caseRef, { recovery: updatedRec, status: 'IN_PROGRESS', updatedAt: now });
+        if (paymentRef && decision === 'APPROVE') {
+          transaction.update(paymentRef, {
+            refundReservationCaseId: caseId,
+            refundReservationStatus: 'RESERVED',
+            refundReservedAt: now,
+            updatedAt: now,
+          });
+        } else if (paymentRef && decision === 'REJECT' && textId(paymentData.refundReservationCaseId) === caseId) {
+          transaction.update(paymentRef, {
+            refundReservationStatus: 'RELEASED',
+            refundReservationReleasedAt: now,
+            refundReservationReleaseReason: 'REJECTED',
+            updatedAt: now,
+          });
+        }
+        transaction.set(adminDb.collection('case_events').doc(caseEventId), {
+          id: caseEventId,
+          caseId,
+          caseCode,
+          eventType: decision === 'APPROVE' ? 'recovery.approved' : 'recovery.rejected',
+          actorId: managerCheck.actorStaffId,
+          actorUid: verifiedUid,
+          actorName: managerCheck.actorName,
+          actorRole: managerCheck.actorRoleLabel,
+          summary: decision === 'APPROVE' ? 'Service recovery refund disetujui' : 'Pengajuan refund ditolak',
+          details: reason,
+          newValue: nextRefundStatus,
+          timestamp: now,
+        });
+        transaction.set(adminDb.collection('operational_audit_logs').doc(auditId), buildRecoveryAuditLog({
+          id: auditId,
+          caseId,
+          caseCode,
+          bookingId: persistedBookingId,
+          bookingCode: textId(caseData.bookingCode).toUpperCase(),
+          action: decision === 'APPROVE' ? 'recovery_approved' : 'recovery_rejected',
+          actorUid: verifiedUid,
+          actorStaffId: managerCheck.actorStaffId,
+          actorName: managerCheck.actorName,
+          actorRole: managerCheck.actorRole,
+          note: reason,
+          timestamp: now,
+          formattedWIB: formatStage7dWIB(new Date(now)),
+        }));
+
+        const responsePayload = {
+          requestId,
+          caseId,
+          caseCode,
+          recovery: updatedRec,
+          refundStatus: nextRefundStatus,
+          paymentReservation: decision === 'APPROVE'
+            ? { paymentId: activePaymentId, status: 'RESERVED', reservedAt: now }
+            : null,
+          caseEventId,
+          auditId,
+          isIdempotent: false,
+        };
+        transaction.set(receiptRef, {
+          id: receiptId,
+          action: 'recovery_approve',
+          requestId,
+          caseId,
+          caseCode,
+          decision,
+          actorUid: verifiedUid,
+          actorStaffId: managerCheck.actorStaffId,
+          actorRole: managerCheck.actorRole,
+          actorName: managerCheck.actorName,
+          fingerprint,
+          responsePayload,
+          createdAt: now,
+          committedAt: now,
+        });
+
+        return { status: 200, ...responsePayload };
+      });
+
+      if (result.status !== 200) {
+        return res.status(result.status).json({
+          success: false,
+          code: result.code || 'RECOVERY_APPROVE_REJECTED',
+          error: result.message,
+          message: result.message,
+        });
+      }
+      return res.status(200).json({ success: true, ...result });
+    } catch (e: any) {
+      return res.status(500).json({
+        success: false,
+        code: 'RECOVERY_APPROVE_FAILED',
+        message: 'Keputusan recovery refund belum dapat diproses.',
+      });
+    }
+  });
+
   app.post('/api/cases/:caseId/manual-refund-status', async (req, res) => {
     setStage7dNoStore(res);
     const snapExists = (snap: any): boolean =>
@@ -5240,6 +5946,7 @@ async function startServer() {
           refundAmount: number;
           paymentHistoryLinked: boolean;
           reviewRequired: boolean;
+          requestId?: string;
           paymentId?: string;
           paymentHistoryId?: string;
           linkageReviewReason?: string;
@@ -5303,6 +6010,7 @@ async function startServer() {
             refundAmount: guard.refundAmount,
             paymentHistoryLinked: guard.paymentHistoryLinked,
             reviewRequired: guard.reviewRequired,
+            requestId: textId(guard.requestId),
             ...(guard.paymentHistoryLinked
               ? {
                   paymentId: guard.paymentId,
@@ -5350,6 +6058,7 @@ async function startServer() {
                 refundAmount: rResp.recovery.refundAmount,
                 paymentHistoryLinked: rResp.paymentHistoryLinked,
                 reviewRequired: rResp.reviewRequired,
+                requestId: textId(rData.requestId),
                 ...(rResp.paymentHistoryLinked
                   ? {
                       paymentId: rResp.paymentId,
@@ -5390,6 +6099,15 @@ async function startServer() {
               reviewRequired: true,
               message:
                 'Konfirmasi refund manual pada kasus ini telah tercatat dan tidak dapat ditulis ulang dengan parameter berbeda.',
+            };
+          }
+
+          if (!matchesManualRefundRequestId(trustedCompletion?.requestId || '', cleanRequestId)) {
+            return {
+              status: 409,
+              code: 'REFUND_TERMINAL_REQUEST_MISMATCH',
+              reviewRequired: true,
+              message: 'Status refund sudah selesai; requestId berbeda tidak diizinkan.',
             };
           }
 
@@ -5517,8 +6235,48 @@ async function startServer() {
           };
         }
 
-        // Check same-state no-op for non-completed statuses without an existing receipt
         const currentRefundStatus = textId(rec.refundStatus);
+
+        // REJECTED is terminal: only a full authoritative payload match may be a no-op.
+        if (currentRefundStatus === 'REJECTED' && newStatus === 'REJECTED') {
+          const authoritativeRejectionMatches = rejectionPayloadMatchesAuthoritativeState({
+            authoritative: rec,
+            incoming: {
+              actorUid: verifiedUid,
+              actorStaffId: managerCheck.actorStaffId,
+              actorName: managerCheck.actorName,
+              note: sanitizedNote,
+              refundAmount: validatedRefundAmount,
+              refundMethod: sanitizedMethod,
+              refundDate: sanitizedDate,
+              refundReference: sanitizedReference,
+              refundProofUrl: sanitizedProofUrl,
+            },
+          });
+          if (!authoritativeRejectionMatches) {
+            return {
+              status: 409,
+              code: 'REFUND_STATUS_TERMINAL',
+              message: 'Status refund ditolak bersifat terminal; payload berbeda tidak diizinkan.',
+            };
+          }
+          return {
+            caseId,
+            caseCode: persistedCaseCode,
+            bookingId: persistedBookingId || '',
+            bookingCode: canonicalBookingCode || '',
+            oldStatus: currentRefundStatus,
+            newStatus,
+            recovery: rec,
+            paymentHistoryLinked: false,
+            reviewRequired: false,
+            status: 200,
+            isIdempotent: true,
+            noOp: true,
+          };
+        }
+
+        // Check same-state no-op for non-terminal statuses without an existing receipt
         if (
           currentRefundStatus === newStatus &&
           (validatedRefundAmount === null || validatedRefundAmount === rec.refundAmount) &&
@@ -5540,6 +6298,14 @@ async function startServer() {
             status: 200,
             isIdempotent: true,
             noOp: true,
+          };
+        }
+
+        if (!canTransitionRefundStatus(currentRefundStatus, newStatus)) {
+          return {
+            status: 409,
+            code: 'REFUND_STATUS_TERMINAL',
+            message: 'Status refund bersifat terminal dan tidak dapat diubah.',
           };
         }
 
@@ -5592,6 +6358,24 @@ async function startServer() {
               status: 409,
               code: 'FOREIGN_PAYMENT_LINKAGE',
               message: 'ID pembayaran pada permintaan tidak sesuai dengan pembayaran sah reservasi ini.',
+            };
+          }
+        }
+
+        if (newStatus === 'COMPLETED_MANUAL') {
+          const claimCheck = evaluateRefundPaymentClaim({
+            targetPaymentId: linkedPayment ? linkedPayment.id : '',
+            linkedRefundPaymentId: textId(rec.refundPaymentId),
+            claimOwnerCaseId: linkedPayment ? textId(linkedPayment.data.refundClaimCaseId) : '',
+            claimStatus: linkedPayment ? textId(linkedPayment.data.refundClaimStatus) : '',
+            reservationOwnerCaseId: linkedPayment ? textId(linkedPayment.data.refundReservationCaseId) : '',
+            caseId,
+          });
+          if (!claimCheck.ok) {
+            return {
+              status: 409,
+              code: claimCheck.code || 'PAYMENT_REFUND_CLAIM_CONFLICT',
+              message: claimCheck.message || 'Pembayaran ini sudah terkait dengan kasus refund lain.',
             };
           }
         }
@@ -5657,6 +6441,14 @@ async function startServer() {
             updatedRec.refundPaymentId = linkedPayment.id;
             updatedRec.refundPaymentHistoryId = actualManualRefundHistId;
           }
+        }
+
+        if (newStatus === 'REJECTED') {
+          updatedRec.rejectedByUid = verifiedUid;
+          updatedRec.rejectedBy = managerCheck.actorStaffId;
+          updatedRec.rejectedByName = managerCheck.actorName;
+          updatedRec.rejectedAt = nowIso;
+          updatedRec.rejectionReason = sanitizedNote;
         }
 
         const caseEventId = cleanRequestId
@@ -5784,6 +6576,16 @@ async function startServer() {
             timestamp: nowIso,
           };
           transaction.set(actualManualRefundHistRef, paymentHistoryEntry);
+          if (newStatus === 'COMPLETED_MANUAL') {
+            // shortcut: claim permanen, release hanya bila transaksi rollback; upgrade bila aturan bisnis mengizinkan pembatalan refund.
+            transaction.update(adminDb.collection('payments').doc(linkedPayment.id), {
+              refundClaimCaseId: caseId,
+              refundClaimStatus: 'CLAIMED',
+              refundClaimedAt: nowIso,
+              refundClaimHistoryId: actualManualRefundHistId,
+              updatedAt: nowIso,
+            });
+          }
         }
 
         if (newStatus === 'COMPLETED_MANUAL' && effectiveRefundAmount !== undefined) {
@@ -15737,6 +16539,434 @@ async function startServer() {
   app.post('/api/booking-status-history/append', handleBookingStatusHistoryAppend);
 
   // =============================================================
+  // CS RESCHEDULE REQUEST & CUSTOMER APPROVAL (server-authoritative)
+  // =============================================================
+  const isValidBookingDocId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v.trim());
+  const cleanText = (v: unknown, max = 500): string => typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim().slice(0, max) : '';
+  const isoNow = () => new Date().toISOString();
+  const formatDateTimeWIBServer = (dateOrIso: string | Date): string => {
+    try {
+      const d = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso;
+      if (isNaN(d.getTime())) return String(dateOrIso);
+      const dateFormatted = new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(d);
+      return `${dateFormatted} WIB`;
+    } catch { return String(dateOrIso); }
+  };
+  const isValidYmd = (v: string): boolean => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const [ys, ms, ds] = v.split('-');
+    const y = Number(ys), m = Number(ms), d = Number(ds);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  };
+  const isValidHm = (v: string): boolean => {
+    if (!/^\d{2}:\d{2}$/.test(v)) return false;
+    const [hs, ms] = v.split(':');
+    const h = Number(hs), m = Number(ms);
+    return Number.isInteger(h) && Number.isInteger(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59;
+  };
+  const isValidSchedulePair = (date: string, time: string): boolean => isValidYmd(date) && isValidHm(time);
+  const getBookingCustomerAuthUid = (booking: any): string | undefined => {
+    for (const v of [booking?.customerAuthUid, booking?.authUserId]) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return undefined;
+  };
+  const getEffectiveTaskStatus = (booking: any): string => {
+    const raw = typeof booking?.taskStatus === 'string' ? booking.taskStatus.trim() : '';
+    return raw || 'Open';
+  };
+
+  async function verifyBearerUid(req: any): Promise<string | null> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.split('Bearer ')[1]?.trim();
+    if (!token) return null;
+    const verified = await adminAuth?.verifyIdToken(token).catch(() => null);
+    return verified?.uid || null;
+  }
+
+  app.post('/api/bookings/:bookingId/reschedule-propose', async (req, res) => {
+    const requestId = (req as any).id;
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server tidak tersedia.', requestId });
+      const bookingId = isValidBookingDocId(req.params.bookingId) ? req.params.bookingId.trim() : '';
+      if (!bookingId) return res.status(400).json({ success: false, code: 'INVALID_BOOKING_ID', message: 'ID booking tidak valid.', requestId });
+      const staffUid = await verifyBearerUid(req);
+      if (!staffUid) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', message: 'Sesi staf diperlukan.', requestId });
+      const roleDoc = await adminDb.collection('staff_roles').doc(staffUid).get();
+      if (!roleDoc.exists) return res.status(403).json({ success: false, code: 'PERMISSION_DENIED', message: 'Identitas staf tidak terdaftar.', requestId });
+      const roleData = roleDoc.data() as any;
+      if (!roleData?.isActive || !['css', 'supervisor', 'manager', 'admin'].includes(roleData.role)) {
+        return res.status(403).json({ success: false, code: 'PERMISSION_DENIED', message: 'Hanya staf operasional berwenang mengajukan reschedule.', requestId });
+      }
+      const staffRole = cleanText(roleData.role, 20).toLowerCase() as 'css' | 'supervisor' | 'manager' | 'admin';
+      const staffName = cleanText(roleData.name || req.body?.cssStaffName || 'CSS Senzu', 80) || 'CSS Senzu';
+      const newDate = cleanText(req.body?.newDate, 20);
+      const newTime = cleanText(req.body?.newTime, 20);
+      const reason = cleanText(req.body?.reason || req.body?.notes, 500);
+      if (!isValidSchedulePair(newDate, newTime)) {
+        return res.status(400).json({ success: false, code: 'INVALID_SCHEDULE', message: 'Tanggal/jam usulan tidak valid (gunakan tanggal kalender valid dan jam 00:00–23:59).', requestId });
+      }
+
+      const now = isoNow();
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const snap = await t.get(bookingRef);
+        if (!snap.exists) throw Object.assign(new Error('Pesanan tidak ditemukan.'), { statusCode: 404, code: 'BOOKING_NOT_FOUND' });
+        const booking = snap.data() as any;
+        if (['Completed', 'Cancelled', 'Treatment', 'On The Way', 'Arrived'].includes(booking.status)) {
+          throw Object.assign(new Error('Status booking saat ini tidak dapat diajukan reschedule.'), { statusCode: 409, code: 'INVALID_BOOKING_STATUS' });
+        }
+        if (booking.csRescheduleRequest?.status === 'pending_customer') {
+          throw Object.assign(new Error('Masih ada permintaan reschedule yang menunggu konfirmasi customer.'), { statusCode: 409, code: 'REQUEST_ALREADY_PENDING' });
+        }
+        const oldDate = cleanText(booking.scheduleDate, 20);
+        const oldTime = cleanText(booking.scheduleTime, 20);
+        if (!isValidSchedulePair(oldDate, oldTime)) {
+          throw Object.assign(new Error('Jadwal aktif booking tidak valid; tidak dapat mengajukan reschedule.'), { statusCode: 409, code: 'INVALID_ACTIVE_SCHEDULE' });
+        }
+        if (oldDate === newDate && oldTime === newTime) {
+          throw Object.assign(new Error('Jadwal usulan harus berbeda dari jadwal aktif.'), { statusCode: 400, code: 'SAME_SCHEDULE' });
+        }
+
+        let recipientAuthUid = getBookingCustomerAuthUid(booking);
+        if (!recipientAuthUid && typeof booking.customerId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(booking.customerId.trim())) {
+          const custSnap = await t.get(adminDb.collection('customers').doc(booking.customerId.trim()));
+          if (custSnap.exists) {
+            const cust = custSnap.data() || {};
+            const custAuth = [cust.authUserId, cust.customerAuthUid].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+            if (custAuth.length > 0) recipientAuthUid = custAuth[0];
+          }
+        }
+        if (!recipientAuthUid) {
+          throw Object.assign(new Error('Pemilik booking (Firebase Auth UID) belum terpetakan/terverifikasi. Lakukan pemetaan identitas customer ke akun login sebelum mengajukan reschedule.'), { statusCode: 409, code: 'CUSTOMER_AUTH_MAPPING_REQUIRED' });
+        }
+
+        const reqObjId = `csr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const oldScheduleAt = cleanText(booking.scheduleAt || `${oldDate} ${oldTime}`, 60);
+        const proposedScheduleAt = `${newDate} ${newTime}`;
+        const previousTaskStatus = getEffectiveTaskStatus(booking);
+        const csRescheduleRequest = {
+          id: reqObjId,
+          status: 'pending_customer',
+          requestedByRole: staffRole,
+          requestedById: roleData.staffId || staffUid,
+          requestedByName: staffName,
+          requestedAt: now,
+          oldScheduleDate: oldDate,
+          oldScheduleTime: oldTime,
+          oldScheduleAt,
+          proposedScheduleDate: newDate,
+          proposedScheduleTime: newTime,
+          proposedScheduleAt,
+          previousTaskStatus,
+          ...(reason ? { reason } : {}),
+        };
+        t.update(bookingRef, { csRescheduleRequest, taskStatus: 'Waiting Customer', updatedAt: now });
+
+        const eventId = `evt_resched_req_${reqObjId}`;
+        const notifId = `notif_resched_req_${bookingId}_${reqObjId}`;
+        const notif = {
+          id: notifId,
+          eventId,
+          eventType: 'booking.reschedule_requested',
+          recipientRole: 'customer',
+          recipientUserId: recipientAuthUid,
+          bookingId,
+          bookingCode: booking.bookingCode || '',
+          customerId: booking.customerId || undefined,
+          title: 'Permintaan Perubahan Jadwal',
+          message: `CS mengajukan perubahan jadwal pesanan #${booking.bookingCode || bookingId}: ${oldScheduleAt} → ${proposedScheduleAt}. Mohon konfirmasi persetujuan Anda.`,
+          channel: 'in_app',
+          priority: 'HIGH',
+          read: false,
+          readAt: null,
+          actionUrl: `/portal?booking=${booking.bookingCode || bookingId}&reschedule=pending`,
+          metadata: { bookingId, bookingCode: booking.bookingCode, customerId: booking.customerId, oldScheduleAt, proposedScheduleAt, requestId: reqObjId },
+          createdAt: now,
+        };
+        t.set(adminDb.collection('notification_events').doc(eventId), {
+          id: eventId, eventType: 'booking.reschedule_requested', bookingId, actorId: roleData.staffId || staffUid, actorRole: staffRole,
+          payload: notif.metadata, createdAt: now, status: 'processed', processedAt: now,
+        }, { merge: false });
+        t.set(adminDb.collection('notifications').doc(notifId), notif, { merge: false });
+
+        const histRef = adminDb.collection('booking_status_history').doc();
+        t.set(histRef, {
+          id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+          note: `Permintaan reschedule dikirim ke customer: ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB. Menunggu konfirmasi customer.`,
+          updatedByRole: staffRole, updatedByName: staffName, timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          requestId: `req_${reqObjId}`,
+        });
+        const auditRef = adminDb.collection('operational_audit_logs').doc();
+        t.set(auditRef, {
+          id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+          therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+          action: 'reschedule', actorRole: staffRole, actorName: staffName,
+          oldValue: oldScheduleAt, newValue: `${proposedScheduleAt} (menunggu konfirmasi customer)`,
+          reason: reason || 'Permintaan perubahan jadwal oleh staf menunggu persetujuan customer',
+          note: `Permintaan reschedule (${reqObjId}) diajukan; jadwal aktif belum berubah`,
+          timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+        });
+
+        return { request: csRescheduleRequest };
+      });
+      return res.json({ success: true, requestId, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ success: false, code: err?.code || 'INTERNAL_ERROR', message: err?.message || 'Gagal mengajukan reschedule.', requestId });
+    }
+  });
+
+  app.post('/api/bookings/:bookingId/reschedule-respond', async (req, res) => {
+    const requestId = (req as any).id;
+    try {
+      await ensureServerAuthenticated();
+      if (!adminDb) return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Database server tidak tersedia.', requestId });
+      const bookingId = isValidBookingDocId(req.params.bookingId) ? req.params.bookingId.trim() : '';
+      if (!bookingId) return res.status(400).json({ success: false, code: 'INVALID_BOOKING_ID', message: 'ID booking tidak valid.', requestId });
+      const customerUid = await verifyBearerUid(req);
+      if (!customerUid) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', message: 'Sesi customer diperlukan.', requestId });
+      const action = cleanText(req.body?.action, 20).toLowerCase();
+      const requestKey = cleanText(req.body?.requestId, 64);
+      const responseNote = cleanText(req.body?.note, 500);
+      if (!['approve', 'reject'].includes(action)) {
+        return res.status(400).json({ success: false, code: 'INVALID_ACTION', message: 'Aksi harus approve atau reject.', requestId });
+      }
+      if (!requestKey) {
+        return res.status(400).json({ success: false, code: 'REQUEST_ID_REQUIRED', message: 'requestId permintaan reschedule wajib dikirim.', requestId });
+      }
+
+      const now = isoNow();
+      const bookingRef = adminDb.collection('bookings').doc(bookingId);
+      const result = await adminDb.runTransaction(async (t: any) => {
+        const snap = await t.get(bookingRef);
+        if (!snap.exists) throw Object.assign(new Error('Pesanan tidak ditemukan.'), { statusCode: 404, code: 'BOOKING_NOT_FOUND' });
+        const booking = snap.data() as any;
+        const reqObj = booking.csRescheduleRequest;
+        const storedRequestId = cleanText(reqObj?.id, 64);
+        if (!storedRequestId) {
+          throw Object.assign(new Error('Permintaan reschedule aktif tidak valid.'), { statusCode: 409, code: 'INVALID_REQUEST_ID' });
+        }
+        if (!reqObj || reqObj.status !== 'pending_customer') {
+          throw Object.assign(new Error('Tidak ada permintaan reschedule yang menunggu konfirmasi.'), { statusCode: 409, code: 'NO_PENDING_REQUEST' });
+        }
+        if (requestKey !== storedRequestId) {
+          throw Object.assign(new Error('Permintaan reschedule tidak cocok atau sudah diperbarui.'), { statusCode: 409, code: 'REQUEST_MISMATCH' });
+        }
+
+        const directOwnerUids = [booking.customerAuthUid, booking.authUserId].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+        let ownerVerified = directOwnerUids.includes(customerUid);
+        let mappedCustomerAuthUid: string | undefined = directOwnerUids[0];
+        if (!ownerVerified && typeof booking.customerId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(booking.customerId.trim())) {
+          const custSnap = await t.get(adminDb.collection('customers').doc(booking.customerId.trim()));
+          if (custSnap.exists) {
+            const cust = custSnap.data() || {};
+            const custAuth = [cust.authUserId, cust.customerAuthUid].map((x: any) => typeof x === 'string' ? x.trim() : '').filter(Boolean);
+            if (custAuth.includes(customerUid)) {
+              ownerVerified = true;
+              mappedCustomerAuthUid = customerUid;
+            } else if (!mappedCustomerAuthUid && custAuth.length > 0) {
+              mappedCustomerAuthUid = custAuth[0];
+            }
+          }
+        }
+        if (!ownerVerified) {
+          throw Object.assign(new Error('Anda tidak berwenang merespons permintaan ini.'), { statusCode: 403, code: 'NOT_BOOKING_OWNER' });
+        }
+
+        const prevTaskStatus = typeof reqObj.previousTaskStatus === 'string' && reqObj.previousTaskStatus.trim()
+          ? reqObj.previousTaskStatus.trim()
+          : 'Open';
+        const currentTaskStatus = getEffectiveTaskStatus(booking);
+        const restoredTaskStatus = currentTaskStatus === 'Waiting Customer' ? prevTaskStatus : currentTaskStatus;
+        const oldScheduleDate = cleanText(reqObj.oldScheduleDate || booking.scheduleDate, 20);
+        const oldScheduleTime = cleanText(reqObj.oldScheduleTime || booking.scheduleTime, 20);
+        const oldScheduleAt = cleanText(reqObj.oldScheduleAt || `${oldScheduleDate} ${oldScheduleTime}`, 60);
+        const proposedDate = cleanText(reqObj.proposedScheduleDate, 20);
+        const proposedTime = cleanText(reqObj.proposedScheduleTime, 20);
+        const proposedScheduleAt = cleanText(reqObj.proposedScheduleAt || `${proposedDate} ${proposedTime}`, 60);
+        const recipientCustomerAuthUid = getBookingCustomerAuthUid(booking) || mappedCustomerAuthUid || customerUid;
+
+        if (String(booking.status || '').toLowerCase() === 'cancelled') {
+          const cancelledReq = { ...reqObj, status: 'cancelled', respondedAt: now, responseNote: responseNote || 'Booking dibatalkan' };
+          t.update(bookingRef, { csRescheduleRequest: cancelledReq, taskStatus: restoredTaskStatus, updatedAt: now });
+          const histRef = adminDb.collection('booking_status_history').doc();
+          t.set(histRef, {
+            id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || 'Cancelled',
+            note: `Permintaan reschedule (${storedRequestId}) ditandai cancelled karena booking telah dibatalkan. Jadwal aktif tidak berubah.`,
+            updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            requestId: `req_${storedRequestId}_cancelled`,
+          });
+          const auditRef = adminDb.collection('operational_audit_logs').doc();
+          t.set(auditRef, {
+            id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+            action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+            oldValue: oldScheduleAt, newValue: `${oldScheduleAt} (permintaan dibatalkan, jadwal aktif tetap)`,
+            reason: responseNote || 'Booking dibatalkan saat respons reschedule',
+            note: `Permintaan ${storedRequestId} ditandai cancelled; jadwal aktif tidak berubah`,
+            timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          });
+          return {
+            conflict: { status: 409, code: 'BOOKING_CANCELLED', message: 'Booking telah dibatalkan; permintaan reschedule ditandai cancelled dan tidak dapat diproses.' },
+            action: 'cancelled',
+            request: cancelledReq,
+          };
+        }
+
+        if (action === 'approve') {
+          if (!isValidSchedulePair(proposedDate, proposedTime)) {
+            throw Object.assign(new Error('Data jadwal usulan tidak valid (tanggal/jam kalender tidak sah).'), { statusCode: 409, code: 'INVALID_PROPOSED_SCHEDULE' });
+          }
+          if (!isValidSchedulePair(oldScheduleDate, oldScheduleTime)) {
+            throw Object.assign(new Error('Data jadwal awal pada permintaan tidak valid.'), { statusCode: 409, code: 'INVALID_OLD_SCHEDULE' });
+          }
+          const activeDate = cleanText(booking.scheduleDate, 20);
+          const activeTime = cleanText(booking.scheduleTime, 20);
+          if (activeDate !== oldScheduleDate || activeTime !== oldScheduleTime) {
+            const conflictMessage = `Jadwal aktif booking telah berubah (aktif: ${activeDate} ${activeTime} WIB, permintaan: ${oldScheduleDate} ${oldScheduleTime} WIB). Permintaan ditandai konflik dan tidak diterapkan.`;
+            const conflictedReq = { ...reqObj, status: 'conflicted', respondedAt: now, conflictedAt: now, conflictMessage, ...(responseNote ? { responseNote } : {}) };
+            t.update(bookingRef, { csRescheduleRequest: conflictedReq, taskStatus: restoredTaskStatus, updatedAt: now });
+            const histRef = adminDb.collection('booking_status_history').doc();
+            t.set(histRef, {
+              id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+              note: `Konflik reschedule (${storedRequestId}): jadwal aktif ${activeDate} ${activeTime} WIB berbeda dari jadwal permintaan ${oldScheduleDate} ${oldScheduleTime} WIB. Jadwal aktif tidak diubah.`,
+              updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+              requestId: `req_${storedRequestId}_conflicted`,
+            });
+            const auditRef = adminDb.collection('operational_audit_logs').doc();
+            t.set(auditRef, {
+              id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+              therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+              action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+              oldValue: `${activeDate} ${activeTime} (aktif)`, newValue: `${oldScheduleDate} ${oldScheduleTime} (permintaan, tidak diterapkan)`,
+              reason: conflictMessage,
+              note: `Permintaan ${storedRequestId} ditandai conflicted; jadwal aktif tidak diubah`,
+              timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            });
+            return {
+              conflict: { status: 409, code: 'SCHEDULE_CONFLICT', message: conflictMessage },
+              action: 'conflicted',
+              request: conflictedReq,
+            };
+          }
+          if (['Completed', 'Treatment', 'On The Way', 'Arrived'].includes(booking.status)) {
+            throw Object.assign(new Error('Status booking saat ini tidak dapat menerapkan reschedule.'), { statusCode: 409, code: 'INVALID_BOOKING_STATUS' });
+          }
+          const updatedRequest = { ...reqObj, status: 'approved', respondedAt: now, ...(responseNote ? { responseNote } : {}) };
+          t.update(bookingRef, {
+            scheduleDate: proposedDate,
+            scheduleTime: proposedTime,
+            scheduleAt: proposedScheduleAt,
+            status: 'Rescheduled',
+            csRescheduleRequest: updatedRequest,
+            taskStatus: restoredTaskStatus,
+            updatedAt: now,
+          });
+
+          const histRef = adminDb.collection('booking_status_history').doc();
+          t.set(histRef, {
+            id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: 'Rescheduled',
+            note: `Customer menyetujui reschedule: ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB.`,
+            updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+            requestId: `req_${storedRequestId}_approved`,
+          });
+          const auditRef = adminDb.collection('operational_audit_logs').doc();
+          t.set(auditRef, {
+            id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+            action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+            oldValue: oldScheduleAt, newValue: proposedScheduleAt,
+            reason: responseNote || 'Customer menyetujui permintaan reschedule',
+            note: `Permintaan ${storedRequestId} disetujui customer; jadwal aktif diperbarui`,
+            timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          });
+          const eventId = `evt_resched_appr_${storedRequestId}`;
+          for (const [role, suffix] of [['css','css'], ['supervisor','supervisor'], ['customer','customer']] as const) {
+            const nid = `notif_resched_appr_${bookingId}_${storedRequestId}_${suffix}`;
+            t.set(adminDb.collection('notifications').doc(nid), {
+              id: nid, eventId, eventType: 'booking.reschedule_approved', recipientRole: role,
+              ...(role === 'customer' && recipientCustomerAuthUid ? { recipientUserId: recipientCustomerAuthUid } : {}),
+              bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+              title: role === 'customer' ? 'Perubahan Jadwal Disetujui' : role === 'css' ? 'Customer Menyetujui Reschedule' : 'Reschedule Disetujui Customer',
+              message: role === 'customer'
+                ? `Jadwal pesanan #${booking.bookingCode || bookingId} telah diperbarui menjadi ${proposedScheduleAt}.`
+                : `Order #${booking.bookingCode || bookingId} (${booking.customerName || 'Customer'}) disetujui pindah ke ${proposedScheduleAt}.`,
+              channel: 'in_app', priority: 'NORMAL', read: false, readAt: null,
+              actionUrl: role === 'customer' ? `/track/${booking.bookingCode || bookingId}` : role === 'css' ? `/css?booking=${booking.bookingCode || bookingId}` : `/supervisor?booking=${booking.bookingCode || bookingId}`,
+              metadata: { bookingId, bookingCode: booking.bookingCode, newScheduleAt: proposedScheduleAt, requestId: storedRequestId },
+              createdAt: now,
+            });
+          }
+          t.set(adminDb.collection('notification_events').doc(eventId), {
+            id: eventId, eventType: 'booking.reschedule_approved', bookingId, actorId: customerUid, actorRole: 'customer',
+            payload: { bookingId, bookingCode: booking.bookingCode, newScheduleAt: proposedScheduleAt, requestId: storedRequestId },
+            createdAt: now, status: 'processed', processedAt: now,
+          }, { merge: false });
+          return { action, request: updatedRequest };
+        }
+
+        const updatedRequest = { ...reqObj, status: 'rejected', respondedAt: now, ...(responseNote ? { responseNote } : {}) };
+        t.update(bookingRef, { csRescheduleRequest: updatedRequest, taskStatus: restoredTaskStatus, updatedAt: now });
+        const histRef = adminDb.collection('booking_status_history').doc();
+        t.set(histRef, {
+          id: histRef.id, bookingId, bookingCode: booking.bookingCode || '', status: booking.status || '',
+          note: `Customer menolak reschedule usulan ${oldScheduleAt} WIB → ${proposedScheduleAt} WIB. Jadwal awal tetap berlaku.`,
+          updatedByRole: 'customer', updatedByName: booking.customerName || 'Customer', timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+          requestId: `req_${storedRequestId}_rejected`,
+        });
+        const auditRef = adminDb.collection('operational_audit_logs').doc();
+        t.set(auditRef, {
+          id: auditRef.id, bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+          therapistId: booking.therapistId || '', therapistName: booking.therapistName || '',
+          action: 'reschedule', actorRole: 'customer', actorName: booking.customerName || 'Customer',
+          oldValue: oldScheduleAt, newValue: `${oldScheduleAt} (ditolak, jadwal awal tetap)`,
+          reason: responseNote || 'Customer menolak permintaan reschedule',
+          note: `Permintaan ${storedRequestId} ditolak customer; jadwal aktif tidak berubah`,
+          timestamp: now, formattedWIB: formatDateTimeWIBServer(now),
+        });
+        const eventId = `evt_resched_rej_${storedRequestId}`;
+        for (const [role, suffix] of [['css','css'], ['customer','customer']] as const) {
+          const nid = `notif_resched_rej_${bookingId}_${storedRequestId}_${suffix}`;
+          t.set(adminDb.collection('notifications').doc(nid), {
+            id: nid, eventId, eventType: 'booking.reschedule_rejected', recipientRole: role,
+            ...(role === 'customer' && recipientCustomerAuthUid ? { recipientUserId: recipientCustomerAuthUid } : {}),
+            bookingId, bookingCode: booking.bookingCode || '', customerId: booking.customerId || '',
+            title: role === 'customer' ? 'Perubahan Jadwal Ditolak' : 'Customer Menolak Reschedule',
+            message: role === 'customer'
+              ? `Anda menolak usulan perubahan jadwal pesanan #${booking.bookingCode || bookingId}. Jadwal awal tetap berlaku.`
+              : `Order #${booking.bookingCode || bookingId} (${booking.customerName || 'Customer'}) menolak usulan perubahan jadwal. Jadwal awal tetap berlaku.`,
+            channel: 'in_app', priority: 'NORMAL', read: false, readAt: null,
+            actionUrl: role === 'customer' ? `/track/${booking.bookingCode || bookingId}` : `/css?booking=${booking.bookingCode || bookingId}`,
+            metadata: { bookingId, bookingCode: booking.bookingCode, requestId: storedRequestId },
+            createdAt: now,
+          });
+        }
+        t.set(adminDb.collection('notification_events').doc(eventId), {
+          id: eventId, eventType: 'booking.reschedule_rejected', bookingId, actorId: customerUid, actorRole: 'customer',
+          payload: { bookingId, bookingCode: booking.bookingCode, requestId: storedRequestId }, createdAt: now, status: 'processed', processedAt: now,
+        }, { merge: false });
+        return { action, request: updatedRequest };
+      });
+
+      if (result && (result as any).conflict) {
+        const c = (result as any).conflict;
+        return res.status(c.status).json({ success: false, code: c.code, message: c.message, requestId, ...result });
+      }
+      return res.json({ success: true, requestId, ...result });
+    } catch (err: any) {
+      const status = err?.statusCode || 500;
+      return res.status(status).json({ success: false, code: err?.code || 'INTERNAL_ERROR', message: err?.message || 'Gagal memproses respons reschedule.', requestId });
+    }
+  });
+
+  // =============================================================
   // MANAGER STAFF MASTER CRUD ENDPOINTS (Server-Authoritative RBAC)
   // =============================================================
 
@@ -16107,8 +17337,8 @@ async function startServer() {
       if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
         return res.status(400).json({ error: 'Nama staf wajib diisi.' });
       }
-      if (!role || !['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
-        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist.' });
+      if (!role || !['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
+        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist, FAT.' });
       }
       if (!email || typeof email !== 'string' || !email.includes('@')) {
         return res.status(400).json({ error: 'Alamat email wajib diisi dengan format valid.' });
@@ -16384,7 +17614,7 @@ async function startServer() {
       const oldRole = existingStaff.role;
       const newRole = role || oldRole;
       if (role && role !== oldRole) {
-        if (!['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
+        if (!['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
           return res.status(400).json({ error: 'Peran organisasi tidak valid.' });
         }
         updates.role = role;
@@ -17007,8 +18237,8 @@ async function startServer() {
       const { staffId } = req.params;
       const { role } = req.body;
 
-      if (!role || !['manager', 'supervisor', 'css', 'therapist'].includes(role)) {
-        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist.' });
+      if (!role || !['manager', 'supervisor', 'css', 'therapist', 'fat'].includes(role)) {
+        return res.status(400).json({ error: 'Peran organisasi tidak valid. Pilihan: Manager, Supervisor, CSS, Therapist, FAT.' });
       }
 
       let staff: any = null;
@@ -20123,7 +21353,7 @@ async function startServer() {
   type S7Caller = { uid: string; role: string; staffId: string; name: string; therapistIds: Set<string> };
   type S7Source = { type: string; references: Record<string, any>; booking: any; bookingId: string; customerId: string; customerUid: string; therapistId: string; payload: Record<string, any>; version: string; entity: any; ownerUid: string };
   const s7Operational = ['css', 'supervisor', 'manager', 'admin'];
-  const s7EventTypes = new Set<string>(["booking.created", "booking.confirmed", "booking.cancelled", "payment.proof_uploaded", "payment.verified", "payment.rejected", "payment.expired", "booking.ready_for_assignment", "therapist.assigned", "therapist.reassigned", "therapist.accepted", "therapist.on_the_way", "therapist.nearby", "therapist.arrived", "treatment.started", "treatment.completed", "tracking.location_stale", "booking.reminder", "supervisor.unassigned_alert", "therapist.not_accepted_alert", "therapist.late_departure_alert", "review.low_rating", "crm.task_due", "loyalty.points_earned", "loyalty.points_redeemed", "loyalty.points_expiring", "membership.tier_upgraded", "membership.tier_renewed", "voucher.issued", "voucher.expiring", "voucher.used", "referral.qualified", "birthday.reward_issued", "therapist.shift_updated", "therapist.off_updated", "therapist.schedule_override", "case.created", "case.assigned", "case.escalated", "case.high_severity", "case.waiting_customer", "case.waiting_manager", "case.resolved", "case.closed", "case.reopened", "recovery.proposed", "recovery.approved", "recovery.rejected", "recovery.completed"]);
+  const s7EventTypes = new Set<string>(["booking.created", "booking.confirmed", "booking.cancelled", "payment.proof_uploaded", "payment.verified", "payment.rejected", "payment.expired", "booking.ready_for_assignment", "therapist.assigned", "therapist.reassigned", "therapist.accepted", "therapist.on_the_way", "therapist.nearby", "therapist.arrived", "treatment.started", "treatment.completed", "tracking.location_stale", "booking.reminder", "supervisor.unassigned_alert", "therapist.not_accepted_alert", "therapist.late_departure_alert", "review.low_rating", "crm.task_due", "loyalty.points_earned", "loyalty.points_redeemed", "loyalty.points_expiring", "membership.tier_upgraded", "membership.tier_renewed", "voucher.issued", "voucher.expiring", "voucher.used", "referral.qualified", "birthday.reward_issued", "therapist.shift_updated", "therapist.off_updated", "therapist.schedule_override", "case.created", "case.assigned", "case.escalated", "case.high_severity", "case.waiting_customer", "case.waiting_manager", "case.resolved", "case.closed", "case.reopened", "recovery.proposed", "recovery.approved", "recovery.rejected", "recovery.completed", "booking.reschedule_requested", "booking.reschedule_approved", "booking.reschedule_rejected"]);
   const s7Rates = new Map<string, { count: number; until: number }>();
   const s7GuestRates = new Map<string, { count: number; until: number }>();
   const s7Text = (v: unknown, max = 160): string => typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -20433,6 +21663,15 @@ async function startServer() {
       if (booking && entity.bookingId !== booking.id) throw s7Error(409, 'REVIEW_LINKAGE_CONFLICT');
       if (!booking && entity.bookingId) booking = await s7Booking(read, { bookingId: entity.bookingId });
       version = `${entityId}:${type}:${entity.createdAt || ''}`;
+    } else if (type === 'booking.reschedule_requested' || type === 'booking.reschedule_approved' || type === 'booking.reschedule_rejected') {
+      kind = 'reschedule';
+      if (!s7Id(refs.requestId)) throw s7Error(400, 'RESCHEDULE_REQUEST_REQUIRED');
+      const req = (booking?.data || {}).csRescheduleRequest || null;
+      if (!req || req.id !== refs.requestId) throw s7Error(409, 'RESCHEDULE_SOURCE_MISSING');
+      const expectedStatus = type === 'booking.reschedule_requested' ? 'pending_customer' : type === 'booking.reschedule_approved' ? 'approved' : 'rejected';
+      if (req.status !== expectedStatus) throw s7Error(409, 'RESCHEDULE_SOURCE_STATE_MISMATCH');
+      entity = req; entityId = req.id; refs.requestId = req.id;
+      version = `${booking!.id}:${type}:${req.id}:${req.status}:${req.respondedAt || req.requestedAt || ''}`;
     }
     if (!booking && !['ledger', 'tier', 'voucher', 'roster'].includes(kind)) throw s7Error(400, 'PERSISTED_SOURCE_REQUIRED');
     const data = booking?.data || null;
@@ -20448,6 +21687,12 @@ async function startServer() {
       ...(booking ? { bookingId: booking.id, bookingCode: data.bookingCode, customerName: s7Text(data.customerName, 120), serviceName: s7Text(data.serviceName, 160), scheduleAt: s7Text(data.scheduleAt, 80) || `${s7Text(data.date)} ${s7Text(data.time)}`.trim(), area: s7Text(data.area, 100), totalAmount: data.totalAmount } : {}),
       customerId: customer.id || undefined, customerName: customer.name, therapistId: therapistId || undefined, therapistName: s7Text(data?.therapistName || data?.assignedTherapistName, 120) || undefined,
     };
+    if (kind === 'reschedule') {
+      payload.requestId = entity.id;
+      payload.oldScheduleAt = s7Text(entity.oldScheduleAt, 80) || `${s7Text(entity.oldScheduleDate)} ${s7Text(entity.oldScheduleTime)}`.trim();
+      payload.proposedScheduleAt = s7Text(entity.proposedScheduleAt, 80) || `${s7Text(entity.proposedScheduleDate)} ${s7Text(entity.proposedScheduleTime)}`.trim();
+      payload.newScheduleAt = payload.proposedScheduleAt;
+    }
     if (kind === 'ledger') {
       payload.pointsEarned = Math.max(0, entity.points); payload.pointsRedeemed = Math.abs(entity.points); payload.newBalance = entity.balanceAfter;
       payload.discountAmount = Number(entity.metadata?.discountRp || entity.metadata?.discountAmount || 0);
@@ -20517,6 +21762,9 @@ async function startServer() {
     if (type === 'payment.expired') requireState(paymentStatus === 'expired');
     if (type === 'review.low_rating') requireState(Number(entity.overallRating) <= 2 && Number(entity.overallRating) >= 1);
     if (type === 'case.high_severity') requireState(['HIGH', 'CRITICAL'].includes(entity.severity));
+    if (type === 'booking.reschedule_requested') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'pending_customer'));
+    if (type === 'booking.reschedule_approved') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'approved'));
+    if (type === 'booking.reschedule_rejected') requireState(Boolean(b.csRescheduleRequest && b.csRescheduleRequest.id === entity.id && b.csRescheduleRequest.status === 'rejected'));
     if (type === 'therapist.nearby' || type === 'tracking.location_stale') {
       const snap = await read.doc('therapist_locations', source.bookingId);
       requireState(snap.exists && source.therapistId && status === 'on the way');
@@ -20675,8 +21923,9 @@ async function startServer() {
         // Historic public rows are pointers, never trusted text, actor, URL or identity proof.
         if ((!s7EventTypes.has(data.eventType) && data.eventType !== 'chat.message_received') || !s7Id(data.bookingId)) return null;
         const messageId = data.metadata?.messageId;
+        const rescheduleRequestId = data.metadata?.requestId || data.requestId;
         if (data.eventType === 'chat.message_received' && !s7Id(messageId)) return null;
-        source = await s7Source(read, data.eventType, { bookingId: data.bookingId, ...(s7Id(data.paymentId) ? { paymentId: data.paymentId } : {}), ...(s7Id(messageId) ? { messageId } : {}) });
+        source = await s7Source(read, data.eventType, { bookingId: data.bookingId, ...(s7Id(data.paymentId) ? { paymentId: data.paymentId } : {}), ...(s7Id(messageId) ? { messageId } : {}), ...(s7Id(rescheduleRequestId) ? { requestId: rescheduleRequestId } : {}) });
         if (data.eventType === 'chat.message_received') {
           const legacy = await read.doc('chat_notification_dispatches', `chat_notif_${messageId}`);
           if (!legacy.exists || legacy.data().bookingId !== source.bookingId || legacy.data().messageId !== messageId || legacy.data().notificationId !== snap.id || legacy.data().recipientUserId !== source.entity.recipientUid) return null;
@@ -20685,7 +21934,7 @@ async function startServer() {
         const settings = await s7Settings(read);
         await s7Eligible(read, source, settings);
         const targets = await s7Recipients(read, source, settings, 'Sistem Senzu Home');
-        const target = targets.find(target => target.recipientRole === data.recipientRole && (!target.recipientUserId || target.recipientUserId === caller.uid));
+        const target = targets.find(t => t.recipientRole === data.recipientRole && (!t.recipientUserId || t.recipientUserId === caller.uid || (data.recipientRole === 'customer' && source.customerId && t.recipientUserId === source.customerId)));
         if (!target) return null;
         content = { ...target, eventId: s7Id(data.eventId) ? data.eventId : `legacy_${s7Hash([source.type, source.bookingId]).slice(0, 32)}`, eventType: source.type, bookingId: source.bookingId, bookingCode: source.booking?.bookingCode, customerId: source.customerId, therapistId: source.therapistId, read: data.read === true, readAt: s7Date(data.readAt) || null };
         createdAt = s7Date(snap.createTime) || s7Date(source.booking?.createdAt);

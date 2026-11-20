@@ -33,7 +33,8 @@ import {
 } from '../lib/bookingPersistenceService';
 import {
   fetchCustomerBookingsAuthoritative,
-  subscribeToCustomerBookings
+  subscribeToCustomerBookings,
+  customerRespondRescheduleRequest,
 } from '../lib/dbService';
 import { formatDistanceDisplay } from '../lib/distanceFeeService';
 import { PendingPaymentCard } from './customer/PendingPaymentCard';
@@ -65,6 +66,7 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
   const [localBookings, setLocalBookings] = useState<Booking[]>(bookings);
   const [isFetching, setIsFetching] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [respondingRescheduleId, setRespondingRescheduleId] = useState<string | null>(null);
 
   // Authoritative current identity ref to safeguard against React closure stale values during account switching
   const currentAuthUidRef = useRef<string | undefined>(firebaseUser?.uid);
@@ -196,6 +198,27 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
     if (activeTab === 'history') return historyList;
     return allList;
   }, [activeTab, activeList, historyList, allList]);
+
+  useEffect(() => {
+    if (!selectedBookingForDetail) return;
+    const latest = (localBookings || []).find((b) => b.id === selectedBookingForDetail.id || b.bookingCode === selectedBookingForDetail.bookingCode);
+    if (latest) setSelectedBookingForDetail(latest);
+  }, [localBookings, selectedBookingForDetail?.id, selectedBookingForDetail?.bookingCode]);
+
+  const handleRespondReschedule = async (booking: Booking, action: 'approve' | 'reject') => {
+    const req = booking.csRescheduleRequest;
+    if (!req || req.status !== 'pending_customer') return;
+    const key = `${booking.id}:${action}`;
+    try {
+      setRespondingRescheduleId(key);
+      await customerRespondRescheduleRequest(booking, action, req.id);
+      await loadAuthoritative(true);
+    } catch (e: any) {
+      alert(e?.message || 'Gagal memproses respons reschedule.');
+    } finally {
+      setRespondingRescheduleId(null);
+    }
+  };
 
   // Status badge styling and text (Prompt Requirement 8)
   const getStatusBadge = (status: string, paymentStatus?: string) => {
@@ -741,6 +764,60 @@ export const CustomerOrdersView: React.FC<CustomerOrdersViewProps> = ({
                     Metode: <strong>{selectedBookingForDetail.paymentMethod}</strong> • Status: {getStatusBadge(selectedBookingForDetail.status, selectedBookingForDetail.paymentStatus)}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {selectedBookingForDetail.csRescheduleRequest && (
+              <div className={`p-3 rounded-2xl border space-y-2 ${
+                selectedBookingForDetail.csRescheduleRequest.status === 'pending_customer'
+                  ? 'bg-sky-50 border-sky-200'
+                  : selectedBookingForDetail.csRescheduleRequest.status === 'approved'
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">Permintaan Perubahan Jadwal (CS)</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    selectedBookingForDetail.csRescheduleRequest.status === 'pending_customer' ? 'bg-sky-100 text-sky-800' :
+                    selectedBookingForDetail.csRescheduleRequest.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
+                    selectedBookingForDetail.csRescheduleRequest.status === 'rejected' ? 'bg-slate-200 text-slate-700' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {selectedBookingForDetail.csRescheduleRequest.status === 'pending_customer' ? 'Menunggu Konfirmasi Anda' :
+                     selectedBookingForDetail.csRescheduleRequest.status === 'approved' ? 'Disetujui' :
+                     selectedBookingForDetail.csRescheduleRequest.status === 'rejected' ? 'Ditolak' :
+                     selectedBookingForDetail.csRescheduleRequest.status === 'conflicted' ? 'Konflik Jadwal' :
+                     selectedBookingForDetail.csRescheduleRequest.status === 'cancelled' ? 'Dibatalkan' : selectedBookingForDetail.csRescheduleRequest.status}
+                  </span>
+                </div>
+                <div className="text-xs space-y-1 text-slate-700">
+                  <div><span className="font-semibold">Jadwal saat ini:</span> {selectedBookingForDetail.csRescheduleRequest.oldScheduleAt || `${selectedBookingForDetail.csRescheduleRequest.oldScheduleDate} ${selectedBookingForDetail.csRescheduleRequest.oldScheduleTime} WIB`}</div>
+                  <div><span className="font-semibold">Jadwal usulan:</span> {selectedBookingForDetail.csRescheduleRequest.proposedScheduleAt || `${selectedBookingForDetail.csRescheduleRequest.proposedScheduleDate} ${selectedBookingForDetail.csRescheduleRequest.proposedScheduleTime} WIB`}</div>
+                  {selectedBookingForDetail.csRescheduleRequest.reason && <div><span className="font-semibold">Catatan CS:</span> {selectedBookingForDetail.csRescheduleRequest.reason}</div>}
+                  {selectedBookingForDetail.csRescheduleRequest.status === 'approved' && <div className="text-emerald-700 font-medium">Jadwal baru telah diterapkan.</div>}
+                  {selectedBookingForDetail.csRescheduleRequest.status === 'rejected' && <div className="text-slate-600 font-medium">Jadwal awal tetap berlaku.</div>}
+                  {selectedBookingForDetail.csRescheduleRequest.status === 'conflicted' && <div className="text-amber-700 font-medium">{selectedBookingForDetail.csRescheduleRequest.conflictMessage || 'Jadwal aktif telah berubah sejak permintaan diajukan. Jadwal aktif tidak diubah.'}</div>}
+                  {selectedBookingForDetail.csRescheduleRequest.status === 'cancelled' && <div className="text-slate-600 font-medium">Permintaan reschedule dibatalkan. Jadwal aktif tidak berubah.</div>}
+                </div>
+                {selectedBookingForDetail.csRescheduleRequest.status === 'pending_customer' && (
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={respondingRescheduleId !== null || ['Cancelled','Completed','Treatment','On The Way','Arrived'].includes(selectedBookingForDetail.status)}
+                      onClick={() => handleRespondReschedule(selectedBookingForDetail, 'approve')}
+                      className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {respondingRescheduleId === `${selectedBookingForDetail.id}:approve` ? 'Memproses...' : 'Setujui Jadwal Baru'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={respondingRescheduleId !== null}
+                      onClick={() => handleRespondReschedule(selectedBookingForDetail, 'reject')}
+                      className="flex-1 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {respondingRescheduleId === `${selectedBookingForDetail.id}:reject` ? 'Memproses...' : 'Tolak'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

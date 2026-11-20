@@ -380,6 +380,44 @@ export const CssBookingDetailDrawer: React.FC<CssBookingDetailDrawerProps> = ({
                 </div>
               )}
 
+              {/* CS-proposed reschedule request */}
+              {booking.csRescheduleRequest && (
+                <div className={`p-3.5 rounded-2xl border space-y-1 ${
+                  booking.csRescheduleRequest.status === 'pending_customer'
+                    ? 'bg-sky-50 border-sky-200 text-sky-900'
+                    : booking.csRescheduleRequest.status === 'approved'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : booking.csRescheduleRequest.status === 'conflicted'
+                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}>
+                  <div className="font-bold flex items-center gap-1.5 text-xs">
+                    <Calendar className="w-4 h-4" />
+                    <span>
+                      {booking.csRescheduleRequest.status === 'pending_customer'
+                        ? 'Reschedule CS: Menunggu Konfirmasi Customer'
+                        : booking.csRescheduleRequest.status === 'approved'
+                        ? 'Reschedule CS: Disetujui Customer'
+                        : booking.csRescheduleRequest.status === 'rejected'
+                        ? 'Reschedule CS: Ditolak Customer'
+                        : booking.csRescheduleRequest.status === 'conflicted'
+                        ? 'Reschedule CS: Konflik Jadwal'
+                        : booking.csRescheduleRequest.status === 'cancelled'
+                        ? 'Reschedule CS: Dibatalkan'
+                        : `Reschedule CS: ${booking.csRescheduleRequest.status}`}
+                    </span>
+                  </div>
+                  <div className="text-xs space-y-0.5">
+                    <div><span className="font-semibold">Jadwal aktif/lama:</span> {booking.csRescheduleRequest.oldScheduleAt || `${booking.csRescheduleRequest.oldScheduleDate} ${booking.csRescheduleRequest.oldScheduleTime} WIB`}</div>
+                    <div><span className="font-semibold">Jadwal usulan:</span> {booking.csRescheduleRequest.proposedScheduleAt || `${booking.csRescheduleRequest.proposedScheduleDate} ${booking.csRescheduleRequest.proposedScheduleTime} WIB`}</div>
+                    {booking.csRescheduleRequest.reason && <div><span className="font-semibold">Catatan CS:</span> {booking.csRescheduleRequest.reason}</div>}
+                    {booking.csRescheduleRequest.conflictMessage && <div><span className="font-semibold">Konflik:</span> {booking.csRescheduleRequest.conflictMessage}</div>}
+                    {booking.csRescheduleRequest.status === 'pending_customer' && <div className="text-[11px] opacity-80">Jadwal aktif belum berubah sampai customer menyetujui.</div>}
+                    {booking.csRescheduleRequest.status === 'conflicted' && <div className="text-[11px] opacity-80">Jadwal aktif tidak diubah karena sudah berubah sejak permintaan diajukan.</div>}
+                  </div>
+                </div>
+              )}
+
               {/* Active Escalation Banner (if any) */}
               {booking.escalation && booking.escalation.status !== 'resolved' && (
                 <div className="p-3.5 bg-purple-50 rounded-2xl border border-purple-200 text-purple-900 space-y-1">
