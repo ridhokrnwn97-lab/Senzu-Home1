@@ -1243,65 +1243,22 @@ export async function getStaffMasterUsers(): Promise<StaffUser[]> {
 }
 
 export async function getStaffApiHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Autentikasi diperlukan. Silakan login dengan akun Firebase untuk mengelola Master Data.');
+  }
+
+  let token: string;
+  try {
+    token = await user.getIdToken();
+  } catch {
+    throw new Error('Sesi login tidak valid. Silakan login kembali.');
+  }
+
+  return {
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
   };
-
-  let tokenToSend = '';
-
-  // If currentUser is an authenticated manager or admin, use their genuine token
-  if (auth.currentUser && auth.currentUser.email) {
-    const userEmail = (auth.currentUser.email || '').toLowerCase().trim();
-    const isDirectManager =
-      userEmail === 'ridhokrnwn97@gmail.com' ||
-      userEmail === 'manager@senzuhome.com' ||
-      userEmail === 'ridho.gaol@gmail.com' ||
-      userEmail === 'system.service@senzuhome.internal';
-
-    let isSessionManager = isDirectManager;
-    if (!isSessionManager) {
-      try {
-        const saved = localStorage.getItem('senzu_staff_user');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && (parsed.role === 'admin' || parsed.role === 'manager')) {
-            isSessionManager = true;
-          }
-        }
-      } catch {}
-    }
-
-    if (isSessionManager) {
-      try {
-        const token = await auth.currentUser.getIdToken();
-        if (token) {
-          tokenToSend = token;
-        }
-      } catch (e) {
-        console.warn('Could not get token from currentUser:', e);
-      }
-    }
-  }
-
-  // Fallback or default: Request a verified manager session token from server backend
-  if (!tokenToSend) {
-    try {
-      const res = await fetch('/api/staff/session-token', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.token) {
-          tokenToSend = data.token;
-        }
-      }
-    } catch (err) {
-      console.warn('Backend session token request failed:', err);
-    }
-  }
-
-  if (tokenToSend) {
-    headers['Authorization'] = `Bearer ${tokenToSend}`;
-  }
-  return headers;
 }
 
 export async function saveStaffMasterUser(
@@ -1316,7 +1273,7 @@ export async function saveStaffMasterUser(
   const internalNotesClean = staff.internalNotes && staff.internalNotes.trim() ? staff.internalNotes.trim() : '';
 
   // Authoritative Backend Attempt: Update staff_users + staff_roles + therapists + audit logs
-  let headers = await getStaffApiHeaders();
+  const headers = await getStaffApiHeaders();
   const endpoint = isNew ? '/api/manager/staff' : `/api/manager/staff/${staffId}`;
   const method = isNew ? 'POST' : 'PATCH';
   const cleanCode = staff.employeeCode ? staff.employeeCode.trim().toUpperCase() : undefined;
@@ -1344,34 +1301,11 @@ export async function saveStaffMasterUser(
     serviceIds: extra?.serviceIds,
   };
 
-  let res = await fetch(endpoint, {
+  const res = await fetch(endpoint, {
     method,
     headers,
     body: JSON.stringify(payload),
   });
-
-  // Self-healing retry: If token was unauthorized (401/403), request fresh backend session token and retry once
-  if (!res.ok && (res.status === 401 || res.status === 403)) {
-    try {
-      const tokenRes = await fetch('/api/staff/session-token', { method: 'POST' });
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        if (tokenData.token) {
-          headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${tokenData.token}`,
-          };
-          res = await fetch(endpoint, {
-            method,
-            headers,
-            body: JSON.stringify(payload),
-          });
-        }
-      }
-    } catch (retryErr) {
-      console.warn('Self-healing retry failed:', retryErr);
-    }
-  }
 
   if (res.ok) {
     const resData = await res.json().catch(() => null);
@@ -1428,36 +1362,16 @@ export async function toggleStaffMasterStatus(
 
   // 1. Authoritative Backend Attempt: Syncs staff_users, staff_roles, and therapists
   try {
-    let headers = await getStaffApiHeaders();
+    const headers = await getStaffApiHeaders();
     const endpoint = newActiveState
       ? `/api/manager/staff/${staff.uid}/reactivate`
       : `/api/manager/staff/${staff.uid}/deactivate`;
 
-    let res = await fetch(endpoint, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({ reason: reason || '' }),
     });
-
-    if (!res.ok && (res.status === 401 || res.status === 403)) {
-      try {
-        const tokenRes = await fetch('/api/staff/session-token', { method: 'POST' });
-        if (tokenRes.ok) {
-          const tokenData = await tokenRes.json();
-          if (tokenData.token) {
-            headers = {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${tokenData.token}`,
-            };
-            res = await fetch(endpoint, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ reason: reason || '' }),
-            });
-          }
-        }
-      } catch {}
-    }
 
     if (res.ok) {
       return newActiveState;
@@ -1677,36 +1591,16 @@ export async function toggleTherapistMasterStatus(
   // 1. Authoritative Backend Attempt: Syncs staff_users, staff_roles, and therapists
   if (staffId) {
     try {
-      let headers = await getStaffApiHeaders();
+      const headers = await getStaffApiHeaders();
       const endpoint = newActiveState
         ? `/api/manager/staff/${staffId}/reactivate`
         : `/api/manager/staff/${staffId}/deactivate`;
 
-      let res = await fetch(endpoint, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({ reason: reason || '' }),
       });
-
-      if (!res.ok && (res.status === 401 || res.status === 403)) {
-        try {
-          const tokenRes = await fetch('/api/staff/session-token', { method: 'POST' });
-          if (tokenRes.ok) {
-            const tokenData = await tokenRes.json();
-            if (tokenData.token) {
-              headers = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${tokenData.token}`,
-              };
-              res = await fetch(endpoint, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ reason: reason || '' }),
-              });
-            }
-          }
-        } catch {}
-      }
 
       if (res.ok) {
         return newActiveState;
