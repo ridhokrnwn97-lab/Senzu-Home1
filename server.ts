@@ -975,18 +975,17 @@ async function startServer() {
     }
   });
 
-  // Authoritative Endpoint: Provide verified Firebase Auth session token for staff operations
+  // Legacy fallback for manager staff-master calls. Uses the same authoritative
+  // manager/admin check as the staff-master endpoints; never returns a server credential.
   app.post('/api/staff/session-token', async (req, res) => {
     try {
-      await ensureServerAuthenticated();
-      if (!auth?.currentUser) {
-        return res.status(500).json({ error: 'Server authentication not ready.' });
+      const authRes = await verifyManagerCaller(req);
+      if (!authRes.authorized) {
+        return res.status(authRes.statusCode || 403).json({ success: false, code: 'ROLE_REQUIRED', message: authRes.error || 'Akses peran aktif dan valid diperlukan.' });
       }
-      const token = await auth.currentUser.getIdToken(true);
-      return res.json({ success: true, token });
-    } catch (err: any) {
-      console.error('Failed to issue staff session token:', err);
-      return res.status(500).json({ error: 'Gagal memperoleh token sesi staf.' });
+      return res.json({ success: true, token: String(req.headers.authorization || '').slice(7).trim() });
+    } catch {
+      return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Layanan sesi staf belum tersedia.' });
     }
   });
 
