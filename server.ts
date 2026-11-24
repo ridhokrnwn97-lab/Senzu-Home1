@@ -5,6 +5,7 @@ import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { resolveCatalogServicePrice, resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
+import { resolveCatalogServiceDuration, resolveHistoricalServiceDuration } from './src/server/bookingDurationSnapshot.ts';
 import { registerCatalogApi } from './src/server/catalogApi.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import {
@@ -9355,16 +9356,14 @@ async function startServer() {
             error: 'Harga layanan pada pesanan berbeda dari katalog resmi. Total pembayaran telah diperbarui.',
           };
         }
-        if (
-          req.body?.serviceDuration !== undefined &&
-          req.body?.serviceDuration !== null &&
-          isFinitePositiveNumber(serviceData.duration) &&
-          req.body.serviceDuration !== serviceData.duration
-        ) {
+        // Duration for a NEW booking comes from the catalog. A stale client value
+        // must not block checkout; the authoritative value is written below.
+        const authoritativeDuration = resolveCatalogServiceDuration(serviceData.duration);
+        if (authoritativeDuration.ok === false) {
           return {
             status: 409,
-            code: 'PRICE_MISMATCH',
-            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+            code: authoritativeDuration.code,
+            error: authoritativeDuration.error,
           };
         }
 
@@ -10465,7 +10464,7 @@ async function startServer() {
           customerEmail: customerEmailTrimmed,
           serviceId,
           serviceName: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
-          serviceDuration: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          serviceDuration: authoritativeDuration.duration,
           scheduleDate,
           scheduleTime,
           scheduleAt: `${scheduleDate} ${scheduleTime}`,
@@ -10484,7 +10483,7 @@ async function startServer() {
           homeServiceFee: authoritativeHomeServiceFee,
           servicePriceSnapshot: authoritativeServicePrice,
           serviceNameSnapshot: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
-          durationMinutesSnapshot: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          durationMinutesSnapshot: authoritativeDuration.duration,
           homeServiceFeeSnapshot: authoritativeHomeServiceFee,
           homeServiceFeeTier: authoritativeHomeServiceTier,
           baseLocationId: SENZU_BASE_LOCATION.id,
@@ -11843,16 +11842,14 @@ async function startServer() {
           return { status: 409, code: historicalPrice.code, error: historicalPrice.error };
         }
         const authoritativeServicePrice = historicalPrice.price;
-        if (
-          bookingData.serviceDuration !== undefined &&
-          bookingData.serviceDuration !== null &&
-          isFinitePositiveNumber(serviceData.duration) &&
-          bookingData.serviceDuration !== serviceData.duration
-        ) {
+        // Historical duration comes from this booking's snapshot (or its legacy
+        // serviceDuration); catalog edits must never revalidate or rewrite it.
+        const historicalDuration = resolveHistoricalServiceDuration(bookingData);
+        if (historicalDuration.ok === false) {
           return {
             status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+            code: historicalDuration.code,
+            error: historicalDuration.error,
           };
         }
 

@@ -7,6 +7,7 @@ import { transformSync } from 'esbuild';
 import express from 'express';
 import { createXenditLive, registerXenditLive } from '../src/server/xenditLive.ts';
 import { liveQuoteSeal, quoteLiveDrivingDistance, validateLiveSchedule } from '../src/server/xenditLiveQuote.ts';
+import { resolveCatalogServiceDuration } from '../src/server/bookingDurationSnapshot.ts';
 import { safeLiveCheckoutUrl } from '../src/lib/xenditLiveContracts.ts';
 import { createPaymentAcceptance, assertManualPayment } from '../src/server/paymentAcceptance.ts';
 import { calculateHomeServiceFee, SENZU_BASE_LOCATION } from '../src/lib/distanceFeeService.ts';
@@ -28,7 +29,7 @@ assert.ok(managerSource && checkoutSource);
 const compile = code => transformSync(code, { loader: 'ts', target: 'es2022', format: 'cjs' }).code;
 const managerFactory = new Function('adminDb', compile(`${['isValidStage7dDocId', 'sanitizeStage7dText', 'validateStage7dActiveManagerIdentity'].map(k => functions.get(k)).join('\n')}\nreturn ${managerSource};`));
 const checkoutFactory = new Function('adminDb', 'adminAuth', 'verifyCustomerFirebaseIdToken', 'calculateHomeServiceFee', 'SENZU_BASE_LOCATION',
-  'DEFAULT_LOYALTY_SETTINGS', 'DEFAULT_MEMBERSHIP_TIERS', 'liveXendit', 'liveQuoteSeal', 'validateLiveSchedule', 'createHash', 'emitStructuredLog',
+  'DEFAULT_LOYALTY_SETTINGS', 'DEFAULT_MEMBERSHIP_TIERS', 'liveXendit', 'liveQuoteSeal', 'validateLiveSchedule', 'createHash', 'emitStructuredLog', 'resolveCatalogServiceDuration',
   compile(`${functions.get('normalizeIndonesianPhoneServer')}\nreturn ${checkoutSource};`));
 
 class MemoryDB {
@@ -284,7 +285,7 @@ function actualCheckoutFixture() {
   let routeCalls = 0;
   const live = { assertBookingAllowed: f.service.assertBookingAllowed, prepareBookingRoute: async () => { f.service.assertBookingAllowed(); routeCalls++; return { distanceKm: 12, distanceMeters: 12000 }; } };
   const handler = checkoutFactory(f.db, { verifyIdToken() {} }, async token => token === 'alice' ? { success: true, uid: 'alice' } : { success: false, statusCode: 401, code: 'AUTH_INVALID' },
-    calculateHomeServiceFee, SENZU_BASE_LOCATION, DEFAULT_LOYALTY_SETTINGS, DEFAULT_MEMBERSHIP_TIERS, live, liveQuoteSeal, validateLiveSchedule, createHash, () => {});
+    calculateHomeServiceFee, SENZU_BASE_LOCATION, DEFAULT_LOYALTY_SETTINGS, DEFAULT_MEMBERSHIP_TIERS, live, liveQuoteSeal, validateLiveSchedule, createHash, () => {}, resolveCatalogServiceDuration);
   const tomorrow = new Date(Date.now() + 86400000 + 7 * 3600000).toISOString().slice(0, 10);
   const input = { checkoutAttemptId: 'chk_fixture_live_0001', customerId: 'alice', customerName: 'Fixture Buyer', customerWhatsApp: '080000000000', customerEmail: '',
     serviceId: 'service_fixture', scheduleDate: tomorrow, scheduleTime: '12:00', address: 'Lokasi fixture Palembang', latitude: SENZU_BASE_LOCATION.lat, longitude: SENZU_BASE_LOCATION.lng,
