@@ -4,6 +4,7 @@ import { registerXenditLive } from './src/server/xenditLive.ts';
 import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
+import { resolveCatalogServicePrice, resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import {
   parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
@@ -11828,37 +11829,18 @@ async function startServer() {
           };
         }
         const serviceData = serviceSnap.data() || {};
-        const authoritativeServicePrice = serviceData.price;
-        if (!isFinitePositiveNumber(authoritativeServicePrice)) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Harga layanan resmi tidak dapat diverifikasi.',
-          };
+        const catalogPrice = resolveCatalogServicePrice(serviceData.price);
+        if (catalogPrice.ok === false) {
+          return { status: 409, code: catalogPrice.code, error: catalogPrice.error };
         }
 
-        if (
-          bookingData.servicePrice !== undefined &&
-          bookingData.servicePrice !== null &&
-          bookingData.servicePrice !== authoritativeServicePrice
-        ) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Harga layanan pada pesanan berbeda dari katalog resmi dan memerlukan peninjauan.',
-          };
+        // Existing bookings keep the price captured at creation; catalog price
+        // only applies to new bookings, so later catalog edits cannot reprice them.
+        const historicalPrice = resolveHistoricalServicePrice(bookingData);
+        if (historicalPrice.ok === false) {
+          return { status: 409, code: historicalPrice.code, error: historicalPrice.error };
         }
-        if (
-          bookingData.servicePriceSnapshot !== undefined &&
-          bookingData.servicePriceSnapshot !== null &&
-          bookingData.servicePriceSnapshot !== authoritativeServicePrice
-        ) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Snapshot harga layanan tidak dapat diverifikasi secara otomatis.',
-          };
-        }
+        const authoritativeServicePrice = historicalPrice.price;
         if (
           bookingData.serviceDuration !== undefined &&
           bookingData.serviceDuration !== null &&
