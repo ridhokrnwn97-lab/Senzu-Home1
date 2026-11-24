@@ -303,12 +303,16 @@ service cloud.firestore {
 
     match /services/{serviceId} {
       allow read: if true;
-      allow write: if isManager();
+      allow create, update: if isManager();
+      // No-Hard-Delete: historical bookings reference this catalog document.
+      allow delete: if false;
     }
 
     match /service_categories/{categoryId} {
       allow read: if true;
-      allow write: if isManager();
+      allow create, update: if isManager();
+      // No-Hard-Delete: services still reference their category.
+      allow delete: if false;
     }
 
     match /therapist_skills/{skillId} {
