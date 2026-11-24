@@ -10,7 +10,7 @@ const KEYS = ['view', 'create', 'editInfo', 'editPrice', 'editDuration', 'manage
 const allPerms = () => Object.fromEntries(KEYS.map(k => [k, true]));
 const only = (...keys) => Object.fromEntries(KEYS.map(k => [k, keys.includes(k)]));
 
-const WRITABLE = new Set(['services', 'service_categories', 'admin_audit_logs']);
+const WRITABLE = new Set(['services', 'service_categories', 'admin_audit_logs', 'staff_roles']);
 
 class MemoryDB {
   data = new Map(); writes = []; failAudit = false;
@@ -287,4 +287,141 @@ test('manager keeps full access and catalog changes do not alter historical book
   assert.deepEqual(resolveHistoricalServicePrice(historical), { ok: true, price: 100000, source: 'snapshot' });
   assert.deepEqual(resolveCatalogServicePrice(f.db.data.get('services/svc-1').price), { ok: true, price: 175000, source: 'catalog' });
   assert.deepEqual([...f.db.writes.map(w => w.ref.name)].filter(n => !WRITABLE.has(n)), []);
+});
+
+function seedFatTarget(db) {
+  db.seed('staff_users/staff_fat1', {
+    authUserId: 'fat1', role: 'fat', name: 'FAT Satu', employeeCode: 'FAT-001', isActive: true, status: 'active',
+  });
+  db.seed('staff_roles/fat1', {
+    authUserId: 'fat1', role: 'fat', isActive: true, status: 'active', staffId: 'staff_fat1',
+    catalogPermissions: { view: true, editPrice: false },
+  });
+}
+
+test('session endpoint reports only server-resolved permissions and denies non-catalog roles', async t => {
+  const fat = await fixture('fat', only('view', 'editPrice')); t.after(() => fat.server.close());
+  const session = await fat.call('GET', '/api/catalog/session');
+  assert.equal(session.status, 200);
+  assert.equal(session.json.data.uid, 'user1');
+  assert.equal(session.json.data.role, 'fat');
+  assert.equal(session.json.data.permissions.view, true);
+  assert.equal(session.json.data.permissions.editPrice, true);
+  assert.equal(session.json.data.permissions.create, false);
+
+  const manager = await fixture('manager', undefined); t.after(() => manager.server.close());
+  assert.equal((await manager.call('GET', '/api/catalog/session')).json.data.permissions.view, true);
+
+  const other = await fixture('therapist', allPerms()); t.after(() => other.server.close());
+  assert.equal((await other.call('GET', '/api/catalog/session')).status, 403);
+  assert.equal((await other.call('GET', '/api/catalog/session')).json.data, undefined);
+});
+
+test('catalog audit endpoint needs view and returns only catalog audit rows', async t => {
+  const f = await fixture('fat', only('view')); t.after(() => f.server.close());
+  f.db.seed('admin_audit_logs/adm_service', {
+    entityType: 'service', action: 'service.updated', entityId: 'svc-1',
+    timestamp: '2026-01-02T00:00:00.000Z', actorName: 'FAT Satu', actorRole: 'fat',
+    changedFields: ['price'], oldValues: { price: 100000 }, newValues: { price: 120000, name: 'Rahasia' },
+  });
+  f.db.seed('admin_audit_logs/adm_staff', {
+    entityType: 'staff', action: 'staff.updated', entityId: 'fat1',
+    timestamp: '2026-01-03T00:00:00.000Z', actorName: 'Manager', actorRole: 'manager',
+    changedFields: ['catalogPermissions.view'], oldValues: {}, newValues: {},
+  });
+  const res = await f.call('GET', '/api/catalog/audit');
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.equal(res.json.data.length, 1);
+  assert.equal(res.json.data[0].action, 'service.updated');
+  assert.deepEqual(Object.keys(res.json.data[0]).sort(),
+    ['action', 'actorName', 'actorRole', 'changedFields', 'entityId', 'entityType', 'newValues', 'oldValues', 'targetName', 'timestamp']);
+  assert.equal(res.json.data[0].newValues.price, 120000);
+
+  const no = await fixture('fat', only('create')); t.after(() => no.server.close());
+  assert.equal((await no.call('GET', '/api/catalog/audit')).status, 403);
+});
+
+test('manager/admin manage FAT catalog permissions; other roles, bad targets and bad payloads are rejected', async t => {
+  const manager = await fixture('manager', undefined); t.after(() => manager.server.close());
+  seedFatTarget(manager.db);
+  const path = '/api/staff/staff_fat1/catalog-permissions';
+
+  const list = await manager.call('GET', '/api/staff/catalog-permissions');
+  assert.equal(list.status, 200, JSON.stringify(list.json));
+  assert.equal(list.json.data.length, 1);
+  assert.equal(list.json.data[0].authUid, 'fat1');
+  assert.equal(list.json.data[0].permissions.view, true);
+  assert.equal(list.json.data[0].permissions.create, false);
+
+  const ok = await manager.call('PATCH', path, { body: { view: true, create: true, editPrice: true } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.equal(ok.json.data.permissions.create, true);
+  assert.equal(manager.db.data.get('staff_roles/fat1').catalogPermissions.editPrice, true);
+  assert.equal(manager.db.data.get('staff_roles/fat1').catalogPermissions.view, true);
+  const audit = manager.db.lastAudit();
+  assert.equal(audit.action, 'staff.updated');
+  assert.equal(audit.entityType, 'staff');
+  assert.equal(audit.actorId, 'user1');
+  assert.equal(audit.actorRole, 'manager');
+  assert.deepEqual(audit.changedFields.sort(), ['catalogPermissions.create', 'catalogPermissions.editPrice']);
+  assert.equal(audit.oldValues['catalogPermissions.create'], false);
+  assert.equal(audit.newValues['catalogPermissions.create'], true);
+
+  const admin = await fixture('admin', undefined); t.after(() => admin.server.close());
+  seedFatTarget(admin.db);
+  assert.equal((await admin.call('PATCH', path, { body: { view: true } })).status, 200);
+
+  for (const role of ['fat', 'therapist', 'css']) {
+    const f = await fixture(role, role === 'fat' ? allPerms() : undefined); t.after(() => f.server.close());
+    seedFatTarget(f.db);
+    assert.equal((await f.call('PATCH', path, { body: { view: true } })).status, 403, role);
+    assert.equal((await f.call('GET', '/api/staff/catalog-permissions')).status, 403, role);
+    assert.equal(f.db.writes.length, 0);
+  }
+
+  const f = await fixture('manager', undefined); t.after(() => f.server.close());
+  seedFatTarget(f.db);
+  const bad = [
+    [{ role: 'fat' }, 400],
+    [{ view: 'true' }, 400],
+    [{ view: true, actorId: 'attacker' }, 400],
+    [{}, 400],
+  ];
+  for (const [body, status] of bad) {
+    const res = await f.call('PATCH', path, { body });
+    assert.equal(res.status, status, JSON.stringify({ body, res: res.json }));
+  }
+  f.db.seed('staff_users/staff_therapist', { authUserId: 'th1', role: 'therapist', isActive: true, status: 'active' });
+  assert.equal((await f.call('PATCH', '/api/staff/staff_therapist/catalog-permissions', { body: { view: true } })).status, 400);
+  assert.equal((await f.call('PATCH', '/api/staff/missing/catalog-permissions', { body: { view: true } })).status, 400);
+  assert.equal(f.db.writes.length, 0);
+});
+
+test('catalog surface exposes no delete or operational-module routes', () => {
+  const app = express();
+  registerCatalogApi(app, { db: new MemoryDB(), verify: async token => ({ uid: token }) });
+  const paths = app._router.stack.filter(layer => layer.route)
+    .map(layer => `${Object.keys(layer.route.methods)[0].toUpperCase()} ${layer.route.path}`).sort();
+  assert.deepEqual(paths, [
+    'GET /api/catalog/audit',
+    'GET /api/catalog/categories',
+    'GET /api/catalog/services',
+    'GET /api/catalog/session',
+    'GET /api/staff/catalog-permissions',
+    'PATCH /api/catalog/categories/:id',
+    'PATCH /api/catalog/services/:id',
+    'PATCH /api/staff/:staffId/catalog-permissions',
+    'POST /api/catalog/categories',
+    'POST /api/catalog/services',
+  ]);
+});
+
+test('permission change and its audit are atomic when the audit write fails', async t => {
+  const f = await fixture('manager', undefined); t.after(() => f.server.close());
+  seedFatTarget(f.db);
+  f.db.failAudit = true;
+  const res = await f.call('PATCH', '/api/staff/staff_fat1/catalog-permissions', { body: { view: true, create: true } });
+  assert.ok(res.status >= 500, JSON.stringify(res.json));
+  assert.deepEqual(f.db.data.get('staff_roles/fat1').catalogPermissions, { view: true, editPrice: false });
+  assert.equal(f.db.writes.length, 0);
 });

@@ -360,17 +360,136 @@ export function createCatalogApi(deps: Dependencies) {
     });
   }
 
+  async function session(req: Request) {
+    const uid = await actorFor(req);
+    return db.runTransaction(async (t: Transaction) => {
+      const actor = await resolveActor(db, t, uid);
+      return { uid, staffId: actor.staffId, role: actor.role, name: actor.name, permissions: actor.perms };
+    });
+  }
+
+  async function auditHistory(req: Request) {
+    const uid = await actorFor(req);
+    return db.runTransaction(async (t: Transaction) => {
+      const actor = await resolveActor(db, t, uid);
+      need(actor, ['view']);
+      const [services, categories] = await Promise.all([
+        t.get(db.collection('admin_audit_logs').where('entityType', '==', 'service').limit(100)),
+        t.get(db.collection('admin_audit_logs').where('entityType', '==', 'service_category').limit(100)),
+      ]);
+      return [...services.docs, ...categories.docs]
+        .map((doc: any) => doc.data() || {})
+        .sort((a: any, b: any) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+        .slice(0, 100)
+        .map((row: any) => ({
+          timestamp: row.timestamp || '',
+          actorName: row.actorName || '', actorRole: row.actorRole || '',
+          entityType: row.entityType || '', entityId: row.entityId || '',
+          targetName: row.newValues?.name || row.newValues?.categoryName || row.entityId || '',
+          action: row.action || '',
+          changedFields: Array.isArray(row.changedFields) ? row.changedFields : [],
+          oldValues: row.oldValues || {}, newValues: row.newValues || {},
+        }));
+    });
+  }
+
+  async function updateStaffPermissions(req: Request, staffId: string) {
+    if (!ID.test(staffId)) throw fail(400, 'INVALID_ID', 'ID staf tidak valid.');
+    const uid = await actorFor(req);
+    if (!plainObject(req.body) || !Object.keys(req.body).length ||
+        Object.keys(req.body).some(key => !CATALOG_PERMISSION_KEYS.includes(key as CatalogPermissionKey)) ||
+        Object.values(req.body).some(value => typeof value !== 'boolean')) {
+      throw fail(400, 'INVALID_PAYLOAD', 'Payload permission katalog tidak valid.');
+    }
+    const input = req.body as Partial<CatalogPermissions>;
+    return db.runTransaction(async (t: Transaction) => {
+      const actor = await resolveActor(db, t, uid);
+      if (actor.role !== 'manager' && actor.role !== 'admin') {
+        throw fail(403, 'ROLE_REQUIRED', 'Hanya Manager atau Admin yang dapat mengatur permission katalog.');
+      }
+      const [direct, byAuth, byLegacy] = await Promise.all([
+        t.get(db.collection('staff_users').doc(staffId)),
+        t.get(db.collection('staff_users').where('authUserId', '==', staffId).limit(2)),
+        t.get(db.collection('staff_users').where('authUid', '==', staffId).limit(2)),
+      ]);
+      const matches = new Map<string, any>();
+      if (direct.exists) matches.set(direct.id, direct);
+      for (const snap of [...byAuth.docs, ...byLegacy.docs]) matches.set(snap.id, snap);
+      if (matches.size !== 1) throw fail(400, 'INVALID_TARGET', 'Staf target tidak dapat diverifikasi secara unik.');
+      const target = [...matches.values()][0].data() || {};
+      const authUid = String(target.authUserId || target.authUid || '').trim();
+      if (String(target.role || '').trim().toLowerCase() !== 'fat' || disabled(target) || !ID.test(authUid)) {
+        throw fail(400, 'INVALID_TARGET', 'Target harus akun FAT aktif dengan akun login terhubung.');
+      }
+      const roleRef = db.collection('staff_roles').doc(authUid);
+      const roleSnap = await t.get(roleRef);
+      if (!roleSnap.exists || roleSnap.data()?.isActive !== true || disabled(roleSnap.data()) ||
+          String(roleSnap.data()?.role || '').trim().toLowerCase() !== 'fat') {
+        throw fail(400, 'INVALID_TARGET', 'Data peran FAT target tidak valid.');
+      }
+      const roleData = roleSnap.data() || {};
+      const previous: CatalogPermissions = {} as CatalogPermissions;
+      for (const key of CATALOG_PERMISSION_KEYS) previous[key] = roleData.catalogPermissions?.[key] === true;
+      const next: CatalogPermissions = { ...previous, ...input } as CatalogPermissions;
+      const changed = CATALOG_PERMISSION_KEYS.filter(key => previous[key] !== next[key]);
+      const nowIso = new Date(clock()).toISOString();
+      t.set(roleRef, { ...roleData, catalogPermissions: next, updatedAt: nowIso, updatedBy: actor.name });
+      const oldValues: Record<string, unknown> = {};
+      const newValues: Record<string, unknown> = {};
+      for (const key of changed) {
+        oldValues[`catalogPermissions.${key}`] = previous[key];
+        newValues[`catalogPermissions.${key}`] = next[key];
+      }
+      t.create(db.collection('admin_audit_logs').doc(
+        `adm_audit_${nowIso.replace(/[-:.TZ]/g, '')}_${Math.random().toString(36).slice(2, 10)}`), {
+        actorId: actor.uid, actorRole: actor.role, actorName: actor.name,
+        action: 'staff.updated', entityType: 'staff', entityId: authUid,
+        changedFields: changed.map(key => `catalogPermissions.${key}`), oldValues, newValues,
+        summary: `Memperbarui permission katalog FAT "${target.name || authUid}"`,
+        timestamp: nowIso, requestId: requestIdOf(req),
+      });
+      return { staffId, authUid, permissions: next };
+    });
+  }
+
+  async function listCatalogStaffPermissions(req: Request) {
+    const uid = await actorFor(req);
+    return db.runTransaction(async (t: Transaction) => {
+      const actor = await resolveActor(db, t, uid);
+      if (actor.role !== 'manager' && actor.role !== 'admin') {
+        throw fail(403, 'ROLE_REQUIRED', 'Hanya Manager atau Admin yang dapat melihat permission katalog.');
+      }
+      const snap = await t.get(db.collection('staff_users').where('role', '==', 'fat').limit(500));
+      const result = [];
+      for (const doc of snap.docs) {
+        const staff = doc.data() || {};
+        if (disabled(staff)) continue;
+        const authUid = String(staff.authUserId || staff.authUid || '').trim();
+        if (!ID.test(authUid)) continue;
+        const roleSnap = await t.get(db.collection('staff_roles').doc(authUid));
+        const roleData = roleSnap.exists ? roleSnap.data() || {} : {};
+        const permissions = {} as CatalogPermissions;
+        for (const key of CATALOG_PERMISSION_KEYS) permissions[key] = roleData.catalogPermissions?.[key] === true;
+        result.push({ staffId: doc.id, authUid, name: String(staff.name || staff.fullName || authUid),
+          employeeCode: staff.employeeCode || '', isActive: staff.isActive !== false, permissions });
+      }
+      return result;
+    });
+  }
+
   return { listServices: (req: Request) => list('services', req), listCategories: (req: Request) => list('service_categories', req),
-    createService, updateService, createCategory, updateCategory };
+    createService, updateService, createCategory, updateCategory, session, auditHistory,
+    listCatalogStaffPermissions, updateStaffPermissions };
 }
 
 export function registerCatalogApi(app: Express, deps: Dependencies) {
   const api = createCatalogApi(deps);
-  const route = (handler: (req: Request, id?: string) => Promise<unknown>, withId = false) =>
+  const route = (handler: (req: Request, id?: string) => Promise<unknown>, param: string | boolean = '') =>
     async (req: Request, res: any) => {
       res.set('Cache-Control', 'no-store');
+      const key = typeof param === 'string' ? param : param ? 'id' : '';
       try {
-        res.json({ success: true, data: await handler(req, withId ? req.params.id : undefined) });
+        res.json({ success: true, data: await handler(req, key ? req.params[key] : undefined) });
       } catch (error: any) {
         const safe = error?.catalogError === true && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599;
         res.status(safe ? error.status : 503).json({ success: false,
@@ -380,8 +499,12 @@ export function registerCatalogApi(app: Express, deps: Dependencies) {
     };
   app.get('/api/catalog/services', route(api.listServices));
   app.get('/api/catalog/categories', route(api.listCategories));
+  app.get('/api/catalog/session', route(api.session));
+  app.get('/api/catalog/audit', route(api.auditHistory));
   app.post('/api/catalog/services', route(api.createService));
   app.patch('/api/catalog/services/:id', route(api.updateService, true));
   app.post('/api/catalog/categories', route(api.createCategory));
   app.patch('/api/catalog/categories/:id', route(api.updateCategory, true));
+  app.get('/api/staff/catalog-permissions', route(api.listCatalogStaffPermissions));
+  app.patch('/api/staff/:staffId/catalog-permissions', route(api.updateStaffPermissions, 'staffId'));
 }
