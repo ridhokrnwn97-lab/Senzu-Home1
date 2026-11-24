@@ -5,6 +5,7 @@ import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
 import { resolveCatalogServicePrice, resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
+import { registerCatalogApi } from './src/server/catalogApi.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import {
   parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
@@ -1698,6 +1699,7 @@ async function startServer() {
   });
 
   registerPaymentAcceptance(app, adminDb, token => adminAuth!.verifyIdToken(token));
+  registerCatalogApi(app, { db: adminDb, verify: token => adminAuth!.verifyIdToken(token) });
 
   // Isolated Test ledger only; reuse the current Stage 7D Manager identity policy.
   registerXenditSandbox(app, {
