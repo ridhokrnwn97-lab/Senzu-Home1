@@ -318,13 +318,14 @@ export const SERVICE_RECOVERY_TYPES: ServiceRecoveryType[] = [
 ];
 
 // Indonesian Customer-friendly Status Mapper (never expose internal names on public UI)
-export function getCustomerFriendlyCaseStatus(status: CaseStatus): {
+export function getCustomerFriendlyCaseStatus(status?: CaseStatus | string | null): {
   label: string;
   bgClass: string;
   textClass: string;
   borderClass: string;
 } {
-  switch (status) {
+  const normalized = String(status || '').trim().toUpperCase();
+  switch (normalized) {
     case 'OPEN':
       return {
         label: 'Laporan Diterima',
@@ -375,11 +376,12 @@ export function getCustomerFriendlyCaseStatus(status: CaseStatus): {
 }
 
 // Operational Staff Status Label & Styling
-export function getStaffCaseStatusBadge(status: CaseStatus): {
+export function getStaffCaseStatusBadge(status?: CaseStatus | string | null): {
   label: string;
   badgeClass: string;
 } {
-  switch (status) {
+  const normalized = String(status || '').trim().toUpperCase();
+  switch (normalized) {
     case 'OPEN':
       return { label: 'Open', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200' };
     case 'IN_PROGRESS':
@@ -398,21 +400,33 @@ export function getStaffCaseStatusBadge(status: CaseStatus): {
       return { label: 'Ditutup (Closed)', badgeClass: 'bg-slate-100 text-slate-700 border-slate-200' };
     case 'REOPENED':
       return { label: 'Dibuka Kembali', badgeClass: 'bg-orange-100 text-orange-800 border-orange-200' };
+    default:
+      return {
+        label: normalized || 'Open',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+      };
   }
 }
 
-export function getCaseSeverityBadge(severity: CaseSeverity): {
+export function getCaseSeverityBadge(severity?: CaseSeverity | string | null): {
   label: string;
   badgeClass: string;
 } {
-  switch (severity) {
+  const normalized = String(severity || '').trim().toUpperCase();
+  switch (normalized) {
     case 'LOW':
       return { label: 'Low', badgeClass: 'bg-slate-100 text-slate-700 border-slate-200' };
     case 'MEDIUM':
+    case 'NORMAL':
       return { label: 'Medium', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200' };
     case 'HIGH':
       return { label: 'High', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300' };
     case 'CRITICAL':
       return { label: 'Critical', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse' };
+    default:
+      return {
+        label: normalized || 'Medium',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+      };
   }
 }

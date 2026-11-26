@@ -120,6 +120,7 @@ test('Accounting tab performs no Accurate sync or Firestore mutation', () => {
 });
 
 test('Finance table layout stays read-only; Tax component untouched', () => {
+  // main asserted Finance untouched; FAT proof work intentionally changes Finance, so the Tax-untouched invariant is retained instead.
   const changed = execFileSync('git', ['diff', '--name-only'], { cwd: new URL('.', root), encoding: 'utf8' });
   assert.doesNotMatch(changed, /FatTaxTab\.tsx/);
   const finance = read('src/components/fat/FatFinanceTab.tsx');

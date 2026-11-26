@@ -189,7 +189,8 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
   // Analytics aggregation
   const totalClosed = cases.filter((c) => c.status === 'CLOSED').length;
   const categoryCounts = cases.reduce((acc, c) => {
-    acc[c.category] = (acc[c.category] || 0) + 1;
+    const cat = c.category || 'Lainnya';
+    acc[cat] = (acc[cat] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
@@ -357,7 +358,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
 
               return (
                 <div
-                  key={c.id}
+                  key={c.id || c.caseCode}
                   onClick={() => setSelectedCase(c)}
                   className={`p-4 rounded-2xl bg-white border transition shadow-xs hover:shadow-md cursor-pointer space-y-3 ${
                     selectedCase?.id === c.id ? 'border-[#8B5A36] ring-1 ring-[#8B5A36]' : 'border-slate-200 hover:border-slate-300'
@@ -370,16 +371,16 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
                       </span>
                       <strong className="text-xs text-slate-800">{c.category}</strong>
                       <span className="text-[11px] text-slate-400">
-                        • Booking: {c.bookingCode}
+                        • Booking: {c.bookingCode || '-'}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${severityBadge.badgeClass}`}>
-                        {severityBadge.label}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${severityBadge?.badgeClass || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                        {severityBadge?.label || 'Medium'}
                       </span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusBadge.badgeClass}`}>
-                        {statusBadge.label}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusBadge?.badgeClass || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                        {statusBadge?.label || 'Open'}
                       </span>
                     </div>
                   </div>
@@ -416,7 +417,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
                       <div>Terapis: <strong className="text-slate-800">{c.therapistName || '-'}</strong></div>
                       <div>Penanggung Jawab: <strong className="text-slate-800">{c.assignedRole}</strong></div>
                       <div className="pt-1 border-t border-slate-200 text-slate-400">
-                        {new Date(c.reportedAt).toLocaleDateString('id-ID')}
+                        {c.reportedAt || c.createdAt ? new Date(c.reportedAt || c.createdAt).toLocaleDateString('id-ID') : '-'}
                       </div>
                     </div>
                   </div>
@@ -596,7 +597,7 @@ export const ManagerCaseGovernance: React.FC<ManagerCaseGovernanceProps> = ({ cu
             </h4>
 
             <form onSubmit={handleApprovalSubmit} className="space-y-3">
-              {approvalDecision === 'approve' && selectedCase.recovery?.type.includes('Voucher') && (
+              {approvalDecision === 'approve' && (selectedCase.recovery?.type || '').includes('Voucher') && (
                 <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
                   <span className="font-bold text-amber-900 block">Parameter Penerbitan Voucher Otomatis:</span>
                   <div>
