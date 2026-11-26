@@ -69,6 +69,8 @@ import {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_MEMBERSHIP_TIERS,
 } from './src/types/loyalty.ts';
+import { hydrateFatCustomerNames } from './src/server/fatCustomerName.ts';
+import { createFatPaymentProofHandler, hasFatPaymentProof } from './src/server/fatPaymentProof.ts';
 
 // Helper to normalize DocumentSnapshot across Firebase Admin SDK and client SDK conventions
 function wrapDocSnap(snap: any) {
@@ -513,7 +515,14 @@ async function startServer() {
    * Attempts Firebase Admin SDK first, then seamlessly falls back to Google Identity Toolkit REST API
    * using the project API key when running in environments where Admin IAM lacks Identity Toolkit permission.
    */
-  async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email: string } | null> {
+  type DetailedTokenVerification = { uid: string; email: string } | { unavailable: true } | null;
+
+  /**
+   * Same cryptographic verification as verifyFirebaseIdToken, but distinguishes
+   * "cannot verify right now" from "definitively invalid" for the reconcile contract.
+   * All other callers keep the original fail-closed boolean behavior.
+   */
+  async function verifyFirebaseIdTokenDetailed(idToken: string): Promise<DetailedTokenVerification> {
     if (!idToken || typeof idToken !== 'string') return null;
     const cleanToken = idToken.trim();
     if (!cleanToken) return null;
@@ -551,13 +560,21 @@ async function startServer() {
               email: data.users[0].email ? data.users[0].email.trim().toLowerCase() : '',
             };
           }
+          return null;
         }
+        if (resp.status >= 500 || resp.status === 429) return { unavailable: true };
       }
     } catch (apiErr: any) {
       console.warn('[Auth] Identity Toolkit verification warning:', apiErr?.message);
+      return { unavailable: true };
     }
 
     return null;
+  }
+
+  async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email: string } | null> {
+    const result = await verifyFirebaseIdTokenDetailed(idToken);
+    return result && 'uid' in result ? result : null;
   }
 
   // Baseline in-memory Staff Master repository (quota-resilient & authoritative fallback)
@@ -1244,12 +1261,15 @@ async function startServer() {
     }
 
     // 2. Cryptographically verify Firebase ID token (never trust client body parameters)
-    const verifiedAuth = await verifyFirebaseIdToken(idToken);
-    if (!verifiedAuth || !verifiedAuth.uid) {
-      return res.status(401).json({
+    const verifiedAuth = await verifyFirebaseIdTokenDetailed(idToken);
+    if (!verifiedAuth || 'unavailable' in verifiedAuth) {
+      const unavailable = Boolean(verifiedAuth && 'unavailable' in verifiedAuth);
+      return res.status(unavailable ? 503 : 401).json({
         success: false,
-        code: 'AUTH_TOKEN_INVALID',
-        message: 'Sesi autentikasi telah kedaluwarsa atau tidak valid.',
+        code: unavailable ? 'AUTH_VERIFICATION_UNAVAILABLE' : 'AUTH_TOKEN_INVALID',
+        message: unavailable
+          ? 'Layanan verifikasi autentikasi sedang tidak tersedia. Silakan coba kembali.'
+          : 'Sesi autentikasi telah kedaluwarsa atau tidak valid.',
       });
     }
 
@@ -1967,7 +1987,7 @@ async function startServer() {
     try {
       const authz = await authorizeReadActor(req, ['fat']);
       if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
-      const fields = ['id', 'bookingId', 'bookingCode', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
+      const fields = ['id', 'bookingId', 'bookingCode', 'customerName', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
       const snap = await adminDb.collection('payments').select(...fields).limit(FAT_LIST_LIMIT + 1).get();
       const truncated = snap.docs.length > FAT_LIST_LIMIT;
       const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
@@ -1981,6 +2001,7 @@ async function startServer() {
           id: String(p.id || d.id || ''),
           bookingId: String(p.bookingId || ''),
           bookingCode: String(p.bookingCode || ''),
+          customerName: String(p.customerName || ''),
           amount: amt.value,
           amountValid: amt.valid,
           status: normalizeFatStatus(p.status),
@@ -1994,7 +2015,7 @@ async function startServer() {
           paidAt: asIso(p.paidAt),
           verifiedAt: asIso(p.verifiedAt),
           paymentProofUploadedAt: asIso(p.paymentProofUploadedAt || p.proofUploadedAt),
-          hasProof: Boolean(p.paymentProofUploadedAt || p.proofUploadedAt || (typeof p.paymentProofUrl === 'string' && p.paymentProofUrl.trim())),
+          hasProof: hasFatPaymentProof(p),
           rejectedAt: asIso(p.rejectedAt),
           expiredAt: asIso(p.expiredAt),
           refundedAt: asIso(p.refundedAt),
@@ -2002,12 +2023,16 @@ async function startServer() {
           refundAmountValid: refund ? refund.valid : null,
           currency: String(p.currency || 'IDR'),
         };
-      }).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      });
+      await hydrateFatCustomerNames(payments, adminDb);
+      payments.sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return res.json({ success: true, count: payments.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, payments, note: 'Data proyeksi minimum dari koleksi payments (tanpa dokumen lengkap/PII sensitif berlebih). Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
     } catch (e: any) {
       return res.status(500).json({ success: false, code: 'FAT_PAYMENTS_FAILED', message: 'Data pembayaran FAT belum dapat dimuat.' });
     }
   });
+
+  app.get('/api/fat/payments/:paymentId/proof', createFatPaymentProofHandler({ authorizeReadActor, db: adminDb }));
 
   app.get('/api/fat/refunds', async (req, res) => {
     setFatNoStore(res);

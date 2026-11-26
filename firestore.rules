@@ -723,7 +723,7 @@ service cloud.firestore {
     match /payments/{paymentId} {
       allow get: if isOperationalStaff() || isPaymentCustomer(resource.data);
 
-      allow list: if isOperationalStaff(); // Customer discovery uses authorized /api/payments/lookup; realtime uses scoped document reads.
+      allow list: if isOperationalStaff(); // Customer discovery uses authorized /api/payments/lookup; realtime uses scoped document reads. FAT uses backend read-only projections.
 
       // Admin-backed payment endpoints derive amounts, ownership, deadline and proof acceptance.
       allow create: if false;

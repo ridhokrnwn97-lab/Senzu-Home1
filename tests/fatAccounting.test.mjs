@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import express from 'express';
 import { createAccurateConnection, registerAccurateConnection } from '../src/server/accurateConnection.ts';
 import { ACCURATE_MASTERS, ACCURATE_APP_KEY, ACCURATE_APP_NAME, ACCURATE_COMPANY } from '../src/lib/accurateContracts.ts';
+import { FINANCE_COLUMNS, FINANCE_TABLE_MIN_WIDTH, financeColumnVars } from '../src/components/fat/financeColumns.ts';
 
 const root = new URL('../', import.meta.url);
 const read = name => fs.readFileSync(new URL(name, root), 'utf8');
@@ -118,10 +119,68 @@ test('Accounting tab performs no Accurate sync or Firestore mutation', () => {
   assert.match(ui, /writesEnabled === false/);
 });
 
-test('Finance and Tax components are untouched', () => {
+test('Finance table layout stays read-only; Tax component untouched', () => {
   const changed = execFileSync('git', ['diff', '--name-only'], { cwd: new URL('.', root), encoding: 'utf8' });
-  assert.doesNotMatch(changed, /FatFinanceTab\.tsx/);
   assert.doesNotMatch(changed, /FatTaxTab\.tsx/);
-  assert.match(read('src/components/fat/FatFinanceTab.tsx'), /export const FatFinanceTab/);
+  const finance = read('src/components/fat/FatFinanceTab.tsx');
+  assert.match(finance, /export const FatFinanceTab/);
+  for (const forbidden of ['onSnapshot', 'updateDoc', 'setDoc', 'addDoc', 'deleteDoc', "method: 'POST'"]) {
+    assert.doesNotMatch(finance, new RegExp(forbidden));
+  }
   assert.match(read('src/components/fat/FatTaxTab.tsx'), /export const FatTaxTab/);
+});
+
+test('Finance table declares nine explicit widths shared by headers, bodies and sticky offsets', () => {
+  assert.equal(FINANCE_COLUMNS.length, 9);
+  assert.equal(new Set(FINANCE_COLUMNS.map(c => c.key)).size, 9);
+  for (const col of FINANCE_COLUMNS) {
+    assert.ok(col.label && col.key, 'every column has a key and label');
+    assert.equal(Number.isInteger(col.width) && col.width > 0, true, `${col.key} has an explicit positive width`);
+  }
+  assert.equal(FINANCE_TABLE_MIN_WIDTH, FINANCE_COLUMNS.reduce((sum, c) => sum + c.width, 0));
+  const vars = financeColumnVars();
+  assert.equal(Object.keys(vars).length, 9);
+  FINANCE_COLUMNS.forEach((col, i) => assert.equal(vars[`--finance-col-${i}`], `${col.width}px`));
+
+  const finance = read('src/components/fat/FatFinanceTab.tsx');
+  assert.match(finance, /<colgroup>/);
+  assert.match(finance, /FINANCE_COLUMNS\.map\(\(col, i\) => <col key=\{col\.key\} style=\{\{ width: `var\(--finance-col-\$\{i\}\)` \}\} \/>\)/);
+  assert.match(finance, /minWidth: FINANCE_TABLE_MIN_WIDTH/);
+  // Header and body both map the same config, so their structures cannot drift.
+  assert.match(finance, /FINANCE_COLUMNS\.slice\(2\)\.map\(/);
+  const bodyCells = finance.match(/<td className="[^"]*truncate[^"]*"/g) || [];
+  assert.equal(bodyCells.length, 9, 'all nine body cells clip and ellipsize their content');
+  const headerCells = finance.match(/<th className="[^"]*truncate[^"]*"/g) || [];
+  assert.equal(headerCells.length, 2, 'first two headers are explicit sticky/non-sticky cells');
+  assert.match(finance, /FINANCE_COLUMNS\.slice\(2\)\.map\(\(col\) => <th key=\{col\.key\} className="truncate py-2 pr-3"/);
+  assert.equal(FINANCE_COLUMNS.slice(2).length, 7, 'remaining seven headers map the same config');
+  assert.doesNotMatch(finance, /whitespace-nowrap/);
+});
+
+test('Finance sticky columns track the first width and never cover all mobile content', () => {
+  const finance = read('src/components/fat/FatFinanceTab.tsx');
+  assert.match(finance, /className="sticky left-0 z-30 truncate/);
+  assert.match(finance, /className="sticky left-0 z-20 truncate/);
+  // Second column offset is derived from the first column's CSS variable, not a duplicated literal.
+  assert.match(finance, /sm:sticky sm:left-\[var\(--finance-col-0\)\]/);
+  assert.match(finance, /sm:z-30/);
+  assert.match(finance, /sm:z-10/);
+  assert.equal((finance.match(/sm:sticky/g) || []).length, 2, 'only header and body second cells stick at sm+');
+  // 390px viewport: first sticky column is 150px, second is revealed by scrolling.
+  assert.ok(FINANCE_COLUMNS[0].width < 390, 'first sticky column cannot consume a 390px viewport');
+  assert.match(finance, /w-full max-w-full overflow-x-auto overscroll-x-contain touch-pan-x/);
+  assert.doesNotMatch(finance, /overflow-hidden[^>]*>\s*<table/);
+});
+
+test('Finance display truncation keeps full values available in titles and export', () => {
+  const finance = read('src/components/fat/FatFinanceTab.tsx');
+  assert.match(finance, /title=\{p\.id\}/, 'full transaction id is available on hover');
+  assert.match(finance, /title=\{p\.customerName \|\| '-'\}/, 'full customer name is available');
+  assert.match(finance, /Nama Pemesan/);
+  assert.match(finance, /'ID Transaksi': p\.id/, 'export uses the untruncated transaction id');
+  assert.match(finance, /'Dibuat': fmtDate\(p\.createdAt\)/, 'export uses full dates');
+  assert.match(finance, /'Diverifikasi': fmtDate\(p\.verifiedAt\)/);
+  for (const control of ['setSearch', 'setStatusFilter', 'setMethodFilter', 'void load()', 'exportExcel']) {
+    assert.match(finance, new RegExp(control.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${control} remains functional`);
+  }
 });

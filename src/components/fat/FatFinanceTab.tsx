@@ -1,13 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Download, FileSpreadsheet, Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, Download, Eye, FileSpreadsheet, Filter, Loader2, RefreshCw, Search, ShieldCheck, X, ZoomIn, ZoomOut } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { auth } from '../../lib/firebase';
 import { summarizeFatCategories } from '../../server/fatMetrics';
+import { FINANCE_COLUMNS, FINANCE_TABLE_MIN_WIDTH, financeColumnVars } from './financeColumns';
 
 interface FatPayment {
   id: string;
   bookingId: string;
   bookingCode: string;
+  customerName: string;
   amount: number | null;
   amountValid: boolean;
   status: string;
@@ -28,6 +30,28 @@ interface FatPayment {
   refundAmount: number | null;
   refundAmountValid: boolean | null;
   currency: string;
+}
+
+interface FatPaymentProof {
+  url: string;
+  mimeType: string;
+}
+
+interface ProofView extends FatPaymentProof {
+  paymentId: string;
+  label: string;
+  requestId: number;
+  status: 'loading' | 'ready' | 'error';
+  imageLoaded: boolean;
+  error: string;
+}
+
+interface FatPaymentProofResponse {
+  success: boolean;
+  proofUrl?: string;
+  mimeType?: string;
+  message?: string;
+  error?: string;
 }
 
 interface FatPaymentsResponse {
@@ -90,6 +114,14 @@ export const FatFinanceTab: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [methodFilter, setMethodFilter] = useState('all');
   const [meta, setMeta] = useState({ limit: 1000, truncated: false, hasMore: false, invalidAmountCount: 0 });
+  const [proof, setProof] = useState<ProofView | null>(null);
+  const [proofCache, setProofCache] = useState<Record<string, FatPaymentProof>>({});
+  const [zoom, setZoom] = useState(1);
+  const proofTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const proofCloseRef = useRef<HTMLButtonElement | null>(null);
+  const proofDialogRef = useRef<HTMLDivElement | null>(null);
+  const proofAbortRef = useRef<AbortController | null>(null);
+  const proofRequestRef = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -109,6 +141,137 @@ export const FatFinanceTab: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  const closeProof = useCallback(() => {
+    proofAbortRef.current?.abort();
+    proofAbortRef.current = null;
+    proofRequestRef.current += 1;
+    setProof(null);
+    const trigger = proofTriggerRef.current;
+    proofTriggerRef.current = null;
+    trigger?.focus();
+  }, []);
+
+  const openProof = (p: FatPayment, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (proof) return;
+    proofTriggerRef.current = e.currentTarget;
+    const cached = proofCache[p.id];
+    const requestId = ++proofRequestRef.current;
+    setProof({
+      paymentId: p.id,
+      label: p.bookingCode || p.id,
+      requestId,
+      status: cached ? 'ready' : 'loading',
+      url: cached?.url || '',
+      mimeType: cached?.mimeType || '',
+      imageLoaded: false,
+      error: '',
+    });
+    setZoom(1);
+  };
+
+  const retryProof = () => {
+    if (!proof) return;
+    setProofCache(prev => {
+      const next = { ...prev };
+      delete next[proof.paymentId];
+      return next;
+    });
+    const requestId = ++proofRequestRef.current;
+    setProof(cur => cur && cur.paymentId === proof.paymentId
+      ? { ...cur, requestId, status: 'loading', url: '', mimeType: '', imageLoaded: false, error: '' }
+      : cur);
+    setZoom(1);
+  };
+
+  const handleProofMediaError = (message: string) => {
+    if (!proof) return;
+    const current = proof;
+    setProofCache(prev => {
+      const next = { ...prev };
+      delete next[current.paymentId];
+      return next;
+    });
+    setProof(cur => cur && cur.requestId === current.requestId
+      ? { ...cur, status: 'error', error: message, imageLoaded: false }
+      : cur);
+  };
+
+  useEffect(() => {
+    if (!proof || proof.status !== 'loading') return;
+    const controller = new AbortController();
+    proofAbortRef.current = controller;
+    const { requestId, paymentId } = proof;
+    const loadProof = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
+        const token = await user.getIdToken();
+        if (controller.signal.aborted || proofRequestRef.current !== requestId) return;
+        const res = await fetch(`/api/fat/payments/${encodeURIComponent(paymentId)}/proof`, {
+          method: 'GET', cache: 'no-store',
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        const json: FatPaymentProofResponse = await res.json().catch(() => ({}));
+        if (!res.ok || json.success === false) throw new Error(json.message || json.error || 'Bukti pembayaran tidak dapat dimuat.');
+        const url = String(json.proofUrl || '');
+        const mimeType = String(json.mimeType || '');
+        if (!url) throw new Error('Bukti pembayaran tidak tersedia.');
+        if (controller.signal.aborted || proofRequestRef.current !== requestId) return;
+        setProofCache(prev => ({ ...prev, [paymentId]: { url, mimeType } }));
+        setProof(cur => cur && cur.requestId === requestId && cur.status === 'loading'
+          ? { ...cur, status: 'ready', url, mimeType, imageLoaded: false, error: '' }
+          : cur);
+      } catch (e: any) {
+        if (controller.signal.aborted || e?.name === 'AbortError' || proofRequestRef.current !== requestId) return;
+        const message = e?.message || 'Bukti pembayaran tidak dapat dimuat.';
+        setProof(cur => cur && cur.requestId === requestId && cur.status === 'loading'
+          ? { ...cur, status: 'error', error: message, imageLoaded: false }
+          : cur);
+      } finally {
+        if (proofAbortRef.current === controller) proofAbortRef.current = null;
+      }
+    };
+    void loadProof();
+    return () => controller.abort();
+  }, [proof?.paymentId, proof?.requestId, proof?.status]);
+
+  const proofOpen = proof !== null;
+  const proofIsPdf = !!proof && (/^application\/pdf\b/i.test(proof.mimeType) || /^data:application\/pdf\b/i.test(proof.url));
+  const proofIsImage = !!proof && (/^image\//i.test(proof.mimeType) || /^data:image\//i.test(proof.url));
+  useEffect(() => {
+    if (proofOpen) proofCloseRef.current?.focus();
+  }, [proofOpen]);
+
+  useEffect(() => {
+    if (!proofOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeProof(); return; }
+      if (e.key !== 'Tab' || !proofDialogRef.current) return;
+      const focusables = Array.from(proofDialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]'));
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) return;
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [proofOpen, closeProof]);
+
+  useEffect(() => {
+    if (!proofOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousPadding = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPadding;
+    };
+  }, [proofOpen]);
+
   const rupiah = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
   const fmtDate = (s: string) => s ? new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
@@ -126,7 +289,7 @@ export const FatFinanceTab: React.FC = () => {
       const m = (p.methodType || p.paymentMethod || p.bankCode || '').toLowerCase();
       if (methodFilter !== 'all' && m !== methodFilter.toLowerCase()) return false;
       if (!q) return true;
-      return [p.bookingCode, p.bookingId, p.id, p.paymentMethod, p.methodType, p.bankCode, p.provider]
+      return [p.bookingCode, p.customerName, p.bookingId, p.id, p.paymentMethod, p.methodType, p.bankCode, p.provider]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
   }, [payments, search, statusFilter, methodFilter]);
@@ -145,6 +308,7 @@ export const FatFinanceTab: React.FC = () => {
     const rows = filtered.map(p => ({
       'ID Transaksi': p.id,
       'Kode Booking': p.bookingCode || '-',
+      'Nama Pemesan': p.customerName || '-',
       'Booking ID': p.bookingId || '-',
       'Nominal (IDR)': p.amountValid && typeof p.amount === 'number' ? p.amount : '',
       'Nominal Valid': p.amountValid ? 'Ya' : 'Tidak',
@@ -191,13 +355,13 @@ export const FatFinanceTab: React.FC = () => {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
-        <div className="flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
-          <div className="flex flex-1 flex-col sm:flex-row gap-2">
+        <div className="flex flex-wrap flex-col md:flex-row gap-2 md:items-center md:justify-between">
+          <div className="flex flex-wrap flex-1 flex-col sm:flex-row gap-2">
             <div className="relative flex-1 min-w-[180px]">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari kode booking / ID transaksi / metode..." className="w-full pl-9 pr-3 py-2 min-h-[40px] border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/30" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari kode booking / nama pemesan / ID transaksi / metode..." className="w-full pl-9 pr-3 py-2 min-h-[40px] border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/30" />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Filter className="w-4 h-4 text-slate-400" />
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 min-h-[40px] border border-slate-200 rounded-xl text-sm bg-white">
                 <option value="all">Semua status</option>
@@ -219,7 +383,7 @@ export const FatFinanceTab: React.FC = () => {
               </select>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void load()} className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl border border-slate-200 bg-white text-sm font-semibold text-[#4B2B18] hover:border-[#8B5A36]/40"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />Muat ulang</button>
             <button type="button" onClick={exportExcel} disabled={filtered.length === 0} className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl bg-[#8B5A36] text-white text-sm font-semibold hover:bg-[#704328] disabled:opacity-50 disabled:cursor-not-allowed"><FileSpreadsheet className="w-4 h-4" /><Download className="w-3.5 h-3.5" />Ekspor</button>
           </div>
@@ -230,39 +394,116 @@ export const FatFinanceTab: React.FC = () => {
         {!loading && !error && filtered.length === 0 && <div className="py-10 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">Tidak ada data pembayaran untuk filter saat ini.</div>}
 
         {!loading && !error && filtered.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-slate-500 border-b">
-                  <th className="py-2 pr-3">Kode Booking</th>
-                  <th className="py-2 pr-3">Transaksi</th>
-                  <th className="py-2 pr-3">Nominal</th>
-                  <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3">Metode</th>
-                  <th className="py-2 pr-3">Dibuat</th>
-                  <th className="py-2 pr-3">Dibayar/Diverifikasi</th>
-                  <th className="py-2">Bukti</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(p => (
-                  <tr key={p.id} className="border-b last:border-0 align-top">
-                    <td className="py-2 pr-3 font-medium text-[#4B2B18] whitespace-nowrap">{p.bookingCode || '-'}</td>
-                    <td className="py-2 pr-3 text-slate-600 font-mono text-xs max-w-[140px] truncate" title={p.id}>{p.id}</td>
-                    <td className="py-2 pr-3 font-semibold whitespace-nowrap">{p.amountValid && typeof p.amount === 'number' ? rupiah(p.amount) : <span className="text-rose-700 font-semibold">Tidak valid</span>}</td>
-                    <td className="py-2 pr-3"><span className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-semibold ${statusClass(p.status)}`}>{statusLabel(p.status)}</span></td>
-                    <td className="py-2 pr-3 text-slate-700">{p.methodType || p.paymentMethod || p.bankCode || '-'}</td>
-                    <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">{fmtDate(p.createdAt)}</td>
-                    <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">{fmtDate(p.paidAt || p.verifiedAt || p.paymentProofUploadedAt)}</td>
-                    <td className="py-2 text-slate-700">{p.hasProof ? 'Ada' : 'Tidak ada'}</td>
+          <>
+            <p className="mb-2 text-xs text-slate-500 lg:hidden">Geser tabel ke kanan untuk melihat kolom lainnya.</p>
+            <div className="fat-finance-table-scroll w-full max-w-full overflow-x-auto overscroll-x-contain touch-pan-x">
+              <table className="w-full table-fixed text-sm" style={{ ...financeColumnVars(), minWidth: FINANCE_TABLE_MIN_WIDTH }}>
+                <colgroup>
+                  {FINANCE_COLUMNS.map((col, i) => <col key={col.key} style={{ width: `var(--finance-col-${i})` }} />)}
+                </colgroup>
+                <thead>
+                  <tr className="text-left text-slate-500 border-b">
+                    <th className="sticky left-0 z-30 truncate border-r border-stone-200 bg-stone-50 py-2 pl-2 pr-3" title={FINANCE_COLUMNS[0].label}>{FINANCE_COLUMNS[0].label}</th>
+                    <th className="truncate border-r border-stone-200 bg-stone-50 py-2 pr-3 shadow-[2px_0_4px_-2px_rgba(68,41,20,0.25)] sm:sticky sm:left-[var(--finance-col-0)] sm:z-30" title={FINANCE_COLUMNS[1].label}>{FINANCE_COLUMNS[1].label}</th>
+                    {FINANCE_COLUMNS.slice(2).map((col) => <th key={col.key} className="truncate py-2 pr-3" title={col.label}>{col.label}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map(p => (
+                    <tr key={p.id} className="group border-b last:border-0 align-top hover:bg-stone-50/60">
+                      <td className="sticky left-0 z-20 truncate border-r border-stone-200 bg-white py-2 pl-2 pr-3 font-medium text-[#4B2B18] group-hover:bg-stone-50" title={p.bookingCode || '-'}>{p.bookingCode || '-'}</td>
+                      <td className="truncate border-r border-stone-200 bg-white py-2 pr-3 text-slate-700 shadow-[2px_0_4px_-2px_rgba(68,41,20,0.25)] group-hover:bg-stone-50 sm:sticky sm:left-[var(--finance-col-0)] sm:z-10" title={p.customerName || '-'}>{p.customerName || '-'}</td>
+                      <td className="truncate py-2 pr-3 font-mono text-xs text-slate-600" title={p.id}>{p.id}</td>
+                      <td className="truncate py-2 pr-3 font-semibold" title={p.amountValid && typeof p.amount === 'number' ? rupiah(p.amount) : 'Tidak valid'}>{p.amountValid && typeof p.amount === 'number' ? rupiah(p.amount) : <span className="text-rose-700 font-semibold">Tidak valid</span>}</td>
+                      <td className="truncate py-2 pr-3" title={statusLabel(p.status)}><span className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-semibold ${statusClass(p.status)}`}>{statusLabel(p.status)}</span></td>
+                      <td className="truncate py-2 pr-3 text-slate-700" title={p.methodType || p.paymentMethod || p.bankCode || '-'}>{p.methodType || p.paymentMethod || p.bankCode || '-'}</td>
+                      <td className="truncate py-2 pr-3 text-slate-600" title={fmtDate(p.createdAt)}>{fmtDate(p.createdAt)}</td>
+                      <td className="truncate py-2 pr-3 text-slate-600" title={fmtDate(p.paidAt || p.verifiedAt || p.paymentProofUploadedAt)}>{fmtDate(p.paidAt || p.verifiedAt || p.paymentProofUploadedAt)}</td>
+                      <td className="truncate py-2 pr-3 text-slate-700" title={p.hasProof ? 'Lihat bukti pembayaran' : '-'}>
+                        {p.hasProof ? (
+                          <button type="button" onClick={e => openProof(p, e)} aria-label={`Lihat bukti pembayaran ${p.bookingCode || p.id}`} title="Lihat bukti pembayaran" className="inline-flex items-center gap-1 rounded-lg border border-[#8B5A36]/40 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-[#704328] hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40">
+                            <Eye className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />Lihat
+                          </button>
+                        ) : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         <p className="text-[11px] text-slate-500">Nominal menggunakan <code>PaymentRecord.amount</code> dari koleksi payments. Booking bukan bukti penerimaan uang; satu booking dapat memiliki &gt;1 transaksi. Ekspor bersifat read-only (tanpa mutasi).</p>
       </div>
+
+      {proof && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fat-proof-title"
+          aria-describedby="fat-proof-desc"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-3 sm:p-6"
+          onClick={e => { if (e.target === e.currentTarget) closeProof(); }}
+        >
+          <div ref={proofDialogRef} className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <h2 id="fat-proof-title" className="text-sm font-bold text-[#4B2B18] sm:text-base">Bukti pembayaran</h2>
+                <p id="fat-proof-desc" className="truncate text-xs text-slate-500">{proof.label}</p>
+              </div>
+              <button ref={proofCloseRef} type="button" onClick={closeProof} aria-label="Tutup bukti pembayaran" title="Tutup" className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40"><X className="w-5 h-5" aria-hidden="true" /></button>
+            </div>
+            <div className="flex min-h-[220px] flex-1 overflow-auto bg-slate-50 p-4">
+              {proof.status === 'loading' && <div role="status" className="m-auto flex items-center gap-2 text-sm text-slate-600"><Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />Mengambil bukti...</div>}
+              {proof.status === 'error' && (
+                <div role="alert" className="m-auto max-w-sm space-y-3 text-center text-sm text-rose-800">
+                  <p className="flex items-center justify-center gap-2 font-semibold"><AlertCircle className="w-5 h-5 shrink-0" aria-hidden="true" />Bukti tidak dapat dimuat.</p>
+                  <p className="text-xs text-slate-600">{proof.error}</p>
+                  <div className="flex justify-center gap-2">
+                    <button type="button" onClick={retryProof} className="inline-flex min-h-[40px] items-center rounded-xl bg-[#8B5A36] px-3 text-sm font-semibold text-white hover:bg-[#704328] focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40">Coba lagi</button>
+                    <button type="button" onClick={closeProof} className="inline-flex min-h-[40px] items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40">Tutup</button>
+                  </div>
+                </div>
+              )}
+              {proof.status === 'ready' && proofIsPdf && (
+                <object data={proof.url} type="application/pdf" title="Pratinjau bukti PDF" className="m-auto h-[65vh] w-full rounded-xl border border-slate-200 bg-white">
+                  <div className="m-auto max-w-sm space-y-2 p-4 text-center text-xs text-slate-600">Pratinjau PDF tidak tersedia di browser ini. <a href={proof.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#704328] underline">Buka PDF</a></div>
+                </object>
+              )}
+              {proof.status === 'ready' && !proofIsPdf && !proofIsImage && (
+                <div role="alert" className="m-auto max-w-sm space-y-2 text-center text-sm text-slate-700">
+                  <p className="font-semibold">Format bukti tidak didukung.</p>
+                  <p className="text-xs text-slate-600">Jenis berkas: {proof.mimeType || 'tidak diketahui'}. Bukti tidak ditampilkan sebagai gambar.</p>
+                  <button type="button" onClick={retryProof} className="inline-flex min-h-[40px] items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40">Coba lagi</button>
+                </div>
+              )}
+              {proof.status === 'ready' && proofIsImage && (
+                <>
+                  {!proof.imageLoaded && <div role="status" className="m-auto flex items-center gap-2 text-sm text-slate-600"><Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />Memuat gambar...</div>}
+                  <img
+                    src={proof.url}
+                    alt={`Bukti pembayaran ${proof.label}`}
+                    onLoad={() => setProof(cur => cur && cur.requestId === proof.requestId ? { ...cur, imageLoaded: true } : cur)}
+                    onError={() => handleProofMediaError('Gambar bukti tidak dapat ditampilkan.')}
+                    style={{ zoom }}
+                    className={`m-auto max-h-[70vh] max-w-full object-contain ${proof.imageLoaded ? '' : 'hidden'}`}
+                  />
+                </>
+              )}
+            </div>
+            {proof.status === 'ready' && proofIsImage && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-4 py-2">
+                <span className="text-xs text-slate-500">Perbesar atau perkecil tampilan bukti.</span>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setZoom(z => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))} disabled={zoom <= 0.5} aria-label="Perkecil bukti" title="Perkecil" className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40 disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="w-4 h-4" aria-hidden="true" /></button>
+                  <span className="w-12 text-center text-xs font-semibold text-slate-700" aria-live="polite">{Math.round(zoom * 100)}%</span>
+                  <button type="button" onClick={() => setZoom(z => Math.min(2, Math.round((z + 0.25) * 100) / 100))} disabled={zoom >= 2} aria-label="Perbesar bukti" title="Perbesar" className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#8B5A36]/40 disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="w-4 h-4" aria-hidden="true" /></button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -106,6 +106,7 @@ export const STAFF_ROLE_LABELS: Record<string, string> = {
   css: 'CSS',
   therapist: 'Terapis',
   admin: 'Admin',
+  fat: 'FAT',
 };
 
 export function getRoleDisplayLabel(role?: string): string {

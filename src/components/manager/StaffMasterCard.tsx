@@ -1168,7 +1168,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   Peran Organisasi (Role) <span className="text-rose-500">*</span>
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(['manager', 'supervisor', 'css', 'therapist'] as UserRole[]).map((r) => (
+                  {(['manager', 'supervisor', 'css', 'therapist', 'fat'] as UserRole[]).map((r) => (
                     <button
                       key={r}
                       type="button"
