@@ -37,6 +37,7 @@ import {
   getTherapistMasterList,
   DEFAULT_THERAPIST_SKILLS,
 } from '../../lib/masterDataService';
+import { FatCatalogPermissionEditor } from './FatCatalogPermissionEditor';
 import {
   formatWhatsAppDisplay,
   normalizeWhatsApp,
@@ -112,6 +113,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
   const [provisioningStaff, setProvisioningStaff] = useState<StaffUser | null>(null);
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
   const [authActionLoadingId, setAuthActionLoadingId] = useState<string | null>(null);
+  const [catalogPermissionStaff, setCatalogPermissionStaff] = useState<StaffUser | null>(null);
 
   const handleOpenProvision = (staff: StaffUser) => {
     setProvisioningStaff(staff);
@@ -1027,6 +1029,16 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
+                        {st.role === 'fat' && !isReadOnly && st.isActive !== false && (
+                          <button
+                            type="button"
+                            onClick={() => setCatalogPermissionStaff(st)}
+                            title="Atur Permission Katalog FAT"
+                            className="p-1.5 rounded-lg border border-amber-200 text-amber-800 bg-amber-50/60 hover:bg-amber-100 transition cursor-pointer"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {!isReadOnly && (
                           <>
                             {!st.authUserId && st.loginAccountStatus !== 'AKTIF' ? (
@@ -1156,7 +1168,7 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
                   Peran Organisasi (Role) <span className="text-rose-500">*</span>
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(['manager', 'supervisor', 'css', 'therapist'] as UserRole[]).map((r) => (
+                  {(['manager', 'supervisor', 'css', 'therapist', 'fat'] as UserRole[]).map((r) => (
                     <button
                       key={r}
                       type="button"
@@ -1674,6 +1686,13 @@ export const StaffMasterCard: React.FC<StaffMasterCardProps> = ({
           onRefresh();
         }}
       />
+
+      {catalogPermissionStaff && (
+        <FatCatalogPermissionEditor
+          staff={catalogPermissionStaff}
+          onClose={() => setCatalogPermissionStaff(null)}
+        />
+      )}
 
       {/* MODAL NONAKTIFKAN STAFF (SOFT DELETE / ARCHIVE) */}
       {deactivatingStaff && (

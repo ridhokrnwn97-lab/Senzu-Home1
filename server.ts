@@ -4,6 +4,9 @@ import { registerXenditLive } from './src/server/xenditLive.ts';
 import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
+import { resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
+import { resolveCatalogServiceDuration, resolveHistoricalServiceDuration } from './src/server/bookingDurationSnapshot.ts';
+import { registerCatalogApi } from './src/server/catalogApi.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
 import {
   parseFatAmount, normalizeFatStatus, fatStatusCategory, projectFatRefund, summarizeFatRefunds,
@@ -66,6 +69,8 @@ import {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_MEMBERSHIP_TIERS,
 } from './src/types/loyalty.ts';
+import { hydrateFatCustomerNames } from './src/server/fatCustomerName.ts';
+import { createFatPaymentProofHandler, hasFatPaymentProof } from './src/server/fatPaymentProof.ts';
 
 // Helper to normalize DocumentSnapshot across Firebase Admin SDK and client SDK conventions
 function wrapDocSnap(snap: any) {
@@ -510,7 +515,14 @@ async function startServer() {
    * Attempts Firebase Admin SDK first, then seamlessly falls back to Google Identity Toolkit REST API
    * using the project API key when running in environments where Admin IAM lacks Identity Toolkit permission.
    */
-  async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email: string } | null> {
+  type DetailedTokenVerification = { uid: string; email: string } | { unavailable: true } | null;
+
+  /**
+   * Same cryptographic verification as verifyFirebaseIdToken, but distinguishes
+   * "cannot verify right now" from "definitively invalid" for the reconcile contract.
+   * All other callers keep the original fail-closed boolean behavior.
+   */
+  async function verifyFirebaseIdTokenDetailed(idToken: string): Promise<DetailedTokenVerification> {
     if (!idToken || typeof idToken !== 'string') return null;
     const cleanToken = idToken.trim();
     if (!cleanToken) return null;
@@ -548,13 +560,21 @@ async function startServer() {
               email: data.users[0].email ? data.users[0].email.trim().toLowerCase() : '',
             };
           }
+          return null;
         }
+        if (resp.status >= 500 || resp.status === 429) return { unavailable: true };
       }
     } catch (apiErr: any) {
       console.warn('[Auth] Identity Toolkit verification warning:', apiErr?.message);
+      return { unavailable: true };
     }
 
     return null;
+  }
+
+  async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email: string } | null> {
+    const result = await verifyFirebaseIdTokenDetailed(idToken);
+    return result && 'uid' in result ? result : null;
   }
 
   // Baseline in-memory Staff Master repository (quota-resilient & authoritative fallback)
@@ -975,18 +995,17 @@ async function startServer() {
     }
   });
 
-  // Authoritative Endpoint: Provide verified Firebase Auth session token for staff operations
+  // Legacy fallback for manager staff-master calls. Uses the same authoritative
+  // manager/admin check as the staff-master endpoints; never returns a server credential.
   app.post('/api/staff/session-token', async (req, res) => {
     try {
-      await ensureServerAuthenticated();
-      if (!auth?.currentUser) {
-        return res.status(500).json({ error: 'Server authentication not ready.' });
+      const authRes = await verifyManagerCaller(req);
+      if (!authRes.authorized) {
+        return res.status(authRes.statusCode || 403).json({ success: false, code: 'ROLE_REQUIRED', message: authRes.error || 'Akses peran aktif dan valid diperlukan.' });
       }
-      const token = await auth.currentUser.getIdToken(true);
-      return res.json({ success: true, token });
-    } catch (err: any) {
-      console.error('Failed to issue staff session token:', err);
-      return res.status(500).json({ error: 'Gagal memperoleh token sesi staf.' });
+      return res.json({ success: true, token: String(req.headers.authorization || '').slice(7).trim() });
+    } catch {
+      return res.status(503).json({ success: false, code: 'SERVICE_UNAVAILABLE', message: 'Layanan sesi staf belum tersedia.' });
     }
   });
 
@@ -1242,12 +1261,15 @@ async function startServer() {
     }
 
     // 2. Cryptographically verify Firebase ID token (never trust client body parameters)
-    const verifiedAuth = await verifyFirebaseIdToken(idToken);
-    if (!verifiedAuth || !verifiedAuth.uid) {
-      return res.status(401).json({
+    const verifiedAuth = await verifyFirebaseIdTokenDetailed(idToken);
+    if (!verifiedAuth || 'unavailable' in verifiedAuth) {
+      const unavailable = Boolean(verifiedAuth && 'unavailable' in verifiedAuth);
+      return res.status(unavailable ? 503 : 401).json({
         success: false,
-        code: 'AUTH_TOKEN_INVALID',
-        message: 'Sesi autentikasi telah kedaluwarsa atau tidak valid.',
+        code: unavailable ? 'AUTH_VERIFICATION_UNAVAILABLE' : 'AUTH_TOKEN_INVALID',
+        message: unavailable
+          ? 'Layanan verifikasi autentikasi sedang tidak tersedia. Silakan coba kembali.'
+          : 'Sesi autentikasi telah kedaluwarsa atau tidak valid.',
       });
     }
 
@@ -1698,6 +1720,7 @@ async function startServer() {
   });
 
   registerPaymentAcceptance(app, adminDb, token => adminAuth!.verifyIdToken(token));
+  registerCatalogApi(app, { db: adminDb, verify: token => adminAuth!.verifyIdToken(token) });
 
   // Isolated Test ledger only; reuse the current Stage 7D Manager identity policy.
   registerXenditSandbox(app, {
@@ -1964,7 +1987,7 @@ async function startServer() {
     try {
       const authz = await authorizeReadActor(req, ['fat']);
       if ('error' in authz) return res.status(authz.error.status).json({ success: false, code: authz.error.code, message: authz.error.message });
-      const fields = ['id', 'bookingId', 'bookingCode', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
+      const fields = ['id', 'bookingId', 'bookingCode', 'customerName', 'amount', 'status', 'paymentMethod', 'methodType', 'bankCode', 'provider', 'createdAt', 'updatedAt', 'paidAt', 'verifiedAt', 'paymentProofUploadedAt', 'proofUploadedAt', 'paymentProofUrl', 'rejectedAt', 'expiredAt', 'refundedAt', 'refundAmount', 'currency'];
       const snap = await adminDb.collection('payments').select(...fields).limit(FAT_LIST_LIMIT + 1).get();
       const truncated = snap.docs.length > FAT_LIST_LIMIT;
       const docs = truncated ? snap.docs.slice(0, FAT_LIST_LIMIT) : snap.docs;
@@ -1978,6 +2001,7 @@ async function startServer() {
           id: String(p.id || d.id || ''),
           bookingId: String(p.bookingId || ''),
           bookingCode: String(p.bookingCode || ''),
+          customerName: String(p.customerName || ''),
           amount: amt.value,
           amountValid: amt.valid,
           status: normalizeFatStatus(p.status),
@@ -1991,7 +2015,7 @@ async function startServer() {
           paidAt: asIso(p.paidAt),
           verifiedAt: asIso(p.verifiedAt),
           paymentProofUploadedAt: asIso(p.paymentProofUploadedAt || p.proofUploadedAt),
-          hasProof: Boolean(p.paymentProofUploadedAt || p.proofUploadedAt || (typeof p.paymentProofUrl === 'string' && p.paymentProofUrl.trim())),
+          hasProof: hasFatPaymentProof(p),
           rejectedAt: asIso(p.rejectedAt),
           expiredAt: asIso(p.expiredAt),
           refundedAt: asIso(p.refundedAt),
@@ -1999,12 +2023,16 @@ async function startServer() {
           refundAmountValid: refund ? refund.valid : null,
           currency: String(p.currency || 'IDR'),
         };
-      }).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      });
+      await hydrateFatCustomerNames(payments, adminDb);
+      payments.sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return res.json({ success: true, count: payments.length, limit: FAT_LIST_LIMIT, truncated, hasMore: truncated, invalidAmountCount, payments, note: 'Data proyeksi minimum dari koleksi payments (tanpa dokumen lengkap/PII sensitif berlebih). Hasil dibatasi maksimum 1000 dokumen dan bukan total keseluruhan bila truncated=true.' });
     } catch (e: any) {
       return res.status(500).json({ success: false, code: 'FAT_PAYMENTS_FAILED', message: 'Data pembayaran FAT belum dapat dimuat.' });
     }
   });
+
+  app.get('/api/fat/payments/:paymentId/proof', createFatPaymentProofHandler({ authorizeReadActor, db: adminDb }));
 
   app.get('/api/fat/refunds', async (req, res) => {
     setFatNoStore(res);
@@ -9353,16 +9381,14 @@ async function startServer() {
             error: 'Harga layanan pada pesanan berbeda dari katalog resmi. Total pembayaran telah diperbarui.',
           };
         }
-        if (
-          req.body?.serviceDuration !== undefined &&
-          req.body?.serviceDuration !== null &&
-          isFinitePositiveNumber(serviceData.duration) &&
-          req.body.serviceDuration !== serviceData.duration
-        ) {
+        // Duration for a NEW booking comes from the catalog. A stale client value
+        // must not block checkout; the authoritative value is written below.
+        const authoritativeDuration = resolveCatalogServiceDuration(serviceData.duration);
+        if (authoritativeDuration.ok === false) {
           return {
             status: 409,
-            code: 'PRICE_MISMATCH',
-            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+            code: authoritativeDuration.code,
+            error: authoritativeDuration.error,
           };
         }
 
@@ -10463,7 +10489,7 @@ async function startServer() {
           customerEmail: customerEmailTrimmed,
           serviceId,
           serviceName: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
-          serviceDuration: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          serviceDuration: authoritativeDuration.duration,
           scheduleDate,
           scheduleTime,
           scheduleAt: `${scheduleDate} ${scheduleTime}`,
@@ -10482,7 +10508,7 @@ async function startServer() {
           homeServiceFee: authoritativeHomeServiceFee,
           servicePriceSnapshot: authoritativeServicePrice,
           serviceNameSnapshot: typeof serviceData.name === 'string' && serviceData.name.trim() ? serviceData.name.trim() : (typeof req.body?.serviceName === 'string' ? req.body.serviceName.trim() : ''),
-          durationMinutesSnapshot: isFinitePositiveNumber(serviceData.duration) ? serviceData.duration : (isFinitePositiveNumber(req.body?.serviceDuration) ? req.body.serviceDuration : 60),
+          durationMinutesSnapshot: authoritativeDuration.duration,
           homeServiceFeeSnapshot: authoritativeHomeServiceFee,
           homeServiceFeeTier: authoritativeHomeServiceTier,
           baseLocationId: SENZU_BASE_LOCATION.id,
@@ -11829,47 +11855,21 @@ async function startServer() {
           };
         }
         const serviceData = serviceSnap.data() || {};
-        const authoritativeServicePrice = serviceData.price;
-        if (!isFinitePositiveNumber(authoritativeServicePrice)) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Harga layanan resmi tidak dapat diverifikasi.',
-          };
+        // Existing bookings keep the price captured at creation; the live catalog
+        // is not consulted here, so later catalog edits cannot reprice them.
+        const historicalPrice = resolveHistoricalServicePrice(bookingData);
+        if (historicalPrice.ok === false) {
+          return { status: 409, code: historicalPrice.code, error: historicalPrice.error };
         }
-
-        if (
-          bookingData.servicePrice !== undefined &&
-          bookingData.servicePrice !== null &&
-          bookingData.servicePrice !== authoritativeServicePrice
-        ) {
+        const authoritativeServicePrice = historicalPrice.price;
+        // Historical duration comes from this booking's snapshot (or its legacy
+        // serviceDuration); catalog edits must never revalidate or rewrite it.
+        const historicalDuration = resolveHistoricalServiceDuration(bookingData);
+        if (historicalDuration.ok === false) {
           return {
             status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Harga layanan pada pesanan berbeda dari katalog resmi dan memerlukan peninjauan.',
-          };
-        }
-        if (
-          bookingData.servicePriceSnapshot !== undefined &&
-          bookingData.servicePriceSnapshot !== null &&
-          bookingData.servicePriceSnapshot !== authoritativeServicePrice
-        ) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Snapshot harga layanan tidak dapat diverifikasi secara otomatis.',
-          };
-        }
-        if (
-          bookingData.serviceDuration !== undefined &&
-          bookingData.serviceDuration !== null &&
-          isFinitePositiveNumber(serviceData.duration) &&
-          bookingData.serviceDuration !== serviceData.duration
-        ) {
-          return {
-            status: 409,
-            code: 'VOUCHER_REDEMPTION_REVIEW_REQUIRED',
-            error: 'Durasi layanan pada pesanan tidak konsisten dengan katalog resmi.',
+            code: historicalDuration.code,
+            error: historicalDuration.error,
           };
         }
 

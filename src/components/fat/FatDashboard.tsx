@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Landmark, Loader2, RefreshCw, ShieldCheck, Wallet, BookOpen, ReceiptText } from 'lucide-react';
+import { AlertCircle, Landmark, Loader2, RefreshCw, ShieldCheck, Wallet, BookOpen, ReceiptText, Layers } from 'lucide-react';
 import type { StaffUser } from '../../types';
 import { auth } from '../../lib/firebase';
 import { FatFinanceTab } from './FatFinanceTab';
 import { FatAccountingTab } from './FatAccountingTab';
 import { FatTaxTab } from './FatTaxTab';
+import { FatCatalogTab } from './FatCatalogTab';
 
 interface FatDashboardProps {
   currentUser: StaffUser;
 }
 
-type FatTab = 'overview' | 'finance' | 'accounting' | 'tax';
+type FatTab = 'overview' | 'finance' | 'accounting' | 'tax' | 'catalog';
 
 type FatRefundAnomalies = {
   duplicateRefundCompletionEvents: number;
@@ -48,6 +49,7 @@ const tabs: Array<{ id: FatTab; label: string; icon: React.ComponentType<{ class
   { id: 'finance', label: 'Finance', icon: Wallet },
   { id: 'accounting', label: 'Accounting', icon: BookOpen },
   { id: 'tax', label: 'Tax', icon: ReceiptText },
+  { id: 'catalog', label: 'Katalog', icon: Layers },
 ];
 
 async function getFatJson<T>(path: string): Promise<T> {
@@ -192,6 +194,7 @@ export const FatDashboard: React.FC<FatDashboardProps> = ({ currentUser }) => {
       {activeTab === 'finance' && <FatFinanceTab />}
       {activeTab === 'accounting' && <FatAccountingTab />}
       {activeTab === 'tax' && <FatTaxTab />}
+      {activeTab === 'catalog' && <FatCatalogTab />}
     </div>
   );
 };
