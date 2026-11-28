@@ -4,7 +4,7 @@ import { registerXenditLive } from './src/server/xenditLive.ts';
 import { registerAccurateConnection } from './src/server/accurateConnection.ts';
 import { registerAccurateSync } from './src/server/accurateSync.ts';
 import { liveQuoteSeal, validateLiveSchedule } from './src/server/xenditLiveQuote.ts';
-import { resolveCatalogServicePrice, resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
+import { resolveHistoricalServicePrice } from './src/server/bookingPriceSnapshot.ts';
 import { resolveCatalogServiceDuration, resolveHistoricalServiceDuration } from './src/server/bookingDurationSnapshot.ts';
 import { registerCatalogApi } from './src/server/catalogApi.ts';
 import { registerLoyaltyAccounts } from './src/server/loyaltyAccounts.ts';
@@ -11855,13 +11855,8 @@ async function startServer() {
           };
         }
         const serviceData = serviceSnap.data() || {};
-        const catalogPrice = resolveCatalogServicePrice(serviceData.price);
-        if (catalogPrice.ok === false) {
-          return { status: 409, code: catalogPrice.code, error: catalogPrice.error };
-        }
-
-        // Existing bookings keep the price captured at creation; catalog price
-        // only applies to new bookings, so later catalog edits cannot reprice them.
+        // Existing bookings keep the price captured at creation; the live catalog
+        // is not consulted here, so later catalog edits cannot reprice them.
         const historicalPrice = resolveHistoricalServicePrice(bookingData);
         if (historicalPrice.ok === false) {
           return { status: 409, code: historicalPrice.code, error: historicalPrice.error };

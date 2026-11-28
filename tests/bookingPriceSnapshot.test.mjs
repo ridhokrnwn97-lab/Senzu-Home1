@@ -66,7 +66,7 @@ test('resolving one booking neither mutates it nor affects another booking', () 
 test('voucher redemption resolves price from the booking snapshot, never the live catalog', () => {
   const server = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   assert.match(server, /resolveHistoricalServicePrice\(bookingData\)/);
-  assert.match(server, /resolveCatalogServicePrice\(serviceData\.price\)/);
+  assert.doesNotMatch(server, /resolveCatalogServicePrice\(serviceData\.price\)/);
   assert.doesNotMatch(server, /bookingData\.servicePriceSnapshot !== authoritativeServicePrice/);
   assert.doesNotMatch(server, /bookingData\.servicePrice !== authoritativeServicePrice/);
 });
